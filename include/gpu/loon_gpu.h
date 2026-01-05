@@ -299,6 +299,8 @@ public:
 private:
   struct Impl;
   Impl *impl = nullptr;
+
+  void chk(uint64_t result);
 };
 
 class CommandBuffer {
