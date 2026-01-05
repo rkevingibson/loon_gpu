@@ -1,0 +1,63 @@
+#Basic Configuration File for Clang Format
+BasedOnStyle: Google
+IndentWidth: 4
+Language: Cpp
+DerivePointerAlignment: false
+PointerAlignment: Left
+
+# =========== Alignment ==============
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: true
+AlignConsecutiveDeclarations: true
+AlignEscapedNewlines: Right
+AlignTrailingComments: true
+AlignOperands: true
+AlignConsecutiveMacros: true
+
+AllowShortBlocksOnASingleLine: Always
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: true
+AllowShortLoopsOnASingleLine: true
+AllowAllArgumentsOnNextLine: false
+# AllowShortNamespacesOnASingleLine: true
+AllowAllParametersOfDeclarationOnNextLine: false
+AlwaysBreakTemplateDeclarations: true
+BinPackArguments: false
+BinPackParameters: false
+
+BreakBeforeBinaryOperators: true
+BreakBeforeBraces: Custom
+BraceWrapping: 
+  AfterClass: false
+  AfterControlStatement: false
+  AfterEnum: false
+  AfterFunction: false
+  AfterNamespace: false
+  AfterStruct: false
+  AfterUnion: false
+  BeforeCatch: false
+  BeforeElse: false
+  SplitEmptyRecord: false
+  SplitEmptyNamespace: false
+
+BreakConstructorInitializers: AfterColon
+
+ColumnLimit: 100
+CompactNamespaces: true
+ConstructorInitializerAllOnOneLineOrOnePerLine: true
+Cpp11BracedListStyle: true
+
+FixNamespaceComments: true
+IndentCaseLabels: true
+IndentPPDirectives: AfterHash
+MaxEmptyLinesToKeep: 3
+
+NamespaceIndentation: None
+
+SpaceBeforeParens: ControlStatements
+Standard: c++20
+TabWidth: 4
+ReflowComments: true
+
+SortIncludes: CaseSensitive

@@ -3,11 +3,16 @@
 #include <mutex>
 #include <utility>
 
-#include "platform_utils.h"
-#include "webgpu/webgpu_loon.h"
+#include "gpu/loon_gpu.h"
 
 
-namespace webgpu {
+#ifdef _MSVC_LANG
+#    define NO_UNIQUE_ADDR [[msvc::no_unique_address]]
+#else
+#    define NO_UNIQUE_ADDR [[no_unique_address]]
+#endif
+
+namespace loon::gpu {
 
 // MARK: Allocator
 class Allocator {
@@ -351,89 +356,12 @@ class HashTable {
     uint32_t                  elem_idx(int idx) const { return m_metadata[idx].index; }
     static constexpr uint32_t kLoadFactorPercent = 90;
 
-    webgpu::Vector<KeyValuePair>         m_key_values;
-    webgpu::Vector<Metadata>             m_metadata;
-    uint32_t                             m_resize_threshold = 0;
-    uint32_t                             m_mask             = 0;
-    Allocator                            m_allocator;
-    [[no_unique_address]] std::hash<Key> m_hasher{};
-};
-
-
-// MARK:ObjectList
-
-template <class T>
-class ObjectList {
-   public:
-    ObjectList() = default;
-    ObjectList(Allocator allocator) : m_objects(allocator), m_freelist(allocator) {}
-    ObjectList(ObjectList&& rhs) : ObjectList() { swap(*this, rhs); }
-    ObjectList& operator=(ObjectList&& rhs) {
-        swap(*this, rhs);
-        return *this;
-    }
-    ~ObjectList() { clear(); }
-
-    // NB: Not thread-safe
-    friend void swap(ObjectList& lhs, ObjectList& rhs) {
-        using std::swap;
-        swap(lhs.m_objects, rhs.m_objects);
-        swap(rhs.m_freelist, lhs.m_freelist);
-    }
-
-    void clear() {
-        // Bit of a hack: need to run destructors on whats left of the objects list, but don't want
-        // to double-destruct objects managing vulkan resources, so default construct them first.
-        for (uint32_t i = m_freelist.size(); i != 0; --i) {
-            T* ptr = *m_freelist.get(i - 1);
-            ::new (ptr) T;
-        }
-
-        m_objects.clear();
-        m_freelist.clear();
-    }
-
-    T* make() {
-        std::unique_lock<std::mutex> lock(m_mutex);
-
-        T* result = nullptr;
-        if (m_freelist.size() != 0) {
-            T* ptr = *m_freelist.get(m_freelist.size() - 1);
-            result = ptr;
-            m_freelist.pop();
-        } else {
-            result = m_objects.push();
-        }
-        return result;
-    }
-
-    T* make(WGPUDevice device, WGPUStringView label) {
-        std::unique_lock<std::mutex> lock(m_mutex);
-
-        T* result = nullptr;
-        if (m_freelist.size() != 0) {
-            T* ptr = *m_freelist.get(m_freelist.size() - 1);
-            result = ptr;
-            m_freelist.pop();
-        } else {
-            result = m_objects.push();
-        }
-
-        if (result) { ::new (result) T(device, label); }
-        return result;
-    }
-
-    void free(T* ptr) {
-        std::unique_lock<std::mutex> lock(m_mutex);
-
-        std::destroy_at(ptr);
-        *m_freelist.push() = ptr;
-    }
-
-   private:
-    std::mutex       m_mutex;
-    SegmentArray<T>  m_objects;
-    SegmentArray<T*> m_freelist;
+    Vector<KeyValuePair> m_key_values;
+    Vector<Metadata>     m_metadata;
+    uint32_t             m_resize_threshold = 0;
+    uint32_t             m_mask             = 0;
+    Allocator            m_allocator;
+    NO_UNIQUE_ADDR std::hash<Key> m_hasher{};
 };
 
 // MARK: Stack
@@ -650,4 +578,4 @@ uint32_t HashTable<Key, Value>::hash_key(const Key& key) const {
     return static_cast<uint32_t>(m_hasher(key));
 }
 
-}  // namespace webgpu
+}  // namespace loon::gpu

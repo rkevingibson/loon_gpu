@@ -55,7 +55,6 @@ target_include_directories(
     PRIVATE ./src
     PUBLIC 
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/generated>
 )
 
 # We use device-specific loader, can define this to avoid accidentally accessing an unloaded function
