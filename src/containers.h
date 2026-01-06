@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "gpu/loon_gpu.h"
+#include "platform_utils.h"
 
 
 #ifdef _MSVC_LANG
@@ -26,13 +27,11 @@ class Allocator {
         std::swap(a.m_userdata, b.m_userdata);
     }
 
-    constexpr WGPULoonMemoryBlock realloc(WGPULoonMemoryBlock blk, size_t new_size) const {
+    constexpr MemoryBlock realloc(MemoryBlock blk, size_t new_size) const {
         return m_alloc(m_userdata, blk.ptr, blk.len, new_size);
     }
-    constexpr WGPULoonMemoryBlock alloc(size_t size) const {
-        return m_alloc(m_userdata, nullptr, 0, size);
-    }
-    constexpr void free(WGPULoonMemoryBlock blk) const { m_alloc(m_userdata, blk.ptr, blk.len, 0); }
+    constexpr MemoryBlock alloc(size_t size) const { return m_alloc(m_userdata, nullptr, 0, size); }
+    constexpr void        free(MemoryBlock blk) const { m_alloc(m_userdata, blk.ptr, blk.len, 0); }
 
    private:
     ProcAllocatorCallback m_alloc    = nullptr;
@@ -427,19 +426,19 @@ void Vector<T>::reserve(uint32_t capacity) {
 
 template <class T>
 void Vector<T>::grow(size_t new_capacity) {
-    new_capacity                          = new_capacity > 4 ? new_capacity : 4;
-    const WGPULoonMemoryBlock current_blk = {
+    new_capacity                  = new_capacity > 4 ? new_capacity : 4;
+    const MemoryBlock current_blk = {
         .ptr = static_cast<void*>(m_data),
         .len = static_cast<uint32_t>(m_capacity * sizeof(T)),
     };
     if constexpr (std::is_trivially_copyable_v<T>) {
-        WGPULoonMemoryBlock blk = m_allocator.realloc(current_blk, new_capacity * sizeof(T));
+        MemoryBlock blk = m_allocator.realloc(current_blk, new_capacity * sizeof(T));
         if (blk.ptr == nullptr) { return; }
         new_capacity = blk.len / sizeof(T);
         m_capacity   = new_capacity;
         m_data       = reinterpret_cast<T*>(blk.ptr);
     } else {
-        WGPULoonMemoryBlock blk = m_allocator.alloc(new_capacity * sizeof(T));
+        MemoryBlock blk = m_allocator.alloc(new_capacity * sizeof(T));
         if (blk.ptr == nullptr) { return; }
         std::uninitialized_move_n(m_data, m_count, reinterpret_cast<T*>(blk.ptr));
         std::destroy_n(m_data, m_count);

@@ -14,6 +14,7 @@ namespace loon::gpu {
 
 constexpr size_t kMaxColorAttachments = 16;
 constexpr size_t kMaxNumBuffers       = 64ull * 1024;
+constexpr size_t kMaxTextureHeapSize  = 32ull * 1024;
 
 template <class T>
 class Span {
@@ -167,10 +168,10 @@ inline constexpr Span<const char> operator""_sv(const char* val, size_t len) {
 #define WGPU_STRCAT(a, b)      WGPU_STRCAT_IMPL(a, b)
 #define WGPU_FN_TYPEDEF(name)  WGPU_STRCAT(WGPUProc, name)
 
-typedef struct WGPULoonMemoryBlock {
+typedef struct MemoryBlock {
     void*    ptr;
     uint32_t len;
-} WGPULoonMemoryBlock;
+} MemoryBlock;
 
 // Opaque handles
 
@@ -387,6 +388,12 @@ enum STORE_OP {
     STORE_OP_DISCARD,
 };
 
+enum QUEUE_TYPE {
+    QUEUE_DEFAULT,
+    QUEUE_COMPUTE,
+    QUEUE_TRANSFER,
+};
+
 // Custom allocation callback - essentially a realloc function but not exactly
 // the same as the C version.
 // - ptr is null iff old_size is 0
@@ -394,10 +401,10 @@ enum STORE_OP {
 // - If new_size == 0, the function must return null; if old_size != 0, it
 // should free the block pointed to by ptr. It is the responsibility of the
 // function to copy old_size bytes of memory from ptr to the returned pointer.
-typedef WGPULoonMemoryBlock (*ProcAllocatorCallback)(void*    userdata,
-                                                     void*    ptr,
-                                                     uint32_t old_size,
-                                                     uint32_t new_size);
+typedef MemoryBlock (*ProcAllocatorCallback)(void*    userdata,
+                                             void*    ptr,
+                                             uint32_t old_size,
+                                             uint32_t new_size);
 typedef void (*ProcLogCallback)(LogLevel lvl, Span<const char> message, void* userdata);
 
 // Structs
@@ -414,12 +421,16 @@ struct Stencil {
 };
 
 struct DeviceDesc {
+    GpuPreference gpu_preference = GpuPreference_Discrete;
+
+    uintptr_t native_window_handle   = 0;
+    uintptr_t native_instance_handle = 0;
+
     ProcLogCallback       log_callback   = nullptr;
     void*                 log_userdata   = nullptr;
     LogLevel              log_level      = LogLevel_Off;
     ProcAllocatorCallback alloc_callback = nullptr;
     void*                 alloc_userdata = nullptr;
-    GpuPreference         gpu_preference = GpuPreference_Discrete;
 };
 
 struct GpuDepthStencilDesc {
@@ -503,6 +514,15 @@ class Device {
    public:
     static Device create(const DeviceDesc& desc);
     Device() = default;
+    ~Device();
+    Device(const Device&) = delete;
+    Device(Device&& other) : impl(std::exchange(other.impl, nullptr)) {}
+    Device& operator=(const Device&) = delete;
+    Device& operator=(Device&& other) {
+        impl = std::exchange(other.impl, impl);
+        return *this;
+    }
+
 
     // Buffers:
     Handle<Buffer> malloc(size_t bytes, MEMORY memory = MEMORY_DEFAULT);
@@ -541,7 +561,7 @@ class Device {
     void                      freeBlendState(Handle<BlendState> state);
 
     // Queue
-    Handle<Queue>         createQueue(/* DEVICE & QUEUE CREATION DETAILS OMITTED */);
+    Handle<Queue>         getQueue(QUEUE_TYPE type = QUEUE_DEFAULT);
     Handle<CommandBuffer> startCommandRecording(Handle<Queue> queue);
     void submit(Handle<Queue> queue, Span<const Handle<CommandBuffer>> commandBuffers);
     void cancel(Handle<Queue> queue, Span<const Handle<CommandBuffer>> commandBuffers);

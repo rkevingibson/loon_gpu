@@ -5,7 +5,7 @@
 namespace loon::gpu {
 
 Allocator::Allocator() {
-    m_alloc = [](void*, void* ptr, uint32_t, uint32_t new_size) -> WGPULoonMemoryBlock {
+    m_alloc = [](void*, void* ptr, uint32_t, uint32_t new_size) -> MemoryBlock {
         if (new_size == 0) {
             ::free(ptr);
             return {.ptr = nullptr, .len = 0};

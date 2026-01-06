@@ -30,6 +30,7 @@ set(SOURCES
     src/containers.cpp
     src/utilities.cpp
     src/gpu_to_vk.cpp
+    src/platform_utils.cpp
 )
 
 set(PUBLIC_HEADERS

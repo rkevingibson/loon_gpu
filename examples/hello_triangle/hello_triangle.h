@@ -12,9 +12,6 @@ class HelloTriangle : public Example {
     void Update(const WindowState& window) override;
 
    private:
-    // WGPUInstance       m_instance;
-    // WGPUAdapter        m_adapter;
-    // WGPUSurface        m_surface;
     Device           m_device;
     Handle<Queue>    m_queue;
     FORMAT           m_swapchain_format;

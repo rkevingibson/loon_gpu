@@ -60,8 +60,8 @@ class Arena {
     Arena(void* ptr, size_t size) noexcept :
         m_ptr(reinterpret_cast<uintptr_t>(ptr)), m_begin(m_ptr), m_size(size) {};
 
-    Arena(const Arena&)            = delete;
-    Arena& operator=(const Arena&) = delete;
+    Arena(const Arena&)            = default;
+    Arena& operator=(const Arena&) = default;
 
     [[nodiscard]] void* alloc(size_t size) {
         const uintptr_t ptr    = m_ptr;

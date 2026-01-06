@@ -9,7 +9,7 @@
 #    error "Unimplemented platform"
 #endif
 
-namespace webgpu {
+namespace loon::gpu {
 #if _WIN32
 tls_key tls_alloc(tls_destructor d) {
     return FlsAlloc(d);
@@ -86,4 +86,4 @@ bool atomic_compare_exchange(int64_t* dst, int64_t* expected, int64_t desired) {
 }
 #endif
 
-}  // namespace webgpu
+}  // namespace loon::gpu

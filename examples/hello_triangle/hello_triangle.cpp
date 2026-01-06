@@ -61,12 +61,14 @@ static void LoonLogCallback(loon::gpu::LogLevel         lvl,
 
 HelloTriangle::HelloTriangle(const WindowState& window_state) {
     m_device = loon::gpu::Device::create({
-        .log_callback   = LoonLogCallback,
-        .log_userdata   = nullptr,
-        .log_level      = LogLevel_Debug,
-        .alloc_callback = nullptr,
-        .alloc_userdata = nullptr,
-        .gpu_preference = loon::gpu::GpuPreference_Discrete,
+        .gpu_preference         = loon::gpu::GpuPreference_Discrete,
+        .native_window_handle   = window_state.native_window_handle,
+        .native_instance_handle = window_state.native_instance_handle,
+        .log_callback           = LoonLogCallback,
+        .log_userdata           = nullptr,
+        .log_level              = LogLevel_Debug,
+        .alloc_callback         = nullptr,
+        .alloc_userdata         = nullptr,
     });
 
     // TODO: Surface creation/configuration:
@@ -110,7 +112,7 @@ HelloTriangle::HelloTriangle(const WindowState& window_state) {
 
     assert(m_render_pipeline.h != 0);
 
-    m_queue = m_device.createQueue();
+    m_queue = m_device.getQueue();
 }
 
 HelloTriangle::~HelloTriangle() {
