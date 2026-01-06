@@ -9,16 +9,28 @@
 
 namespace loon::gpu {
 
+static constexpr const char* kRequiredDeviceExtensions[] = {
+    VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+    VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME,
+};
+static constexpr size_t kRequiredDeviceExtensionsCount
+    = sizeof(kRequiredDeviceExtensions) / sizeof(kRequiredDeviceExtensions[0]);
+
 struct Buffer {
     VkBuffer      vk_buffer;
     VmaAllocation vk_allocation;
 };
 
-struct Semaphore {
-    VkSemaphore s;
+struct PhysicalDeviceInfo {
+    VkPhysicalDevice device       = VK_NULL_HANDLE;
+    uint32_t         queue_family = 0;
 };
 
 struct Device::Impl {
+    bool initialize(const DeviceDesc& desc);
+
+    void shutdown();
+
     // Buffers:
     Handle<Buffer> malloc(size_t bytes, MEMORY memory = MEMORY_DEFAULT);
     Handle<Buffer> malloc(size_t bytes, size_t align, MEMORY memory = MEMORY_DEFAULT);
@@ -67,17 +79,210 @@ struct Device::Impl {
 
 
    private:
-    VkDevice        device;
-    VolkDeviceTable vk_api;
-    VmaAllocator    vk_allocator = VK_NULL_HANDLE;
+    Allocator        m_allocator;
+    VkInstance       m_instance;
+    VkPhysicalDevice m_physical_device;
+    VkDevice         m_device;
+    VolkDeviceTable  m_api;
+    VmaAllocator     vk_allocator = VK_NULL_HANDLE;
 
     VkPipelineLayout default_graphics_layout;
 
     ObjectPool<Buffer, kMaxNumBuffers> buffer_pool;
 
-    void             chk(VkResult result);
-    VkPipelineLayout createDefaultGraphicsLayout();
+    void               log(LogLevel lvl, Span<const char> msg);
+    void               chk(VkResult result);
+    PhysicalDeviceInfo selectPhysicalDevice(GpuPreference preference);
+    VkPipelineLayout   createDefaultGraphicsLayout();
 };
+
+// MARK: Initialization
+
+
+PhysicalDeviceInfo Device::Impl::selectPhysicalDevice(GpuPreference preference) {
+    constexpr uint32_t max_physical_devices = 8;
+    VkPhysicalDevice   physical_devices[max_physical_devices];
+    uint32_t           device_count = max_physical_devices;
+    VkResult vkresult = vkEnumeratePhysicalDevices(m_instance, &device_count, physical_devices);
+
+    if (vkresult == VK_INCOMPLETE) {
+        log(LogLevel_Warning, "Too many vulkan physical devices returned some will be ignored");
+    }
+    if (vkresult < 0) { return PhysicalDeviceInfo{}; }
+
+    const bool prefer_integrated = preference == GpuPreference_Integrated;
+    const bool prefer_dedicated  = preference == GpuPreference_Discrete;
+
+    VkPhysicalDevice best_device       = VK_NULL_HANDLE;
+    uint32_t         best_queue_family = 0;
+
+    device_count = device_count < max_physical_devices ? device_count : max_physical_devices;
+    for (uint32_t device_idx = 0; device_idx < device_count; ++device_idx) {
+        const VkPhysicalDevice     physical_device = physical_devices[device_idx];
+        VkPhysicalDeviceProperties properties{};
+        vkGetPhysicalDeviceProperties(physical_device, &properties);
+
+        constexpr uint32_t      max_queue_families                   = 16;
+        VkQueueFamilyProperties queue_properties[max_queue_families] = {};
+        uint32_t                queue_family_count                   = max_queue_families;
+        vkGetPhysicalDeviceQueueFamilyProperties(physical_device,
+                                                 &queue_family_count,
+                                                 queue_properties);
+        if (queue_family_count > max_queue_families) {
+            log(LogLevel_Warning, "Too many queue families on physical device, some may be missed");
+        }
+        queue_family_count
+            = queue_family_count < max_queue_families ? queue_family_count : max_queue_families;
+
+        // For WebGPU, we only need one queue (might add extension to support async compute later).
+        // We need compute and graphics support, and possibly presentation support
+        uint32_t selected_queue_family = ~0;
+        for (uint32_t queue_family = 0; queue_family < queue_family_count; ++queue_family) {
+            const auto& props    = queue_properties[queue_family];
+            bool        is_valid = (props.queueFlags & VK_QUEUE_GRAPHICS_BIT)
+                            && (props.queueFlags & VK_QUEUE_COMPUTE_BIT);
+            // Need to find the graphics/presentation queue.
+            // if (options->compatibleSurface) {
+            //     const VkSurfaceKHR surface           = options->compatibleSurface->vk_surface;
+            //     VkBool32           surface_supported = false;
+            //     vkGetPhysicalDeviceSurfaceSupportKHR(physical_devices[device_idx],
+            //                                          queue_family,
+            //                                          surface,
+            //                                          &surface_supported);
+
+            //     is_valid = is_valid && surface_supported;
+            // }
+
+            if (is_valid) {
+                selected_queue_family = queue_family;
+                break;
+            }
+        }
+        if (selected_queue_family == ~0u) { continue; }
+
+        // Check device extensions - there's no reasonable upperlimit on the number of device
+        // extensions, so need to allocate :(
+        uint32_t extension_count = 0;
+        vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &extension_count, nullptr);
+        // TODO: Use the arena instead.
+        auto extension_properties_block
+            = m_allocator.alloc(sizeof(VkExtensionProperties) * extension_count);
+        auto* extension_properties
+            = reinterpret_cast<VkExtensionProperties*>(extension_properties_block.ptr);
+        vkEnumerateDeviceExtensionProperties(physical_device,
+                                             nullptr,
+                                             &extension_count,
+                                             extension_properties);
+        // Need to check against the list of required extensions and make sure all required
+        // extensions are available.
+        for (uint32_t i = 0; i < extension_count; ++i) {
+            printf("%s\n", extension_properties[i].extensionName);
+        }
+        bool all_extensions_supported = true;
+        for (size_t required_ext_idx = 0;
+             required_ext_idx < loon::gpu::kRequiredDeviceExtensionsCount;
+             ++required_ext_idx) {
+            const char* required_extension = loon::gpu::kRequiredDeviceExtensions[required_ext_idx];
+            bool        extension_found    = false;
+            for (size_t available_ext_idx = 0; available_ext_idx < extension_count;
+                 ++available_ext_idx) {
+                if (strcmp(extension_properties[available_ext_idx].extensionName,
+                           required_extension)
+                    == 0) {
+                    extension_found = true;
+                    break;
+                }
+            }
+
+            if (!extension_found) {
+                all_extensions_supported = false;
+                break;
+            }
+        }
+        m_allocator.free(extension_properties_block);
+
+        if (!all_extensions_supported) {
+            // Invalid device, doesn't support the extensions we need.
+            continue;
+        }
+
+        // If we don't have a "best" device yet, let's use this one.
+        if (best_device == VK_NULL_HANDLE) {
+            best_device       = physical_device;
+            best_queue_family = selected_queue_family;
+        }
+
+        const bool is_integrated = properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
+        if (is_integrated && prefer_integrated) {
+            best_device       = physical_device;
+            best_queue_family = selected_queue_family;
+        }
+
+        const bool is_dedicated = properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
+        if (is_dedicated && prefer_dedicated) {
+            best_device       = physical_device;
+            best_queue_family = selected_queue_family;
+        }
+    }
+
+    return PhysicalDeviceInfo{
+        .device       = best_device,
+        .queue_family = best_queue_family,
+    };
+}
+
+bool Device::Impl::initialize(const DeviceDesc& desc) {
+    // Setup instance
+    VkResult result = volkInitialize();
+    if (result != VK_SUCCESS) return false;
+
+    VkApplicationInfo app_info = {
+        .sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+        .pNext              = nullptr,
+        .pApplicationName   = nullptr,
+        .applicationVersion = 0,
+        .pEngineName        = "loon",
+        .engineVersion      = 0,
+        .apiVersion         = VK_API_VERSION_1_3,
+    };
+
+    const char* instance_extensions[] = {
+        VK_KHR_SURFACE_EXTENSION_NAME,
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+        VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
+#elif defined(VK_USE_PLATFORM_XLIB_KHR)
+        VK_KHR_XLIB_SURFACE_EXTENSION_NAME,
+#elif defined(VK_USE_PLATFORM_METAL_EXT)
+        VK_EXT_METAL_SURFACE_EXTENSION_NAME,
+#endif
+    };
+
+    const auto instance_info = VkInstanceCreateInfo{
+        .sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .pNext                   = nullptr,
+        .flags                   = 0,
+        .pApplicationInfo        = &app_info,
+        .enabledLayerCount       = 0,
+        .ppEnabledLayerNames     = nullptr,
+        .enabledExtensionCount   = sizeof(instance_extensions) / sizeof(instance_extensions[0]),
+        .ppEnabledExtensionNames = instance_extensions,
+    };
+
+    result = vkCreateInstance(&instance_info, nullptr, &m_instance);
+    if (result != VK_SUCCESS) return false;
+    volkLoadInstanceOnly(m_instance);
+
+
+    // Select physical device
+    auto physical_device_info = selectPhysicalDevice(desc.gpu_preference);
+
+    return true;
+}
+
+void Device::Impl::shutdown() {
+    vkDestroyInstance(m_instance, nullptr);
+    volkFinalize();
+}
 
 // MARK: Buffers
 
@@ -153,7 +358,7 @@ GpuPtr Device::Impl::getDevicePointer(Handle<Buffer> buffer) {
         .pNext  = nullptr,
         .buffer = buffer_pool[buffer.h].vk_buffer,
     };
-    return vk_api.vkGetBufferDeviceAddress(device, &addr_info);
+    return m_api.vkGetBufferDeviceAddress(m_device, &addr_info);
 }
 
 
@@ -189,7 +394,7 @@ VkPipelineLayout Device::Impl::createDefaultGraphicsLayout() {
     };
 
     VkPipelineLayout pipeline_layout;
-    chk(vk_api.vkCreatePipelineLayout(device, &create_info, nullptr, &pipeline_layout));
+    chk(m_api.vkCreatePipelineLayout(m_device, &create_info, nullptr, &pipeline_layout));
     return pipeline_layout;
 }
 
@@ -204,7 +409,7 @@ Handle<Pipeline> Device::Impl::createGraphicsPipeline(ShaderSource vertex,
         .pCode    = reinterpret_cast<const uint32_t*>(vertex.spirv.data()),
     };
     VkShaderModule vert_module;
-    chk(vk_api.vkCreateShaderModule(device, &vert_info, nullptr, &vert_module));
+    chk(m_api.vkCreateShaderModule(m_device, &vert_info, nullptr, &vert_module));
 
     VkShaderModuleCreateInfo frag_info{
         .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
@@ -214,7 +419,7 @@ Handle<Pipeline> Device::Impl::createGraphicsPipeline(ShaderSource vertex,
         .pCode    = reinterpret_cast<const uint32_t*>(fragment.spirv.data()),
     };
     VkShaderModule frag_module;
-    chk(vk_api.vkCreateShaderModule(device, &frag_info, nullptr, &frag_module));
+    chk(m_api.vkCreateShaderModule(m_device, &frag_info, nullptr, &frag_module));
 
     VkPipelineShaderStageCreateInfo stages[] = {
         // Vertex stage info
@@ -381,23 +586,23 @@ Handle<Pipeline> Device::Impl::createGraphicsPipeline(ShaderSource vertex,
         .basePipelineIndex   = 0,
     };
     VkPipeline vk_pipeline;
-    chk(vk_api.vkCreateGraphicsPipelines(device,
-                                         VK_NULL_HANDLE,
-                                         1,
-                                         &create_info,
-                                         nullptr,
-                                         &vk_pipeline));
+    chk(m_api.vkCreateGraphicsPipelines(m_device,
+                                        VK_NULL_HANDLE,
+                                        1,
+                                        &create_info,
+                                        nullptr,
+                                        &vk_pipeline));
 
 
 
-    vk_api.vkDestroyShaderModule(device, vert_module, nullptr);
-    vk_api.vkDestroyShaderModule(device, frag_module, nullptr);
+    m_api.vkDestroyShaderModule(m_device, vert_module, nullptr);
+    m_api.vkDestroyShaderModule(m_device, frag_module, nullptr);
 
     return {.h = reinterpret_cast<uintptr_t>(vk_pipeline)};
 }
 
 void Device::Impl::freePipeline(Handle<Pipeline> pipeline) {
-    vk_api.vkDestroyPipeline(device, reinterpret_cast<VkPipeline>(pipeline.h), nullptr);
+    m_api.vkDestroyPipeline(m_device, reinterpret_cast<VkPipeline>(pipeline.h), nullptr);
 }
 
 // MARK: Queue
@@ -423,7 +628,7 @@ Handle<Semaphore> Device::Impl::createSemaphore(uint64_t initValue) {
     };
 
     VkSemaphore s = VK_NULL_HANDLE;
-    chk(vk_api.vkCreateSemaphore(device, &timeline_create_info, nullptr, &s));
+    chk(m_api.vkCreateSemaphore(m_device, &timeline_create_info, nullptr, &s));
 
     // For semaphores, we don't need anything beyond the handle, so we just return the vk handle
     // directly.
@@ -441,11 +646,11 @@ void Device::Impl::waitSemaphore(Handle<Semaphore> sema, uint64_t value) {
         .pSemaphores    = &s,
         .pValues        = &value,
     };
-    chk(vk_api.vkWaitSemaphores(device, &wait_info, UINT64_MAX));
+    chk(m_api.vkWaitSemaphores(m_device, &wait_info, UINT64_MAX));
 }
 
 void Device::Impl::destroySemaphore(Handle<Semaphore> sema) {
-    vk_api.vkDestroySemaphore(device, reinterpret_cast<VkSemaphore>(sema.h), nullptr);
+    m_api.vkDestroySemaphore(m_device, reinterpret_cast<VkSemaphore>(sema.h), nullptr);
 }
 
 void Device::Impl::chk(VkResult result) {
@@ -455,7 +660,10 @@ void Device::Impl::chk(VkResult result) {
 }
 
 Device Device::create(const DeviceDesc& desc) {
-    return Device{};
+    Impl* impl = new Impl;
+    if (impl->initialize(desc)) { return Device(impl); }
+
+    return Device(nullptr);
 }
 
 Handle<Buffer> Device::malloc(size_t bytes, MEMORY memory) {

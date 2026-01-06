@@ -502,6 +502,7 @@ struct ShaderSource {
 class Device {
    public:
     static Device create(const DeviceDesc& desc);
+    Device() = default;
 
     // Buffers:
     Handle<Buffer> malloc(size_t bytes, MEMORY memory = MEMORY_DEFAULT);
@@ -553,6 +554,8 @@ class Device {
    private:
     struct Impl;
     Impl* impl = nullptr;
+
+    Device(Impl* impl) : impl{impl} {};
 };
 
 template <>
