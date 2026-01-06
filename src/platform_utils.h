@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace webgpu {
+namespace loon::gpu {
 
 // Minimal thread-local storage helpers
 using tls_key        = ptrdiff_t;
@@ -52,4 +52,4 @@ inline constexpr uint64_t int_log_2(uint64_t x) {
     return 63 - count_leading_zeros(x);
 }
 
-};  // namespace webgpu
+};  // namespace loon::gpu

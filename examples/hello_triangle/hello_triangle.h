@@ -1,9 +1,9 @@
 #pragma once
 
-#include <webgpu/webgpu.h>
+#include <gpu/loon_gpu.h>
 
 #include "common/example.h"
-
+using namespace loon::gpu;
 
 class HelloTriangle : public Example {
    public:
@@ -12,11 +12,11 @@ class HelloTriangle : public Example {
     void Update(const WindowState& window) override;
 
    private:
-    WGPUInstance       m_instance;
-    WGPUAdapter        m_adapter;
-    WGPUSurface        m_surface;
-    WGPUDevice         m_device;
-    WGPUQueue          m_queue;
-    WGPUTextureFormat  m_swapchain_format;
-    WGPURenderPipeline m_render_pipeline;
+    // WGPUInstance       m_instance;
+    // WGPUAdapter        m_adapter;
+    // WGPUSurface        m_surface;
+    Device           m_device;
+    Handle<Queue>    m_queue;
+    FORMAT           m_swapchain_format;
+    Handle<Pipeline> m_render_pipeline;
 };

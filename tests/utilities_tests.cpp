@@ -1,12 +1,12 @@
 #include <gtest/gtest.h>
 
-#include "utilities.h"
-
+#include "containers.h"
+using namespace loon::gpu;
 
 TEST(utilities_tests, vector_basic_usage) {
     // With no allocator, all operations should work fine, using the default allocator
-    webgpu::Vector<uint32_t> a{};
-    auto                     result = a.push_back(42);
+    Vector<uint32_t> a{};
+    auto             result = a.push_back(42);
     ASSERT_EQ(result, 42);
     ASSERT_EQ(a.size(), 1);
     ASSERT_NE(a.data(), nullptr);
@@ -22,7 +22,7 @@ TEST(utilities_tests, vector_basic_usage) {
 }
 
 TEST(utilities_tests, hash_table_test) {
-    webgpu::HashTable<uint64_t, uint32_t> table;
+    HashTable<uint64_t, uint32_t> table;
 
     const auto result = table.insert({42, 999});
     ASSERT_TRUE(result.inserted);

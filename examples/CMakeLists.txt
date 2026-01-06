@@ -67,9 +67,8 @@ endif()
 set(EXAMPLE_SOURCES
     common/example.cpp
     common/shaders.cpp
-    common/initialization.cpp
     hello_triangle/hello_triangle.cpp
-    hello_cube/hello_cube.cpp
+    #hello_cube/hello_cube.cpp
 )
 
 if (WIN32)
@@ -80,23 +79,23 @@ elseif(APPLE)
 endif()
 
 add_executable(
-    loon_webgpu_examples
+    loon_gpu_examples
     ${EXAMPLE_SOURCES}
 )
 
 if (WIN32)
-    target_link_options(loon_webgpu_examples PRIVATE "/SUBSYSTEM:WINDOWS")
+    target_link_options(loon_gpu_examples PRIVATE "/SUBSYSTEM:WINDOWS")
 endif()
 
 target_link_libraries(
-    loon_webgpu_examples
+    loon_gpu_examples
     PRIVATE
-    loon_webgpu
+    loon_gpu
     slang
 )
 
 if (APPLE)
-    target_link_libraries(loon_webgpu_examples
+    target_link_libraries(loon_gpu_examples
     PRIVATE
     "-framework Foundation"
     "-framework AppKit"
@@ -105,6 +104,6 @@ if (APPLE)
     )
 endif()
 
-target_include_directories(loon_webgpu_examples 
+target_include_directories(loon_gpu_examples 
     PRIVATE 
     ${CMAKE_CURRENT_SOURCE_DIR})

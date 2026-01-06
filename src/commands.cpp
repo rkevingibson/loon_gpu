@@ -114,7 +114,7 @@ CommandEncodingError CommandsMixin::add(Command&& cmd) {
 
 RenderCommandsMixin::RenderCommandsMixin(Allocator alloc) : usage_scope(alloc) {}
 
-static bool compatible_usage_set(webgpu::ResourceUsage u) {
+static bool compatible_usage_set(loon::gpu::ResourceUsage u) {
     // A usage set is "compatible" if any of the following are true:
     // - Each usage is storage
     // - Each usage is attachment
@@ -126,15 +126,16 @@ static bool compatible_usage_set(webgpu::ResourceUsage u) {
            || ((u & kCompatibleUsageList) != 0 && (u & ~kCompatibleUsageList) == 0);
 }
 
-static bool needs_barrier(const webgpu::ResourceUsage prev_usage,
-                          const webgpu::ResourceUsage next_usage) {
+static bool needs_barrier(const loon::gpu::ResourceUsage prev_usage,
+                          const loon::gpu::ResourceUsage next_usage) {
     // Need a barrier if the previous usage was a read and next usage is a write, or vice-versa.
     static constexpr uint16_t kWriteOpsMask = kUsageStorage | kUsageAttachment | kUsageTransferDst;
     static constexpr uint16_t kReadOnlyOpsMask = kUsageInput | kUsageConstant | kUsageStorageRead
                                                  | kUsageAttachmentRead | kUsageTransferSrc;
-    const auto read_only = [](webgpu::ResourceUsage u) -> bool { return (u & kWriteOpsMask) == 0; };
+    const auto read_only
+        = [](loon::gpu::ResourceUsage u) -> bool { return (u & kWriteOpsMask) == 0; };
     const auto read_write
-        = [](webgpu::ResourceUsage u) -> bool { return (u & kReadOnlyOpsMask) == 0; };
+        = [](loon::gpu::ResourceUsage u) -> bool { return (u & kReadOnlyOpsMask) == 0; };
 
     return (read_only(prev_usage) && read_write(next_usage))
            || (read_write(prev_usage) && read_only(next_usage));
@@ -187,22 +188,22 @@ static VkPipelineStageFlags2 usage_to_pipeline_stage(ResourceUsage u) {
     }
 }
 
-static VkImageMemoryBarrier2 image_memory_barrier(WGPUDevice                              device,
-                                                  VkImage                                 vk_image,
-                                                  webgpu::ResourceUsage                   prev,
-                                                  const webgpu::UsageScope::TextureUsage& next) {
+static VkImageMemoryBarrier2 image_memory_barrier(WGPUDevice               device,
+                                                  VkImage                  vk_image,
+                                                  loon::gpu::ResourceUsage prev,
+                                                  const loon::gpu::UsageScope::TextureUsage& next) {
     return VkImageMemoryBarrier2 {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2, .pNext = nullptr,
         .srcStageMask        = usage_to_pipeline_stage(prev),
         .srcAccessMask       = usage_to_access_mask(prev),
         .dstStageMask        = usage_to_pipeline_stage(next.usage),
         .dstAccessMask       = usage_to_access_mask(next.usage),
-        .oldLayout           = webgpu::image_layout_from_usage(prev),
-        .newLayout           = webgpu::image_layout_from_usage(next.usage),
+        .oldLayout           = loon::gpu::image_layout_from_usage(prev),
+        .newLayout           = loon::gpu::image_layout_from_usage(next.usage),
         .srcQueueFamilyIndex = device->get_queue_family(),
         .dstQueueFamilyIndex = device->get_queue_family(), .image = vk_image,
         .subresourceRange = {
-            .aspectMask     = webgpu::bridge(next.aspect),
+            .aspectMask     = loon::gpu::bridge(next.aspect),
             .baseMipLevel   = next.min_mip_level,
             .levelCount     = next.max_mip_level - next.min_mip_level + 1,
             .baseArrayLayer = next.min_array_layer,
@@ -211,10 +212,11 @@ static VkImageMemoryBarrier2 image_memory_barrier(WGPUDevice                    
     };
 }
 
-static VkBufferMemoryBarrier2 buffer_memory_barrier(WGPUDevice                             device,
-                                                    WGPUBuffer                             buffer,
-                                                    webgpu::ResourceUsage                  prev,
-                                                    const webgpu::UsageScope::BufferUsage& next) {
+static VkBufferMemoryBarrier2 buffer_memory_barrier(
+    WGPUDevice                                device,
+    WGPUBuffer                                buffer,
+    loon::gpu::ResourceUsage                  prev,
+    const loon::gpu::UsageScope::BufferUsage& next) {
     return {
         .sType               = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
         .pNext               = nullptr,
@@ -230,11 +232,11 @@ static VkBufferMemoryBarrier2 buffer_memory_barrier(WGPUDevice                  
     };
 }
 
-void record_pipeline_barriers(VkCommandBuffer           cmd_buffer,
-                              WGPUDevice                device,
-                              const webgpu::UsageScope& previous_scope,
-                              const webgpu::UsageScope& new_scope) {
-    webgpu::ArenaVector<VkImageMemoryBarrier2> image_barriers(device->get_thread_local_arena());
+void record_pipeline_barriers(VkCommandBuffer              cmd_buffer,
+                              WGPUDevice                   device,
+                              const loon::gpu::UsageScope& previous_scope,
+                              const loon::gpu::UsageScope& new_scope) {
+    loon::gpu::ArenaVector<VkImageMemoryBarrier2> image_barriers(device->get_thread_local_arena());
     for (auto& tex_usage : new_scope.tex_usages) {
         auto previous_usage = previous_scope.tex_usages.find(tex_usage.key);
         if (previous_usage != nullptr
@@ -248,7 +250,8 @@ void record_pipeline_barriers(VkCommandBuffer           cmd_buffer,
         }
     }
 
-    webgpu::ArenaVector<VkBufferMemoryBarrier2> buffer_barriers(device->get_thread_local_arena());
+    loon::gpu::ArenaVector<VkBufferMemoryBarrier2> buffer_barriers(
+        device->get_thread_local_arena());
     for (auto& buf_usage : new_scope.buffer_usages) {
         auto prev_usage = previous_scope.buffer_usages.find(buf_usage.key);
         if (prev_usage && needs_barrier(prev_usage->value.usage, buf_usage.value.usage)) {
@@ -275,14 +278,14 @@ void record_pipeline_barriers(VkCommandBuffer           cmd_buffer,
     device->vk_api.vkCmdPipelineBarrier2(cmd_buffer, &dependency_info);
 }
 
-bool record_pre_submit_synchronization_cmd(VkCommandBuffer           cmd_buffer,
-                                           WGPUDevice                device,
-                                           const webgpu::UsageScope& first_usages) {
-    webgpu::ArenaVector<VkImageMemoryBarrier2> image_barriers(device->get_thread_local_arena());
+bool record_pre_submit_synchronization_cmd(VkCommandBuffer              cmd_buffer,
+                                           WGPUDevice                   device,
+                                           const loon::gpu::UsageScope& first_usages) {
+    loon::gpu::ArenaVector<VkImageMemoryBarrier2> image_barriers(device->get_thread_local_arena());
     for (auto& tex_usage : first_usages.tex_usages) {
         auto previous_usage = tex_usage.key->last_submitted_usage;
         if (needs_barrier(previous_usage, tex_usage.value.usage)
-            || previous_usage == webgpu::kUsageUndefined) {
+            || previous_usage == loon::gpu::kUsageUndefined) {
             // TODO: WGPUShaderStage - This is likely insufficient, in webgpu we only have 3 shader
             // stages, but e.g. attachment output is a separate stage in vulkan.
             image_barriers.push(image_memory_barrier(device,
@@ -292,7 +295,8 @@ bool record_pre_submit_synchronization_cmd(VkCommandBuffer           cmd_buffer,
         }
     }
 
-    webgpu::ArenaVector<VkBufferMemoryBarrier2> buffer_barriers(device->get_thread_local_arena());
+    loon::gpu::ArenaVector<VkBufferMemoryBarrier2> buffer_barriers(
+        device->get_thread_local_arena());
 
     for (auto& buf_usage : first_usages.buffer_usages) {
         auto prev_usage = buf_usage.key->last_submitted_usage;
@@ -329,11 +333,11 @@ bool record_pre_submit_synchronization_cmd(VkCommandBuffer           cmd_buffer,
     return true;
 }
 
-void record_pipeline_barrier(VkCommandBuffer           cmd_buffer,
-                             WGPUDevice                device,
-                             const webgpu::UsageScope& scope,
-                             WGPUBuffer                buffer,
-                             ResourceUsage             usage) {
+void record_pipeline_barrier(VkCommandBuffer              cmd_buffer,
+                             WGPUDevice                   device,
+                             const loon::gpu::UsageScope& scope,
+                             WGPUBuffer                   buffer,
+                             ResourceUsage                usage) {
     auto prev_usage = scope.buffer_usages.find(buffer);
     if (prev_usage && needs_barrier(prev_usage->value.usage, usage)) {
         VkBufferMemoryBarrier2 memory_barrier{
@@ -378,13 +382,13 @@ void swap(WGPUCommandEncoderImpl& a, WGPUCommandEncoderImpl& b) {
 
 WGPURenderPassEncoder WGPUCommandEncoderImpl::begin_render_pass(
     WGPURenderPassDescriptor const* descriptor) {
-    if (!webgpu::validate(this, descriptor)) { return nullptr; }
+    if (!loon::gpu::validate(this, descriptor)) { return nullptr; }
 
     auto* commands  = &commands_mixin;
-    commands->state = webgpu::CommandEncodingState::RecordingRenderPass;
+    commands->state = loon::gpu::CommandEncodingState::RecordingRenderPass;
 
     auto render_pass                      = device->m_render_passes.make(device, descriptor->label);
-    render_pass->render_commands          = webgpu::RenderCommandsMixin(device->get_allocator());
+    render_pass->render_commands          = loon::gpu::RenderCommandsMixin(device->get_allocator());
     render_pass->encoder                  = this;
     render_pass->attachment_size          = VkExtent2D{0, 0};
     render_pass->color_attachments        = {};
@@ -400,7 +404,7 @@ WGPURenderPassEncoder WGPUCommandEncoderImpl::begin_render_pass(
             render_pass->color_attachments[i].view->add_ref_internal();
             render_extent = render_pass->color_attachments[i].view->render_extent;
             render_pass->render_commands.usage_scope.add(render_pass->color_attachments[i].view,
-                                                         webgpu::ResourceUsage::kUsageAttachment,
+                                                         loon::gpu::ResourceUsage::kUsageAttachment,
                                                          WGPUShaderStage_Fragment);
         }
 
@@ -418,22 +422,22 @@ WGPURenderPassEncoder WGPUCommandEncoderImpl::begin_render_pass(
             render_pass->depth_stencil_attachment.view,
             render_pass->depth_stencil_attachment.depthReadOnly
                     && render_pass->depth_stencil_attachment.stencilReadOnly
-                ? webgpu::ResourceUsage::kUsageAttachmentRead
-                : webgpu::ResourceUsage::kUsageAttachment,
+                ? loon::gpu::ResourceUsage::kUsageAttachmentRead
+                : loon::gpu::ResourceUsage::kUsageAttachment,
             WGPUShaderStage_Fragment);
         render_extent = render_pass->depth_stencil_attachment.view->render_extent;
     }
     render_pass->attachment_size = {.width = render_extent.width, .height = render_extent.height};
 
     render_pass->add_ref_internal();
-    commands->add(webgpu::Command{
+    commands->add(loon::gpu::Command{
         .begin_render_pass{
             .render_pass = render_pass,
         },
-        .type = webgpu::CommandType::BeginRenderPass,
+        .type = loon::gpu::CommandType::BeginRenderPass,
     });
 
-    return webgpu::return_with_ownership(render_pass);
+    return loon::gpu::return_with_ownership(render_pass);
 }
 
 WGPUCommandBuffer WGPUCommandEncoderImpl::finish(
@@ -441,8 +445,8 @@ WGPUCommandBuffer WGPUCommandEncoderImpl::finish(
     const auto& vk_api          = device->vk_api;
     bool        touches_surface = false;
 
-    webgpu::UsageScope first_usages(device->get_allocator());
-    webgpu::UsageScope last_usages(device->get_allocator());
+    loon::gpu::UsageScope first_usages(device->get_allocator());
+    loon::gpu::UsageScope last_usages(device->get_allocator());
 
     uint64_t                 timeline_value = device->queue.get_current_timeline_value();
     WGPUCommandBuffer        result         = device->allocate_command_buffer();
@@ -465,13 +469,13 @@ WGPUCommandBuffer WGPUCommandEncoderImpl::finish(
                 auto& render_pass = c.begin_render_pass.render_pass;
                 // Any synchronization needs to happen here - image transitions, etc
                 const auto& render_pass_scope = render_pass->render_commands.usage_scope;
-                webgpu::record_pipeline_barriers(cmd_buffer,
-                                                 device,
-                                                 last_usages,
-                                                 render_pass_scope);
+                loon::gpu::record_pipeline_barriers(cmd_buffer,
+                                                    device,
+                                                    last_usages,
+                                                    render_pass_scope);
                 render_pass_scope.update_first_last_usages(first_usages, last_usages);
 
-                webgpu::Stack<VkRenderingAttachmentInfo, webgpu::kMaxColorAttachments>
+                loon::gpu::Stack<VkRenderingAttachmentInfo, loon::gpu::kMaxColorAttachments>
                     color_attachments;
                 for (const auto& attachment : render_pass->color_attachments) {
                     if (attachment.view->texture->is_surface_image) { touches_surface = true; }
@@ -484,10 +488,10 @@ WGPUCommandBuffer WGPUCommandEncoderImpl::finish(
                         .resolveMode        = VK_RESOLVE_MODE_NONE,
                         .resolveImageView   = VK_NULL_HANDLE,
                         .resolveImageLayout = VK_IMAGE_LAYOUT_GENERAL,
-                        .loadOp             = webgpu::bridge(attachment.loadOp),
-                        .storeOp            = webgpu::bridge(attachment.storeOp),
+                        .loadOp             = loon::gpu::bridge(attachment.loadOp),
+                        .storeOp            = loon::gpu::bridge(attachment.storeOp),
                         .clearValue
-                        = {.color = webgpu::bridge_clear_color_value(
+                        = {.color = loon::gpu::bridge_clear_color_value(
                                attachment.clearValue,
                                attachment.view->vk_format)},  // Value depends on the format of
                                                               // the image view.
@@ -596,7 +600,7 @@ WGPUCommandBuffer WGPUCommandEncoderImpl::finish(
                 vk_api.vkCmdBindIndexBuffer(cmd_buffer,
                                             cmd.buffer->vk_buffer,
                                             cmd.offset,
-                                            webgpu::bridge(cmd.format));
+                                            loon::gpu::bridge(cmd.format));
             } break;
             case CommandType::SetRenderPipeline: {
                 const auto& set_render_pipeline = c.set_render_pipeline;
@@ -642,7 +646,7 @@ WGPUCommandBuffer WGPUCommandEncoderImpl::finish(
     add_ref_internal();
     result->cmd_encoder = this;
 
-    return webgpu::return_with_ownership(result);
+    return loon::gpu::return_with_ownership(result);
 }
 
 // MARK: RenderPassEncoder
@@ -690,7 +694,7 @@ void swap(WGPUCommandBufferImpl& a, WGPUCommandBufferImpl& b) {
 }
 
 void WGPUCommandBufferImpl::reset() {
-    if (cmd_encoder) { webgpu::release_internal(cmd_encoder); }
+    if (cmd_encoder) { loon::gpu::release_internal(cmd_encoder); }
     auto& vk_api = device->vk_api;
     WGPU_VK_CHECK(
         vkResetCommandBuffer(vk_cmd_buffers[0], VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT));

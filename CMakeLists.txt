@@ -27,6 +27,9 @@ add_subdirectory(third_party)
 set(SOURCES
     src/loon_gpu.cpp
     src/vma_usage.cpp
+    src/containers.cpp
+    src/utilities.cpp
+    src/gpu_to_vk.cpp
 )
 
 set(PUBLIC_HEADERS

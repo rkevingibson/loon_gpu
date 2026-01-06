@@ -48,15 +48,15 @@ struct FutureParts {
 };
 
 struct WGPUInstanceImpl::ThreadLocalState {
-    webgpu::Allocator       allocator;
+    loon::gpu::Allocator    allocator;
     WGPULoonMemoryBlock     arena_memory;
-    webgpu::Arena           arena;
+    loon::gpu::Arena        arena;
     static constexpr size_t kArenaSize = 64ll * 1024;
 
-    ThreadLocalState(const webgpu::Allocator& alloc) :
+    ThreadLocalState(const loon::gpu::Allocator& alloc) :
         allocator{alloc},
         arena_memory{allocator.alloc(kArenaSize)},
-        arena{webgpu::Arena(arena_memory.ptr, arena_memory.len)} {}
+        arena{loon::gpu::Arena(arena_memory.ptr, arena_memory.len)} {}
     ~ThreadLocalState() { allocator.free(arena_memory); }
 };
 
@@ -123,13 +123,13 @@ static void fire_callback(const CallbackData& cb) {
 }  // namespace webgpu
 
 WGPUInstance WGPUInstanceImpl::create(WGPULoonInstanceConfiguration* config) {
-    webgpu::Allocator       allocator;
+    loon::gpu::Allocator    allocator;
     WGPULoonLogLevel        log_level    = WGPULoonLogLevel_Off;
     WGPULoonProcLogCallback log          = nullptr;
     void*                   log_userdata = nullptr;
 
     if (config) {
-        if (config->alloc) { allocator = webgpu::Allocator(*config); }
+        if (config->alloc) { allocator = loon::gpu::Allocator(*config); }
         log_level    = config->log_level;
         log          = config->log;
         log_userdata = config->log_userdata;
@@ -182,7 +182,7 @@ WGPUInstance WGPUInstanceImpl::create(WGPULoonInstanceConfiguration* config) {
     auto instance_impl             = ::new (instance_allocation.ptr) WGPUInstanceImpl;
     instance_impl->vk_instance     = instance;
     instance_impl->allocator       = allocator;
-    instance_impl->tls_key         = webgpu::tls_alloc([](void* data) {
+    instance_impl->tls_key         = loon::gpu::tls_alloc([](void* data) {
         auto state = reinterpret_cast<WGPUInstanceImpl::ThreadLocalState*>(data);
         state->~ThreadLocalState();
     });
@@ -198,7 +198,7 @@ WGPUInstance WGPUInstanceImpl::create(WGPULoonInstanceConfiguration* config) {
 WGPUInstanceImpl::~WGPUInstanceImpl() {
     vkDestroyInstance(vk_instance, nullptr);
     volkFinalize();
-    webgpu::tls_free(tls_key);
+    loon::gpu::tls_free(tls_key);
 
     const auto size = allocation_size;
     allocator.free({this, allocation_size});
@@ -213,8 +213,8 @@ void WGPUInstanceImpl::release() {
 }
 
 bool WGPUInstanceImpl::can_destroy() {
-    return refcount.count() == 0 && webgpu::atomic_load(&adapter_count) == 0
-           && webgpu::atomic_load(&surface_count) == 0;
+    return refcount.count() == 0 && loon::gpu::atomic_load(&adapter_count) == 0
+           && loon::gpu::atomic_load(&surface_count) == 0;
 }
 
 static void findAdapterFeatures(WGPUAdapter adapter) {
@@ -287,7 +287,7 @@ static void getAdapterInfo(WGPUAdapter adapter) {
         .maxTextureArrayLayers = vk_limits.maxImageArrayLayers,
         .maxBindGroups         = vk_limits.maxBoundDescriptorSets,
         .maxBindGroupsPlusVertexBuffers
-        = vk_limits.maxVertexInputBindings + webgpu::kMaxVertexBuffers,
+        = vk_limits.maxVertexInputBindings + loon::gpu::kMaxVertexBuffers,
         .maxBindingsPerBindGroup = 1000,
         .maxDynamicUniformBuffersPerPipelineLayout
         = vk_limits.maxDescriptorSetUniformBuffersDynamic,
@@ -304,13 +304,13 @@ static void getAdapterInfo(WGPUAdapter adapter) {
         = static_cast<uint32_t>(vk_limits.minUniformBufferOffsetAlignment),
         .minStorageBufferOffsetAlignment
         = static_cast<uint32_t>(vk_limits.minUniformBufferOffsetAlignment),
-        .maxVertexBuffers                  = webgpu::kMaxVertexBuffers,
+        .maxVertexBuffers                  = loon::gpu::kMaxVertexBuffers,
         .maxBufferSize                     = properties13.maxBufferSize,
-        .maxVertexAttributes               = webgpu::kMaxVertexInputAttributes,
+        .maxVertexAttributes               = loon::gpu::kMaxVertexInputAttributes,
         .maxVertexBufferArrayStride        = vk_limits.maxVertexInputBindingStride,
         .maxInterStageShaderVariables      = vk_limits.maxVertexOutputComponents,
-        .maxColorAttachments               = webgpu::kMaxColorAttachments,
-        .maxColorAttachmentBytesPerSample  = webgpu::kMaxColorAttachmentBytesPerSample,
+        .maxColorAttachments               = loon::gpu::kMaxColorAttachments,
+        .maxColorAttachmentBytesPerSample  = loon::gpu::kMaxColorAttachmentBytesPerSample,
         .maxComputeWorkgroupStorageSize    = vk_limits.maxComputeSharedMemorySize,
         .maxComputeInvocationsPerWorkgroup = vk_limits.maxComputeWorkGroupInvocations,
         .maxComputeWorkgroupSizeX          = vk_limits.maxComputeWorkGroupSize[0],
@@ -365,20 +365,20 @@ WGPUFuture WGPUInstanceImpl::request_adapter(WGPU_NULLABLE WGPURequestAdapterOpt
     adapter->queue_family       = device_info.queue_family;
     adapter->add_ref();
 
-    webgpu::atomic_fetch_add(&adapter_count, 1);
+    loon::gpu::atomic_fetch_add(&adapter_count, 1);
 
     findAdapterFeatures(adapter);
     getAdapterInfo(adapter);
 
-    webgpu::CallbackData* cb;
-    WGPUFuture            future = create_future(&cb);
+    loon::gpu::CallbackData* cb;
+    WGPUFuture               future = create_future(&cb);
     *cb                  = {
                          .callback  = reinterpret_cast<WGPUProc>(callbackInfo.callback),
                          .mode      = callbackInfo.mode,
                          .userdata1 = callbackInfo.userdata1,
                          .userdata2 = callbackInfo.userdata2,
                          .message   = WGPU_STRING_VIEW_INIT,
-                         .type      = webgpu::CallbackType::RequestAdapter,
+                         .type      = loon::gpu::CallbackType::RequestAdapter,
                          .request_adapter = {
                              .status  = WGPURequestAdapterStatus_Success,
                              .adapter = adapter,
@@ -392,7 +392,7 @@ WGPUFuture WGPUInstanceImpl::request_adapter(WGPU_NULLABLE WGPURequestAdapterOpt
 void WGPUInstanceImpl::free_adapter(WGPUAdapter adapter) {
     adapter->~WGPUAdapterImpl();
     allocator.free({.ptr = adapter, .len = sizeof(WGPUAdapterImpl)});
-    webgpu::atomic_fetch_add(&adapter_count, -1);
+    loon::gpu::atomic_fetch_add(&adapter_count, -1);
     if (can_destroy()) { this->~WGPUInstanceImpl(); }
 }
 
@@ -468,14 +468,14 @@ WGPUSurface WGPUInstanceImpl::create_surface(WGPUSurfaceDescriptor const* descri
     impl->vk_surface = surface;
     impl->label.set(allocator, descriptor->label);
     impl->add_ref();
-    webgpu::atomic_fetch_add(&surface_count, 1);
+    loon::gpu::atomic_fetch_add(&surface_count, 1);
     return impl;
 }
 
 void WGPUInstanceImpl::free_surface(WGPUSurface surface) {
     surface->~WGPUSurfaceImpl();
     allocator.free({.ptr = surface, .len = sizeof(WGPUSurfaceImpl)});
-    webgpu::atomic_fetch_add(&surface_count, -1);
+    loon::gpu::atomic_fetch_add(&surface_count, -1);
     if (can_destroy()) { this->~WGPUInstanceImpl(); }
 }
 
@@ -500,7 +500,7 @@ void WGPUInstanceImpl::log(WGPULoonLogLevel lvl, const char* fmt, ...) {
     va_end(args2);
 }
 
-WGPUFuture WGPUInstanceImpl::create_future(webgpu::CallbackData** cbOut) {
+WGPUFuture WGPUInstanceImpl::create_future(loon::gpu::CallbackData** cbOut) {
     const auto future_idx = futures_pool.get();
     if (future_idx == futures_pool.INVALID_INDEX) { return WGPU_FUTURE_INIT; }
     if (cbOut) { *cbOut = &futures_pool[future_idx]; }
@@ -517,7 +517,7 @@ WGPUFuture WGPUInstanceImpl::create_future(webgpu::CallbackData** cbOut) {
 
 void WGPUInstanceImpl::complete_future(uint32_t index) {
     auto& callback = futures_pool[index];
-    webgpu::fire_callback(callback);
+    loon::gpu::fire_callback(callback);
     futures_pool.release(index);
 }
 
@@ -591,7 +591,7 @@ WGPUWaitStatus WGPUInstanceImpl::wait_on_futures(size_t              future_coun
         auto& callback = futures_pool[future.index];
         f.completed    = callback.ready;
         if (callback.ready) {
-            webgpu::fire_callback(callback);
+            loon::gpu::fire_callback(callback);
             futures_pool.release(future.index);
             result = WGPUWaitStatus_Success;
             // Swap with the end to remove
@@ -603,15 +603,15 @@ WGPUWaitStatus WGPUInstanceImpl::wait_on_futures(size_t              future_coun
 }
 
 WGPUInstanceImpl::ThreadLocalState* WGPUInstanceImpl::get_thread_local_state() {
-    auto state = reinterpret_cast<ThreadLocalState*>(webgpu::tls_get_data(tls_key));
+    auto state = reinterpret_cast<ThreadLocalState*>(loon::gpu::tls_get_data(tls_key));
     if (state == nullptr) {
         state = new ThreadLocalState(allocator);
-        webgpu::tls_set_data(tls_key, state);
+        loon::gpu::tls_set_data(tls_key, state);
     }
     return state;
 }
 
-webgpu::Arena* WGPUInstanceImpl::get_thread_local_arena() {
+loon::gpu::Arena* WGPUInstanceImpl::get_thread_local_arena() {
     return &get_thread_local_state()->arena;
 }
 
@@ -699,9 +699,10 @@ WGPUInstanceImpl::PhysicalDeviceInfo WGPUInstanceImpl::selectPhysicalDevice(
             printf("%s\n", extension_properties[i].extensionName);
         }
         bool all_extensions_supported = true;
-        for (size_t required_ext_idx = 0; required_ext_idx < webgpu::kRequiredDeviceExtensionsCount;
+        for (size_t required_ext_idx = 0;
+             required_ext_idx < loon::gpu::kRequiredDeviceExtensionsCount;
              ++required_ext_idx) {
-            const char* required_extension = webgpu::kRequiredDeviceExtensions[required_ext_idx];
+            const char* required_extension = loon::gpu::kRequiredDeviceExtensions[required_ext_idx];
             bool        extension_found    = false;
             for (size_t available_ext_idx = 0; available_ext_idx < extension_count;
                  ++available_ext_idx) {

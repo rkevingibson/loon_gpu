@@ -18,9 +18,8 @@ namespace loon::gpu {
 class Allocator {
    public:
     Allocator();
-    Allocator(WGPULoonProcAllocatorCallback alloc, void* userdata) :
+    Allocator(ProcAllocatorCallback alloc, void* userdata) :
         m_alloc{alloc}, m_userdata{userdata} {};
-    Allocator(const WGPULoonInstanceConfiguration& alloc);
 
     friend void swap(Allocator& a, Allocator& b) {
         std::swap(a.m_alloc, b.m_alloc);
@@ -36,8 +35,8 @@ class Allocator {
     constexpr void free(WGPULoonMemoryBlock blk) const { m_alloc(m_userdata, blk.ptr, blk.len, 0); }
 
    private:
-    WGPULoonProcAllocatorCallback m_alloc    = nullptr;
-    void*                         m_userdata = nullptr;
+    ProcAllocatorCallback m_alloc    = nullptr;
+    void*                 m_userdata = nullptr;
 };
 
 // MARK: Vector

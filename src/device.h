@@ -88,8 +88,8 @@ struct WGPUDeviceImpl {
 
     WGPUCommandBuffer allocate_command_buffer();
 
-    webgpu::Allocator& get_allocator() { return m_allocator; }
-    webgpu::Arena*     get_thread_local_arena();
+    loon::gpu::Allocator& get_allocator() { return m_allocator; }
+    loon::gpu::Arena*     get_thread_local_arena();
 
     WGPUInstance get_instance() const { return m_instance; }
     WGPUAdapter  get_adapter() const { return m_adapter; }
@@ -101,8 +101,8 @@ struct WGPUDeviceImpl {
 
     WGPUQueueImpl queue;
 
-    webgpu::ObjectList<WGPUCommandBufferImpl> cmd_buffers;
-    webgpu::Label                             label;
+    loon::gpu::ObjectList<WGPUCommandBufferImpl> cmd_buffers;
+    loon::gpu::Label                             label;
 
    private:
     friend class WGPUSurfaceImpl;
@@ -110,29 +110,29 @@ struct WGPUDeviceImpl {
     friend class WGPUTextureImpl;  // For allocating texture views.
 
     struct ThreadLocalState;
-    ThreadLocalState* get_thread_local_state();
-    const char*       get_temp_null_terminated_string(WGPUStringView msg);
-    void              free_temp_string(const char* str);
-    webgpu::Allocator m_allocator;
-    WGPUInstance      m_instance = nullptr;
-    WGPUAdapter       m_adapter  = nullptr;
+    ThreadLocalState*    get_thread_local_state();
+    const char*          get_temp_null_terminated_string(WGPUStringView msg);
+    void                 free_temp_string(const char* str);
+    loon::gpu::Allocator m_allocator;
+    WGPUInstance         m_instance = nullptr;
+    WGPUAdapter          m_adapter  = nullptr;
 
-    webgpu::ReferenceCount                         m_refcount;
-    webgpu::ObjectList<WGPUShaderModuleImpl>       m_shader_modules;
-    webgpu::ObjectList<WGPURenderPipelineImpl>     m_render_pipelines;
-    webgpu::ObjectList<WGPUComputePipelineImpl>    m_compute_pipelines;
-    webgpu::ObjectList<WGPUBindGroupLayoutImpl>    m_bind_group_layouts;
-    webgpu::ObjectList<WGPUBindGroupImpl>          m_bind_groups;
-    webgpu::ObjectList<WGPUPipelineLayoutImpl>     m_pipeline_layouts;
-    webgpu::ObjectList<WGPUTextureImpl>            m_textures;
-    webgpu::ObjectList<WGPUTextureViewImpl>        m_texture_views;
-    webgpu::ObjectList<WGPUBufferImpl>             m_buffers;
-    webgpu::ObjectList<WGPUCommandEncoderImpl>     m_cmd_encoders;
-    webgpu::ObjectList<WGPURenderPassEncoderImpl>  m_render_passes;
-    webgpu::ObjectList<WGPUComputePassEncoderImpl> m_compute_passes;
+    loon::gpu::ReferenceCount                         m_refcount;
+    loon::gpu::ObjectList<WGPUShaderModuleImpl>       m_shader_modules;
+    loon::gpu::ObjectList<WGPURenderPipelineImpl>     m_render_pipelines;
+    loon::gpu::ObjectList<WGPUComputePipelineImpl>    m_compute_pipelines;
+    loon::gpu::ObjectList<WGPUBindGroupLayoutImpl>    m_bind_group_layouts;
+    loon::gpu::ObjectList<WGPUBindGroupImpl>          m_bind_groups;
+    loon::gpu::ObjectList<WGPUPipelineLayoutImpl>     m_pipeline_layouts;
+    loon::gpu::ObjectList<WGPUTextureImpl>            m_textures;
+    loon::gpu::ObjectList<WGPUTextureViewImpl>        m_texture_views;
+    loon::gpu::ObjectList<WGPUBufferImpl>             m_buffers;
+    loon::gpu::ObjectList<WGPUCommandEncoderImpl>     m_cmd_encoders;
+    loon::gpu::ObjectList<WGPURenderPassEncoderImpl>  m_render_passes;
+    loon::gpu::ObjectList<WGPUComputePassEncoderImpl> m_compute_passes;
 
-    webgpu::DescriptorSetAllocator m_descriptor_set_allocator;
+    loon::gpu::DescriptorSetAllocator m_descriptor_set_allocator;
 
     WGPUUncapturedErrorCallbackInfo m_error_callback;
-    webgpu::tls_key                 m_tls_key;
+    loon::gpu::tls_key              m_tls_key;
 };

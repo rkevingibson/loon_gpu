@@ -27,16 +27,16 @@ struct WGPUInstanceImpl {
     // Managing futures:
 
     static constexpr size_t kMaxFutures = 1 << 12;
-    WGPUFuture              create_future(webgpu::CallbackData** cbOut);
+    WGPUFuture              create_future(loon::gpu::CallbackData** cbOut);
     void                    set_future_ready(WGPUFuture f);
     void                    process_ready_futures();
     WGPUWaitStatus          wait_on_futures(size_t              future_count,
                                             WGPUFutureWaitInfo* futures,
                                             uint64_t            timeoutNS);
 
-    VkInstance               get_vk_instance() const { return vk_instance; };
-    const webgpu::Allocator& get_allocator() const { return allocator; }
-    webgpu::Arena*           get_thread_local_arena();
+    VkInstance                  get_vk_instance() const { return vk_instance; };
+    const loon::gpu::Allocator& get_allocator() const { return allocator; }
+    loon::gpu::Arena*           get_thread_local_arena();
 
    private:
     bool can_destroy();
@@ -48,7 +48,7 @@ struct WGPUInstanceImpl {
 
     PhysicalDeviceInfo selectPhysicalDevice(WGPURequestAdapterOptions const* options);
 
-    webgpu::ReferenceCount refcount;
+    loon::gpu::ReferenceCount refcount;
     // For created surfaces/adapters - we could store a vector of pointers, but really we just need
     // the count. They should be atomically manipulated
     int64_t adapter_count = 0;
@@ -60,15 +60,15 @@ struct WGPUInstanceImpl {
 
     VkInstance vk_instance = VK_NULL_HANDLE;
 
-    webgpu::ObjectPool<webgpu::CallbackData, kMaxFutures>
+    loon::gpu::ObjectPool<loon::gpu::CallbackData, kMaxFutures>
                           futures_pool;  // TODO: Can probably replace this with objectList
     std::atomic<uint64_t> futures_generation = {0};
     std::mutex            ready_futures_mutex;
     uint32_t              ready_futures_count = 0;
     WGPUFuture            ready_futures[kMaxFutures];
-    webgpu::Allocator     allocator;
+    loon::gpu::Allocator  allocator;
 
-    webgpu::tls_key tls_key = 0;
+    loon::gpu::tls_key tls_key = 0;
 
     WGPULoonLogLevel        log_level    = WGPULoonLogLevel_Off;
     WGPULoonProcLogCallback log_fn       = nullptr;

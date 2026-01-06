@@ -112,13 +112,13 @@ CapturedError ErrorStack::pop_scope(WGPUDevice device) {
 
 struct WGPUDeviceImpl::ThreadLocalState {
     constexpr static size_t kArenaSize = 64ll * 1024;
-    webgpu::ErrorStack      error_stack;
-    webgpu::Allocator       allocator;
+    loon::gpu::ErrorStack   error_stack;
+    loon::gpu::Allocator    allocator;
     WGPULoonMemoryBlock     arena_memory;
-    webgpu::Arena           arena;
-    webgpu::CommandPool     command_pool;
+    loon::gpu::Arena        arena;
+    loon::gpu::CommandPool  command_pool;
 
-    ThreadLocalState(const webgpu::Allocator& alloc, WGPUDeviceImpl* device);
+    ThreadLocalState(const loon::gpu::Allocator& alloc, WGPUDeviceImpl* device);
     ~ThreadLocalState() { allocator.free(arena_memory); }
 };
 
@@ -168,8 +168,8 @@ WGPURequestDeviceStatus WGPUDeviceImpl::initialize(WGPUAdapter                 a
         .pQueueCreateInfos       = &queue_create_info,
         .enabledLayerCount       = 0,
         .ppEnabledLayerNames     = nullptr,
-        .enabledExtensionCount   = webgpu::kRequiredDeviceExtensionsCount,
-        .ppEnabledExtensionNames = webgpu::kRequiredDeviceExtensions,
+        .enabledExtensionCount   = loon::gpu::kRequiredDeviceExtensionsCount,
+        .ppEnabledExtensionNames = loon::gpu::kRequiredDeviceExtensions,
         .pEnabledFeatures        = nullptr,
     };
 
@@ -205,24 +205,24 @@ WGPURequestDeviceStatus WGPUDeviceImpl::initialize(WGPUAdapter                 a
 
     this->queue.initialize(this, get_queue_family());
     m_allocator          = m_instance->get_allocator();
-    m_shader_modules     = webgpu::ObjectList<WGPUShaderModuleImpl>(m_allocator);
-    m_render_pipelines   = webgpu::ObjectList<WGPURenderPipelineImpl>(m_allocator);
-    m_bind_group_layouts = webgpu::ObjectList<WGPUBindGroupLayoutImpl>(m_allocator);
-    m_bind_groups        = webgpu::ObjectList<WGPUBindGroupImpl>(m_allocator);
-    m_pipeline_layouts   = webgpu::ObjectList<WGPUPipelineLayoutImpl>(m_allocator);
-    m_textures           = webgpu::ObjectList<WGPUTextureImpl>(m_allocator);
-    m_texture_views      = webgpu::ObjectList<WGPUTextureViewImpl>(m_allocator);
-    m_cmd_encoders       = webgpu::ObjectList<WGPUCommandEncoderImpl>(m_allocator);
-    m_render_passes      = webgpu::ObjectList<WGPURenderPassEncoderImpl>(m_allocator);
-    m_compute_passes     = webgpu::ObjectList<WGPUComputePassEncoderImpl>(m_allocator);
-    this->cmd_buffers    = webgpu::ObjectList<WGPUCommandBufferImpl>(m_allocator);
+    m_shader_modules     = loon::gpu::ObjectList<WGPUShaderModuleImpl>(m_allocator);
+    m_render_pipelines   = loon::gpu::ObjectList<WGPURenderPipelineImpl>(m_allocator);
+    m_bind_group_layouts = loon::gpu::ObjectList<WGPUBindGroupLayoutImpl>(m_allocator);
+    m_bind_groups        = loon::gpu::ObjectList<WGPUBindGroupImpl>(m_allocator);
+    m_pipeline_layouts   = loon::gpu::ObjectList<WGPUPipelineLayoutImpl>(m_allocator);
+    m_textures           = loon::gpu::ObjectList<WGPUTextureImpl>(m_allocator);
+    m_texture_views      = loon::gpu::ObjectList<WGPUTextureViewImpl>(m_allocator);
+    m_cmd_encoders       = loon::gpu::ObjectList<WGPUCommandEncoderImpl>(m_allocator);
+    m_render_passes      = loon::gpu::ObjectList<WGPURenderPassEncoderImpl>(m_allocator);
+    m_compute_passes     = loon::gpu::ObjectList<WGPUComputePassEncoderImpl>(m_allocator);
+    this->cmd_buffers    = loon::gpu::ObjectList<WGPUCommandBufferImpl>(m_allocator);
     m_error_callback     = descriptor->uncapturedErrorCallbackInfo;
-    m_tls_key            = webgpu::tls_alloc([](void* data) {
+    m_tls_key            = loon::gpu::tls_alloc([](void* data) {
         auto state = reinterpret_cast<WGPUDeviceImpl::ThreadLocalState*>(data);
         state->~ThreadLocalState();
     });
 
-    m_descriptor_set_allocator = webgpu::DescriptorSetAllocator(this);
+    m_descriptor_set_allocator = loon::gpu::DescriptorSetAllocator(this);
     this->label.set(m_allocator, descriptor->label);
     add_ref();
 
@@ -248,7 +248,7 @@ WGPUDeviceImpl::~WGPUDeviceImpl() {
     m_render_passes.clear();
     m_compute_passes.clear();
     m_cmd_encoders.clear();
-    webgpu::tls_free(m_tls_key);
+    loon::gpu::tls_free(m_tls_key);
 
     vmaDestroyAllocator(vk_allocator);
 
@@ -300,7 +300,7 @@ WGPUFuture WGPUDeviceImpl::pop_error_scope(WGPUPopErrorScopeCallbackInfo callbac
 // MARK: Resource Management
 
 WGPUBuffer WGPUDeviceImpl::create_buffer(WGPUBufferDescriptor const* descriptor) {
-    if (!webgpu::validate(this, descriptor)) { return nullptr; }
+    if (!loon::gpu::validate(this, descriptor)) { return nullptr; }
 
     // TODO: Need to support mappedAtCreation even if the buffer is not otherwise mappable. How do
     // we do that?
@@ -308,7 +308,7 @@ WGPUBuffer WGPUDeviceImpl::create_buffer(WGPUBufferDescriptor const* descriptor)
     const bool mappable = (descriptor->usage & WGPUBufferUsage_MapRead)
                           | (descriptor->usage & WGPUBufferUsage_MapWrite);
 
-    auto usage = webgpu::bridge_buffer_usage(descriptor->usage);
+    auto usage = loon::gpu::bridge_buffer_usage(descriptor->usage);
     if (!mappable && descriptor->mappedAtCreation) {
         // If we can't map, we'll need to copy from a staging buffer.
         usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
@@ -347,12 +347,12 @@ WGPUBuffer WGPUDeviceImpl::create_buffer(WGPUBufferDescriptor const* descriptor)
                                    &vk_allocation,
                                    nullptr));
 
-    void*                 mapping_ptr = nullptr;
-    webgpu::StagingBuffer staging_buffer{};
+    void*                    mapping_ptr = nullptr;
+    loon::gpu::StagingBuffer staging_buffer{};
     if (descriptor->mappedAtCreation && mappable) {
         vmaMapMemory(vk_allocator, vk_allocation, &mapping_ptr);
     } else if (descriptor->mappedAtCreation && !mappable) {
-        staging_buffer = webgpu::StagingBuffer(device, descriptor->size);
+        staging_buffer = loon::gpu::StagingBuffer(device, descriptor->size);
         mapping_ptr    = staging_buffer.get_mapped_range(0, descriptor->size);
     }
 
@@ -376,23 +376,23 @@ WGPUBuffer WGPUDeviceImpl::create_buffer(WGPUBufferDescriptor const* descriptor)
     };
 
 
-    return webgpu::return_with_ownership(buffer);
+    return loon::gpu::return_with_ownership(buffer);
 }
 
 WGPUBindGroupLayout WGPUDeviceImpl::create_bind_group_layout(
     WGPUBindGroupLayoutDescriptor const* descriptor) {
-    if (!webgpu::validate(this, descriptor)) { return nullptr; }
+    if (!loon::gpu::validate(this, descriptor)) { return nullptr; }
 
     const size_t num_bindings = descriptor->entryCount;
 
-    webgpu::Arena* arena    = get_thread_local_arena();
-    auto           bindings = reinterpret_cast<VkDescriptorSetLayoutBinding*>(
+    loon::gpu::Arena* arena    = get_thread_local_arena();
+    auto              bindings = reinterpret_cast<VkDescriptorSetLayoutBinding*>(
         arena->alloc(num_bindings * sizeof(VkDescriptorSetLayoutBinding)));
-    auto arena_free = webgpu::ScopeGuard([arena, num_bindings, bindings]() {
+    auto arena_free = loon::gpu::ScopeGuard([arena, num_bindings, bindings]() {
         arena->free(bindings, sizeof(VkDescriptorSetLayoutBinding) * num_bindings);
     });
-    webgpu::Vector<WGPUBindGroupLayoutImpl::LayoutEntry> entries(m_allocator);
-    uint32_t                                             dynamic_offset_count = 0;
+    loon::gpu::Vector<WGPUBindGroupLayoutImpl::LayoutEntry> entries(m_allocator);
+    uint32_t                                                dynamic_offset_count = 0;
 
     if (bindings == nullptr) {
         error(WGPUErrorType_OutOfMemory,
@@ -473,7 +473,7 @@ WGPUBindGroupLayout WGPUDeviceImpl::create_bind_group_layout(
             .binding            = entry.binding,
             .descriptorType     = descriptor_type,
             .descriptorCount    = descriptor_count,
-            .stageFlags         = webgpu::bridge_shader_stage(entry.visibility),
+            .stageFlags         = loon::gpu::bridge_shader_stage(entry.visibility),
             .pImmutableSamplers = nullptr,
         };
     }
@@ -496,23 +496,25 @@ WGPUBindGroupLayout WGPUDeviceImpl::create_bind_group_layout(
     result->entries              = std::move(entries);
     result->dynamic_offset_count = dynamic_offset_count;
     result->vk_set_layout        = set_layout;
-    result->entry_map = webgpu::HashTable<uint16_t, uint16_t>(get_allocator(), entries.size() * 2);
+    result->entry_map
+        = loon::gpu::HashTable<uint16_t, uint16_t>(get_allocator(), entries.size() * 2);
     for (uint32_t i = 0; i < result->entries.size(); ++i) {
         result->entry_map.insert_or_assign(result->entries[i].binding, i);
     }
     WGPUBindGroupEntry test;
-    return webgpu::return_with_ownership(result);
+    return loon::gpu::return_with_ownership(result);
 }
 
 WGPUBindGroup WGPUDeviceImpl::create_bind_group(WGPUBindGroupDescriptor const* descriptor) {
     // TODO: validation
     WGPUBindGroup bind_group = m_bind_groups.make(this, descriptor->label);
     descriptor->layout->add_ref_internal();
-    bind_group->layout  = descriptor->layout;
-    bind_group->entries = webgpu::Vector(m_allocator, descriptor->entries, descriptor->entryCount);
-    bind_group->used_resources = webgpu::UsageScope(m_allocator);
+    bind_group->layout = descriptor->layout;
+    bind_group->entries
+        = loon::gpu::Vector(m_allocator, descriptor->entries, descriptor->entryCount);
+    bind_group->used_resources = loon::gpu::UsageScope(m_allocator);
 
-    webgpu::ArenaVector<VkWriteDescriptorSet> write_descriptor_sets(get_thread_local_arena());
+    loon::gpu::ArenaVector<VkWriteDescriptorSet> write_descriptor_sets(get_thread_local_arena());
 
     bind_group->descriptor = m_descriptor_set_allocator.alloc(bind_group->layout);
 
@@ -568,18 +570,18 @@ WGPUBindGroup WGPUDeviceImpl::create_bind_group(WGPUBindGroupDescriptor const* d
                                   0,
                                   nullptr);
 
-    return webgpu::return_with_ownership(bind_group);
+    return loon::gpu::return_with_ownership(bind_group);
 }
 
 WGPUPipelineLayout WGPUDeviceImpl::create_pipeline_layout(
     WGPUPipelineLayoutDescriptor const* descriptor) {
-    if (!webgpu::validate(this, descriptor)) { return nullptr; }
+    if (!loon::gpu::validate(this, descriptor)) { return nullptr; }
 
     auto arena       = get_thread_local_arena();
     auto set_layouts = reinterpret_cast<VkDescriptorSetLayout*>(
         arena->alloc(sizeof(VkDescriptorSetLayout) * descriptor->bindGroupLayoutCount));
 
-    webgpu::Stack<WGPUBindGroupLayout, webgpu::kMaxBindGroups> bind_group_layouts;
+    loon::gpu::Stack<WGPUBindGroupLayout, loon::gpu::kMaxBindGroups> bind_group_layouts;
 
     for (size_t set_idx = 0; set_idx < descriptor->bindGroupLayoutCount; ++set_idx) {
         if (descriptor->bindGroupLayouts[set_idx]
@@ -613,7 +615,7 @@ WGPUPipelineLayout WGPUDeviceImpl::create_pipeline_layout(
     auto result                = device->m_pipeline_layouts.make(device, descriptor->label);
     result->bind_group_layouts = std::move(bind_group_layouts);
     result->vk_layout          = pipeline_layout;
-    return webgpu::return_with_ownership(result);
+    return loon::gpu::return_with_ownership(result);
 }
 
 // MARK: Shaders
@@ -644,18 +646,19 @@ WGPUShaderModule WGPUDeviceImpl::create_shader_module(
     auto module       = device->m_shader_modules.make(device, descriptor->label);
     module->vk_module = vk_module;
 
-    return webgpu::return_with_ownership(module);
+    return loon::gpu::return_with_ownership(module);
 }
 
 WGPURenderPipeline WGPUDeviceImpl::create_render_pipeline(
     WGPURenderPipelineDescriptor const* descriptor) {
-    if (!webgpu::validate(this, descriptor)) { return nullptr; }
+    if (!loon::gpu::validate(this, descriptor)) { return nullptr; }
 
-    webgpu::Stack<VkPipelineShaderStageCreateInfo, 2> stages;
+    loon::gpu::Stack<VkPipelineShaderStageCreateInfo, 2> stages;
 
     // Vertex state:
-    webgpu::Stack<VkVertexInputBindingDescription, webgpu::kMaxVertexBuffers> binding_descriptions;
-    webgpu::Stack<VkVertexInputAttributeDescription, webgpu::kMaxVertexInputAttributes>
+    loon::gpu::Stack<VkVertexInputBindingDescription, loon::gpu::kMaxVertexBuffers>
+        binding_descriptions;
+    loon::gpu::Stack<VkVertexInputAttributeDescription, loon::gpu::kMaxVertexInputAttributes>
         vertex_attributes;
 
     auto vertex_entry_point = get_temp_null_terminated_string(descriptor->vertex.entryPoint);
@@ -699,7 +702,7 @@ WGPURenderPipeline WGPUDeviceImpl::create_render_pipeline(
             vertex_attributes.push({
                 .location = attribute.shaderLocation,
                 .binding  = static_cast<uint32_t>(buffer_idx),
-                .format   = webgpu::bridge(attribute.format),
+                .format   = loon::gpu::bridge(attribute.format),
                 .offset   = static_cast<uint32_t>(attribute.offset),
             });
         }
@@ -720,7 +723,7 @@ WGPURenderPipeline WGPUDeviceImpl::create_render_pipeline(
         .sType                  = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
         .pNext                  = nullptr,
         .flags                  = 0,
-        .topology               = webgpu::bridge(descriptor->primitive.topology),
+        .topology               = loon::gpu::bridge(descriptor->primitive.topology),
         .primitiveRestartEnable = false,
     };
 
@@ -730,8 +733,8 @@ WGPURenderPipeline WGPUDeviceImpl::create_render_pipeline(
     VkFormat                              depth_attachment_format   = VK_FORMAT_UNDEFINED;
     VkFormat                              stencil_attachment_format = VK_FORMAT_UNDEFINED;
     if (descriptor->depthStencil) {
-        depth_stencil_state                 = webgpu::bridge(*descriptor->depthStencil);
-        const VkFormat depth_stencil_format = webgpu::bridge(descriptor->depthStencil->format);
+        depth_stencil_state                 = loon::gpu::bridge(*descriptor->depthStencil);
+        const VkFormat depth_stencil_format = loon::gpu::bridge(descriptor->depthStencil->format);
         switch (descriptor->depthStencil->format) {
             case WGPUTextureFormat_Stencil8: {  // Stencil-only
                 stencil_attachment_format = depth_stencil_format;
@@ -754,9 +757,9 @@ WGPURenderPipeline WGPUDeviceImpl::create_render_pipeline(
     }
 
     // Color blend state
-    webgpu::Stack<VkPipelineColorBlendAttachmentState, webgpu::kMaxColorAttachments>
-                                                          color_blend_attachment_states{};
-    webgpu::Stack<VkFormat, webgpu::kMaxColorAttachments> color_attachment_formats{};
+    loon::gpu::Stack<VkPipelineColorBlendAttachmentState, loon::gpu::kMaxColorAttachments>
+                                                                color_blend_attachment_states{};
+    loon::gpu::Stack<VkFormat, loon::gpu::kMaxColorAttachments> color_attachment_formats{};
 
     VkPipelineColorBlendStateCreateInfo color_blend_state{
         .sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
@@ -785,9 +788,9 @@ WGPURenderPipeline WGPUDeviceImpl::create_render_pipeline(
         for (size_t target_idx = 0; target_idx < descriptor->fragment->targetCount; ++target_idx) {
             const auto& target = descriptor->fragment->targets[target_idx];
 
-            const auto attachment_state = webgpu::bridge(target);
+            const auto attachment_state = loon::gpu::bridge(target);
             color_blend_attachment_states.push(attachment_state);
-            color_attachment_formats.push(webgpu::bridge(target.format));
+            color_attachment_formats.push(loon::gpu::bridge(target.format));
         }
 
         color_blend_state.attachmentCount = color_blend_attachment_states.size();
@@ -803,8 +806,8 @@ WGPURenderPipeline WGPUDeviceImpl::create_render_pipeline(
         .depthClampEnable        = descriptor->primitive.unclippedDepth,
         .rasterizerDiscardEnable = false,
         .polygonMode             = VK_POLYGON_MODE_FILL,
-        .cullMode                = webgpu::bridge(descriptor->primitive.cullMode),
-        .frontFace               = webgpu::bridge(descriptor->primitive.frontFace),
+        .cullMode                = loon::gpu::bridge(descriptor->primitive.cullMode),
+        .frontFace               = loon::gpu::bridge(descriptor->primitive.frontFace),
         .depthBiasEnable
         = descriptor->depthStencil ? (descriptor->depthStencil->depthBias != 0) : false,
         .depthBiasConstantFactor = 0,
@@ -821,7 +824,7 @@ WGPURenderPipeline WGPUDeviceImpl::create_render_pipeline(
         .sType                 = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
         .pNext                 = nullptr,
         .flags                 = 0,
-        .rasterizationSamples  = webgpu::bridge_sample_count(descriptor->multisample.count),
+        .rasterizationSamples  = loon::gpu::bridge_sample_count(descriptor->multisample.count),
         .sampleShadingEnable   = false,
         .minSampleShading      = 1.0f,
         .pSampleMask           = &sample_mask,
@@ -894,7 +897,7 @@ WGPURenderPipeline WGPUDeviceImpl::create_render_pipeline(
     pipeline->vk_pipeline = vk_pipeline;
     descriptor->layout->add_ref_internal();
     pipeline->pipeline_layout = descriptor->layout;
-    return webgpu::return_with_ownership(pipeline);
+    return loon::gpu::return_with_ownership(pipeline);
 }
 
 
@@ -903,8 +906,8 @@ WGPURenderPipeline WGPUDeviceImpl::create_render_pipeline(
 WGPUCommandEncoder WGPUDeviceImpl::create_command_encoder(
     WGPU_NULLABLE WGPUCommandEncoderDescriptor const* descriptor) {
     auto encoder            = m_cmd_encoders.make(this, descriptor ? descriptor->label : ""_wsv);
-    encoder->commands_mixin = webgpu::CommandsMixin(m_allocator);
-    return webgpu::return_with_ownership(encoder);
+    encoder->commands_mixin = loon::gpu::CommandsMixin(m_allocator);
+    return loon::gpu::return_with_ownership(encoder);
 }
 
 WGPUCommandBuffer WGPUDeviceImpl::allocate_command_buffer() {
@@ -985,8 +988,8 @@ uint32_t WGPUDeviceImpl::get_queue_family() const {
 
 // MARK: Thread local state
 
-WGPUDeviceImpl::ThreadLocalState::ThreadLocalState(const webgpu::Allocator& alloc,
-                                                   WGPUDeviceImpl*          device) :
+WGPUDeviceImpl::ThreadLocalState::ThreadLocalState(const loon::gpu::Allocator& alloc,
+                                                   WGPUDeviceImpl*             device) :
     allocator{alloc},
     arena_memory{allocator.alloc(kArenaSize)},
     arena(arena_memory.ptr, arena_memory.len),
@@ -995,15 +998,15 @@ WGPUDeviceImpl::ThreadLocalState::ThreadLocalState(const webgpu::Allocator& allo
 }
 
 WGPUDeviceImpl::ThreadLocalState* WGPUDeviceImpl::get_thread_local_state() {
-    auto state = reinterpret_cast<ThreadLocalState*>(webgpu::tls_get_data(m_tls_key));
+    auto state = reinterpret_cast<ThreadLocalState*>(loon::gpu::tls_get_data(m_tls_key));
     if (state == nullptr) {
         state = new ThreadLocalState(m_allocator, this);
-        webgpu::tls_set_data(m_tls_key, state);
+        loon::gpu::tls_set_data(m_tls_key, state);
     }
     return state;
 }
 
-webgpu::Arena* WGPUDeviceImpl::get_thread_local_arena() {
+loon::gpu::Arena* WGPUDeviceImpl::get_thread_local_arena() {
     return &get_thread_local_state()->arena;
 }
 

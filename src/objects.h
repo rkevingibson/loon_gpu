@@ -51,13 +51,13 @@ struct WGPUAdapterImpl {
     uint32_t        subgroup_min_size = 0;
     uint32_t        subgroup_max_size = 0;
 
-    webgpu::Label label;
+    loon::gpu::Label label;
 
    private:
     bool can_destroy();
 
-    webgpu::ReferenceCount refcount;
-    int64_t                device_count = 0;
+    loon::gpu::ReferenceCount refcount;
+    int64_t                   device_count = 0;
 };
 
 struct WGPUSurfaceImpl {
@@ -76,29 +76,29 @@ struct WGPUSurfaceImpl {
     VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
 
     // Only set when configured
-    WGPUDevice                                      device              = nullptr;
-    VkSwapchainKHR                                  vk_swapchain        = VK_NULL_HANDLE;
-    static constexpr uint32_t                       kMaxSwapchainImages = 8;
-    webgpu::Stack<WGPUTexture, kMaxSwapchainImages> swapchain_images;
-    VkFormat                                        swapchain_format = VK_FORMAT_UNDEFINED;
-    VkExtent2D                                      swapchain_extent = {0, 0};
+    WGPUDevice                                         device              = nullptr;
+    VkSwapchainKHR                                     vk_swapchain        = VK_NULL_HANDLE;
+    static constexpr uint32_t                          kMaxSwapchainImages = 8;
+    loon::gpu::Stack<WGPUTexture, kMaxSwapchainImages> swapchain_images;
+    VkFormat                                           swapchain_format = VK_FORMAT_UNDEFINED;
+    VkExtent2D                                         swapchain_extent = {0, 0};
 
     WGPUTexture current_frame = nullptr;
     uint32_t    current_idx   = 0;
 
-    webgpu::Label label;
+    loon::gpu::Label label;
 
     bool is_configured() const { return device != nullptr; }
 
    private:
-    webgpu::ReferenceCount refcount;
+    loon::gpu::ReferenceCount refcount;
 };
 
 struct WGPUObjectBase {
-    WGPUDevice    device = nullptr;
-    webgpu::Label label;
-    bool          valid = true;
-    int64_t       reference_count{0};
+    WGPUDevice       device = nullptr;
+    loon::gpu::Label label;
+    bool             valid = true;
+    int64_t          reference_count{0};
 
     WGPUObjectBase() = default;
     WGPUObjectBase(WGPUDevice device, WGPUStringView l = WGPU_STRING_VIEW_INIT);
@@ -106,27 +106,27 @@ struct WGPUObjectBase {
     static constexpr int64_t kInternalReferenceIncrement = 1ll << 32;
     static constexpr int64_t kExternalReferenceCountMask = kInternalReferenceIncrement - 1;
 
-    void               add_ref() { webgpu::atomic_fetch_add(&reference_count, 1); }
+    void               add_ref() { loon::gpu::atomic_fetch_add(&reference_count, 1); }
     [[nodiscard]] bool release() {
-        const auto old_count = webgpu::atomic_fetch_add(&reference_count, -1);
+        const auto old_count = loon::gpu::atomic_fetch_add(&reference_count, -1);
         assert((old_count & kExternalReferenceCountMask) != 0);
         return (old_count - 1) == 0;
     }
 
     [[nodiscard]] bool free_external_refs() {
-        auto    expected = webgpu::atomic_load(&reference_count);
+        auto    expected = loon::gpu::atomic_load(&reference_count);
         int64_t desired  = expected & ~kExternalReferenceCountMask;  // Zero out external references
-        while (!webgpu::atomic_compare_exchange(&reference_count, &desired, expected)) {
+        while (!loon::gpu::atomic_compare_exchange(&reference_count, &desired, expected)) {
             desired = expected & ~kExternalReferenceCountMask;  // Zero out external references
         }
         return desired == 0;
     }
     void add_ref_internal() {
-        webgpu::atomic_fetch_add(&reference_count, kInternalReferenceIncrement);
+        loon::gpu::atomic_fetch_add(&reference_count, kInternalReferenceIncrement);
     }
     [[nodiscard]] bool release_internal() {
         const auto old_count
-            = webgpu::atomic_fetch_add(&reference_count, -kInternalReferenceIncrement);
+            = loon::gpu::atomic_fetch_add(&reference_count, -kInternalReferenceIncrement);
         assert((old_count >> 32) != 0);
         return ((old_count - kInternalReferenceIncrement) == 0);
     }
@@ -215,34 +215,35 @@ struct WGPUBindGroupLayoutImpl : WGPUObjectBase {
             WGPUStorageTextureBindingLayout storage_texture;
         };
 
-        friend bool           operator==(const LayoutEntry& a, const LayoutEntry& b);
-        webgpu::ResourceUsage internal_usage() const;
+        friend bool              operator==(const LayoutEntry& a, const LayoutEntry& b);
+        loon::gpu::ResourceUsage internal_usage() const;
 
         VkDescriptorType descriptor_type() const;
     };
 
-    webgpu::Vector<LayoutEntry>           entries;
-    uint32_t                              dynamic_offset_count = 0;
-    WGPUPipelineBase                      exclusive_pipeline   = nullptr;
-    VkDescriptorSetLayout                 vk_set_layout        = VK_NULL_HANDLE;
-    webgpu::HashTable<uint16_t, uint16_t> entry_map;  // Map from binding index to index in entries
+    loon::gpu::Vector<LayoutEntry> entries;
+    uint32_t                       dynamic_offset_count = 0;
+    WGPUPipelineBase               exclusive_pipeline   = nullptr;
+    VkDescriptorSetLayout          vk_set_layout        = VK_NULL_HANDLE;
+    loon::gpu::HashTable<uint16_t, uint16_t>
+        entry_map;  // Map from binding index to index in entries
 };
 
 struct WGPUBindGroupImpl : WGPUObjectBase {
     WGPU_DEVICE_OBJECT_DEFAULT_OPERATORS(WGPUBindGroupImpl);
 
-    WGPUBindGroupLayout                                  layout = nullptr;
-    webgpu::Vector<WGPUBindGroupEntry>                   entries;
-    webgpu::UsageScope                                   used_resources;
-    webgpu::DescriptorSetAllocator::DescriptorAllocation descriptor;
-    VkDescriptorPool                                     vk_pool = VK_NULL_HANDLE;
+    WGPUBindGroupLayout                                     layout = nullptr;
+    loon::gpu::Vector<WGPUBindGroupEntry>                   entries;
+    loon::gpu::UsageScope                                   used_resources;
+    loon::gpu::DescriptorSetAllocator::DescriptorAllocation descriptor;
+    VkDescriptorPool                                        vk_pool = VK_NULL_HANDLE;
 };
 
 struct WGPUPipelineLayoutImpl : WGPUObjectBase {
     WGPU_DEVICE_OBJECT_DEFAULT_OPERATORS(WGPUPipelineLayoutImpl);
 
-    webgpu::Stack<WGPUBindGroupLayout, webgpu::kMaxBindGroups> bind_group_layouts;
-    VkPipelineLayout                                           vk_layout = VK_NULL_HANDLE;
+    loon::gpu::Stack<WGPUBindGroupLayout, loon::gpu::kMaxBindGroups> bind_group_layouts;
+    VkPipelineLayout                                                 vk_layout = VK_NULL_HANDLE;
 };
 
 struct WGPUTextureImpl : WGPUObjectBase {
@@ -253,17 +254,17 @@ struct WGPUTextureImpl : WGPUObjectBase {
     WGPUExtent3D logical_extent(uint32_t mip_level) const;
     WGPUExtent3D physical_extent(uint32_t mip_level) const;
 
-    VkImage               vk_image              = VK_NULL_HANDLE;
-    uint32_t              width                 = 0;
-    uint32_t              height                = 0;
-    uint32_t              depth_or_array_layers = 0;
-    uint32_t              mip_level_count       = 0;
-    uint32_t              sample_count          = 0;
-    WGPUTextureDimension  dimension             = WGPUTextureDimension_Undefined;
-    WGPUTextureFormat     format                = WGPUTextureFormat_Undefined;
-    WGPUTextureUsage      usages                = 0;
-    bool                  is_surface_image      = false;
-    webgpu::ResourceUsage last_submitted_usage  = webgpu::ResourceUsage::kUsageUndefined;
+    VkImage                  vk_image              = VK_NULL_HANDLE;
+    uint32_t                 width                 = 0;
+    uint32_t                 height                = 0;
+    uint32_t                 depth_or_array_layers = 0;
+    uint32_t                 mip_level_count       = 0;
+    uint32_t                 sample_count          = 0;
+    WGPUTextureDimension     dimension             = WGPUTextureDimension_Undefined;
+    WGPUTextureFormat        format                = WGPUTextureFormat_Undefined;
+    WGPUTextureUsage         usages                = 0;
+    bool                     is_surface_image      = false;
+    loon::gpu::ResourceUsage last_submitted_usage  = loon::gpu::ResourceUsage::kUsageUndefined;
     // TODO: View formats array. Do I need it for anything other than validation?
 };
 
@@ -302,7 +303,7 @@ struct WGPUBufferImpl : WGPUObjectBase {
         uint64_t    size     = 0;
 
         // Null unless internal_state == Init;
-        webgpu::StagingBuffer staging_buffer = {};
+        loon::gpu::StagingBuffer staging_buffer = {};
     };
 
     InternalState      internal_state;
@@ -315,7 +316,7 @@ struct WGPUBufferImpl : WGPUObjectBase {
     VmaAllocationInfo   vk_allocation_info = {};
     ActiveBufferMapping mapping            = {};
 
-    webgpu::ResourceUsage last_submitted_usage = webgpu::ResourceUsage::kUsageUndefined;
+    loon::gpu::ResourceUsage last_submitted_usage = loon::gpu::ResourceUsage::kUsageUndefined;
 };
 
 struct WGPUQuerySetImpl : WGPUObjectBase {};

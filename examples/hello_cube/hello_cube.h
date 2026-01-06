@@ -1,6 +1,6 @@
 #pragma once
 
-#include <webgpu/webgpu.h>
+#include <gpu/loon_gpu.h>
 
 #include "common/example.h"
 

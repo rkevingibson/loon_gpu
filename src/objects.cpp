@@ -22,7 +22,7 @@ void WGPUAdapterImpl::release() {
 }
 
 bool WGPUAdapterImpl::can_destroy() {
-    return refcount.count() == 0 && webgpu::atomic_load(&device_count) == 0;
+    return refcount.count() == 0 && loon::gpu::atomic_load(&device_count) == 0;
 }
 
 WGPUFuture WGPUAdapterImpl::request_device(WGPU_NULLABLE WGPUDeviceDescriptor const* descriptor,
@@ -35,15 +35,15 @@ WGPUFuture WGPUAdapterImpl::request_device(WGPU_NULLABLE WGPUDeviceDescriptor co
         device = nullptr;
     }
 
-    webgpu::CallbackData* cb;
-    WGPUFuture            future = instance->create_future(&cb);
+    loon::gpu::CallbackData* cb;
+    WGPUFuture               future = instance->create_future(&cb);
     *cb                  = {
                          .callback       = reinterpret_cast<WGPUProc>(callbackInfo.callback),
                          .mode           = callbackInfo.mode,
                          .userdata1      = callbackInfo.userdata1,
                          .userdata2      = callbackInfo.userdata2,
                          .message        = WGPU_STRING_VIEW_INIT,
-                         .type           = webgpu::CallbackType::RequestDevice,
+                         .type           = loon::gpu::CallbackType::RequestDevice,
                          .request_device = {.status = status, .device = device,},
     };
 
@@ -54,7 +54,7 @@ WGPUFuture WGPUAdapterImpl::request_device(WGPU_NULLABLE WGPUDeviceDescriptor co
 void WGPUAdapterImpl::free_device(WGPUDevice device) {
     device->~WGPUDeviceImpl();
     instance->get_allocator().free({.ptr = device, .len = sizeof(WGPUDeviceImpl)});
-    webgpu::atomic_fetch_add(&device_count, -1);
+    loon::gpu::atomic_fetch_add(&device_count, -1);
     if (can_destroy()) { instance->free_adapter(this); }
 }
 
@@ -76,7 +76,7 @@ void WGPUSurfaceImpl::release() {
 }
 
 void WGPUSurfaceImpl::configure(WGPUSurfaceConfiguration const* config) {
-    if (!webgpu::validate(this, config)) {
+    if (!loon::gpu::validate(this, config)) {
         return;  // No way of error reporting for this function?
     }
 
@@ -99,18 +99,18 @@ void WGPUSurfaceImpl::configure(WGPUSurfaceConfiguration const* config) {
         .flags         = 0,
         .surface       = vk_surface,
         .minImageCount = image_count,
-        .imageFormat   = webgpu::bridge(config->format),
+        .imageFormat   = loon::gpu::bridge(config->format),
         .imageColorSpace
         = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,  // TODO: Colorspace support in webgpu?
         .imageExtent           = extent,
         .imageArrayLayers      = 1,
-        .imageUsage            = webgpu::bridge_usage_flags(config->usage),
+        .imageUsage            = loon::gpu::bridge_usage_flags(config->usage),
         .imageSharingMode      = VK_SHARING_MODE_EXCLUSIVE,  // We only support one queue.
         .queueFamilyIndexCount = 0,
         .pQueueFamilyIndices   = nullptr,
         .preTransform          = vk_capabilities.currentTransform,
-        .compositeAlpha        = webgpu::bridge_composite_alpha_mode(config->alphaMode),
-        .presentMode           = webgpu::bridge(config->presentMode),
+        .compositeAlpha        = loon::gpu::bridge_composite_alpha_mode(config->alphaMode),
+        .presentMode           = loon::gpu::bridge(config->presentMode),
         .clipped               = true,
         .oldSwapchain          = vk_swapchain,
     };
@@ -131,12 +131,12 @@ void WGPUSurfaceImpl::configure(WGPUSurfaceConfiguration const* config) {
         return;
     }
 
-    webgpu::Stack<VkImage, WGPUSurfaceImpl::kMaxSwapchainImages> images;
+    loon::gpu::Stack<VkImage, WGPUSurfaceImpl::kMaxSwapchainImages> images;
     images.resize(image_count);
     WGPU_VK_CHECK(
         vkGetSwapchainImagesKHR(config->device->vk_device, swapchain, &image_count, images.data()));
 
-    webgpu::Stack<WGPUTexture, WGPUSurfaceImpl::kMaxSwapchainImages> textures;
+    loon::gpu::Stack<WGPUTexture, WGPUSurfaceImpl::kMaxSwapchainImages> textures;
     for (size_t i = 0; i < images.size(); ++i) {
         auto texture      = config->device->m_textures.make(config->device, "Swapchain image"_wsv);
         texture->vk_image = images[i];
@@ -158,7 +158,7 @@ void WGPUSurfaceImpl::configure(WGPUSurfaceConfiguration const* config) {
     device           = config->device;
     vk_swapchain     = swapchain;
     swapchain_images = textures;
-    swapchain_format = webgpu::bridge(config->format);
+    swapchain_format = loon::gpu::bridge(config->format);
     swapchain_extent = extent;
     return;
 }
@@ -175,7 +175,7 @@ void WGPUSurfaceImpl::unconfigure() {
 
 WGPUStatus WGPUSurfaceImpl::get_capabilities(WGPUAdapter              adapter,
                                              WGPUSurfaceCapabilities* capabilities) {
-    if (!webgpu::validate(this, adapter, capabilities)) { return WGPUStatus_Error; }
+    if (!loon::gpu::validate(this, adapter, capabilities)) { return WGPUStatus_Error; }
 
     // Surface formats:
     uint32_t format_count = 0;
@@ -212,10 +212,10 @@ WGPUStatus WGPUSurfaceImpl::get_capabilities(WGPUAdapter              adapter,
                                               vk_surface,
                                               &vk_capabilities);
     const auto alpha_modes
-        = webgpu::bridge_composite_alpha_mode(vk_capabilities.supportedCompositeAlpha);
+        = loon::gpu::bridge_composite_alpha_mode(vk_capabilities.supportedCompositeAlpha);
 
     // Need to copy to output:
-    const auto output_alloc_size = sizeof(webgpu::Allocator)
+    const auto output_alloc_size = sizeof(loon::gpu::Allocator)
                                    + sizeof(WGPUTextureFormat) * format_count
                                    + sizeof(WGPUPresentMode) * present_mode_count
                                    + sizeof(WGPUCompositeAlphaMode) * alpha_modes.size();
@@ -223,12 +223,14 @@ WGPUStatus WGPUSurfaceImpl::get_capabilities(WGPUAdapter              adapter,
     // This is an odd line of code - basically copying the allocator into its own allocation, so
     // that it can be freed properly later.
     auto allocator_ptr
-        = ::new (alloc_block.ptr) webgpu::Allocator(adapter->instance->get_allocator());
+        = ::new (alloc_block.ptr) loon::gpu::Allocator(adapter->instance->get_allocator());
     auto formats = reinterpret_cast<WGPUTextureFormat*>(&allocator_ptr[1]);
-    for (size_t i = 0; i < format_count; ++i) { formats[i] = webgpu::bridge(vk_formats[i].format); }
+    for (size_t i = 0; i < format_count; ++i) {
+        formats[i] = loon::gpu::bridge(vk_formats[i].format);
+    }
     auto present_modes = reinterpret_cast<WGPUPresentMode*>(&formats[format_count]);
     for (size_t i = 0; i < present_mode_count; ++i) {
-        present_modes[i] = webgpu::bridge(vk_modes[i]);
+        present_modes[i] = loon::gpu::bridge(vk_modes[i]);
     }
     auto alpha_modes_ptr
         = reinterpret_cast<WGPUCompositeAlphaMode*>(&present_modes[present_mode_count]);
@@ -237,7 +239,7 @@ WGPUStatus WGPUSurfaceImpl::get_capabilities(WGPUAdapter              adapter,
     adapter->instance->get_allocator().free(present_mode_block);
     adapter->instance->get_allocator().free(format_block);
 
-    capabilities->usages      = webgpu::bridge_usage_flags(vk_capabilities.supportedUsageFlags);
+    capabilities->usages      = loon::gpu::bridge_usage_flags(vk_capabilities.supportedUsageFlags);
     capabilities->formatCount = format_count;
     capabilities->formats     = formats;
     capabilities->presentModeCount = present_mode_count;
@@ -316,7 +318,7 @@ void swap(WGPUShaderModuleImpl& a, WGPUShaderModuleImpl& b) {
 
 // MARK: PipelineBase
 WGPUPipelineBaseImpl::~WGPUPipelineBaseImpl() {
-    if (pipeline_layout) { webgpu::release_internal(pipeline_layout); }
+    if (pipeline_layout) { loon::gpu::release_internal(pipeline_layout); }
 }
 
 void swap(WGPUPipelineBaseImpl& a, WGPUPipelineBaseImpl& b) {
@@ -391,8 +393,8 @@ bool operator==(const WGPUBindGroupLayoutImpl::LayoutEntry& a,
     return false;
 }
 
-webgpu::ResourceUsage WGPUBindGroupLayoutImpl::LayoutEntry::internal_usage() const {
-    using webgpu::ResourceUsage;
+loon::gpu::ResourceUsage WGPUBindGroupLayoutImpl::LayoutEntry::internal_usage() const {
+    using loon::gpu::ResourceUsage;
     switch (entry_type) {
         case BindingType::kBuffer: {
             switch (buffer.type) {
@@ -467,7 +469,7 @@ WGPUPipelineLayoutImpl::~WGPUPipelineLayoutImpl() {
     }
 
     for (auto layout : bind_group_layouts) {
-        if (layout) { webgpu::release_internal(layout); }
+        if (layout) { loon::gpu::release_internal(layout); }
     }
 }
 
@@ -502,19 +504,19 @@ void swap(WGPUTextureImpl& a, WGPUTextureImpl& b) {
 }
 
 WGPUTextureView WGPUTextureImpl::create_view(WGPUTextureViewDescriptor const* descriptor) {
-    const auto vk_format = webgpu::bridge(descriptor->format);
+    const auto vk_format = loon::gpu::bridge(descriptor->format);
     VkImageViewCreateInfo create_info{.sType      = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
                                       .pNext      = nullptr,
                                       .flags      = 0,
                                       .image      = vk_image,
-                                      .viewType   = webgpu::bridge(descriptor->dimension),
+                                      .viewType   = loon::gpu::bridge(descriptor->dimension),
                                       .format     = vk_format,
                                       .components = {VK_COMPONENT_SWIZZLE_IDENTITY,
                                                      VK_COMPONENT_SWIZZLE_IDENTITY,
                                                      VK_COMPONENT_SWIZZLE_IDENTITY,
                                                      VK_COMPONENT_SWIZZLE_IDENTITY,},
                                       .subresourceRange = {
-                                        .aspectMask = webgpu::bridge(descriptor->aspect),
+                                        .aspectMask = loon::gpu::bridge(descriptor->aspect),
                                         .baseMipLevel = descriptor->baseMipLevel,
                                         .levelCount = descriptor->mipLevelCount,
                                         .baseArrayLayer = descriptor->baseArrayLayer,
@@ -532,7 +534,7 @@ WGPUTextureView WGPUTextureImpl::create_view(WGPUTextureViewDescriptor const* de
     result->vk_image_view = image_view;
     result->vk_format     = vk_format;
 
-    return webgpu::return_with_ownership(result);
+    return loon::gpu::return_with_ownership(result);
 }
 
 WGPUExtent3D WGPUTextureImpl::logical_extent(uint32_t mip_level) const {
@@ -561,8 +563,8 @@ WGPUExtent3D WGPUTextureImpl::logical_extent(uint32_t mip_level) const {
 WGPUExtent3D WGPUTextureImpl::physical_extent(uint32_t mip_level) const {
     WGPUExtent3D extent{};
     const auto   l_extent         = logical_extent(mip_level);
-    const auto   texel_blk_width  = webgpu::texel_block_width(format);
-    const auto   texel_blk_height = webgpu::texel_block_height(format);
+    const auto   texel_blk_width  = loon::gpu::texel_block_width(format);
+    const auto   texel_blk_height = loon::gpu::texel_block_height(format);
     const auto   round_up         = [](uint32_t x, uint32_t m) { return ((x + m - 1) / m) * m; };
     switch (dimension) {
         case WGPUTextureDimension_1D:
@@ -633,7 +635,7 @@ WGPUFuture WGPUBufferImpl::map_async(WGPUMapMode               mode,
 }
 
 void* WGPUBufferImpl::get_mapped_range(size_t offset, size_t size) {
-    if (!webgpu::validate_buffer_get_mapped_range(this, offset, size)) { return nullptr; }
+    if (!loon::gpu::validate_buffer_get_mapped_range(this, offset, size)) { return nullptr; }
     return ((char*)mapping.ptr) + offset;
 }
 

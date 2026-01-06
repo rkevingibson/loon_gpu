@@ -9,7 +9,7 @@
 
 #include "hello_cube.h"
 
-#include <webgpu/webgpu_loon.h>
+#include <gpu/loon_gpu.h>
 
 #include <cassert>
 

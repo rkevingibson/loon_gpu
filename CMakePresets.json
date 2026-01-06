@@ -3,30 +3,34 @@
     "configurePresets": [
         {
             "name": "Development-Base",
-            "hidden":true,
+            "hidden": true,
             "generator": "Ninja Multi-Config",
             "binaryDir": "${sourceDir}/build/",
             "cacheVariables": {
                 "FETCHCONTENT_BASE_DIR": "${sourceDir}/build/external",
                 "CMAKE_OPTIMIZE_DEPENDENCIES": "YES",
                 "CMAKE_CONFIGURATION_TYPES": "Debug;RelWithDebInfo",
-                "LOON_WEBGPU_BUILD_EXAMPLES": "YES",
-                "LOON_WEBGPU_BUILD_TESTS": "YES",
-                "LOON_WEBGPU_WERROR": "YES",
-                "LOON_WEBGPU_INSTALL": "YES",
+                "LOON_GPU_BUILD_EXAMPLES": "YES",
+                "LOON_GPU_BUILD_TESTS": "YES",
+                "LOON_GPU_WERROR": "YES",
+                "LOON_GPU_INSTALL": "YES",
                 "CMAKE_INSTALL_PREFIX": "${sourceDir}/install"
             }
         },
         {
             "name": "Development Windows",
             "displayName": "Development",
-            "inherits":["Development-Base"],
+            "inherits": [
+                "Development-Base"
+            ],
             "hidden": false,
             "description": "Sets Ninja generator, Clang compilers, x64 architecture, Multiple Configurations",
-            "condition":{
+            "condition": {
                 "type": "inList",
                 "string": "${hostSystemName}",
-                "list":["Windows"]
+                "list": [
+                    "Windows"
+                ]
             },
             "architecture": {
                 "value": "x64",
@@ -40,13 +44,17 @@
         {
             "name": "Development MacOS",
             "displayName": "Development",
-            "inherits":["Development-Base"],
+            "inherits": [
+                "Development-Base"
+            ],
             "hidden": false,
             "description": "Sets Ninja generator, Clang compilers, arm64 architecture, Multiple Configurations",
-            "condition":{
+            "condition": {
                 "type": "inList",
                 "string": "${hostSystemName}",
-                "list":["Darwin"]
+                "list": [
+                    "Darwin"
+                ]
             },
             "architecture": {
                 "value": "arm64",

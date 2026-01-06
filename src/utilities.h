@@ -6,20 +6,20 @@
 #include "containers.h"
 #include "platform_utils.h"
 #include "volk.h"
-#include "webgpu/webgpu.h"
 
-namespace webgpu {
+
+namespace loon::gpu {
 
 // MARK: ReferenceCount
 struct ReferenceCount {
-    void               add() { webgpu::atomic_fetch_add(&reference_count, 1); }
+    void               add() { loon::gpu::atomic_fetch_add(&reference_count, 1); }
     [[nodiscard]] bool release() {
-        const auto old_count = webgpu::atomic_fetch_add(&reference_count, -1);
+        const auto old_count = loon::gpu::atomic_fetch_add(&reference_count, -1);
         assert((old_count) != 0);
         return (old_count - 1) == 0;
     }
-    void    release_all() { webgpu::atomic_exchange(&reference_count, 0); }
-    int64_t count() { return webgpu::atomic_load(&reference_count); };
+    void    release_all() { loon::gpu::atomic_exchange(&reference_count, 0); }
+    int64_t count() { return loon::gpu::atomic_load(&reference_count); };
 
    private:
     // TODO: Should probably start this at 1, and ensure that I can't add/release once it goes to 0
@@ -36,11 +36,11 @@ T* return_with_ownership(T* ptr) {
 class Label {
    public:
     Label() = default;
-    Label(const Allocator& backup_alloc, WGPUStringView label) : Label() {
+    Label(const Allocator& backup_alloc, Span<const char> label) : Label() {
         set(backup_alloc, label);
     }
-    WGPUStringView get() const;
-    void           set(const Allocator& backup_alloc, WGPUStringView label);
+    Span<const char> get() const;
+    void             set(const Allocator& backup_alloc, Span<const char> label);
 
    private:
     static constexpr uint32_t label_buffer_size = 256;
@@ -51,56 +51,6 @@ class Label {
         char  m_inline_buffer[label_buffer_size];
     };
 };
-
-// MARK: UsageScope
-
-enum ResourceUsage : uint16_t {
-    kUsageUndefined      = 0,
-    kUsageInput          = 1 << 0,
-    kUsageConstant       = 1 << 1,
-    kUsageStorage        = 1 << 2,
-    kUsageStorageRead    = 1 << 3,
-    kUsageAttachment     = 1 << 4,
-    kUsageAttachmentRead = 1 << 5,
-    kUsagePresent        = 1 << 6,
-    kUsageTransferSrc    = 1 << 7,
-    kUsageTransferDst    = 1 << 8,
-};
-
-class UsageScope {
-   public:
-    UsageScope() = default;
-    explicit UsageScope(Allocator allocator);
-    void reset();
-
-    void add(WGPUTextureView tex, ResourceUsage usage, WGPUShaderStage stage);
-
-    void add(WGPUBuffer buffer, ResourceUsage usage, WGPUShaderStage stage);
-    void try_add(WGPUBuffer buffer, ResourceUsage usage, WGPUShaderStage stage);
-
-    void update_resource_last_usages();
-
-    void update_first_last_usages(UsageScope& first_usages, UsageScope& last_usages) const;
-
-    struct TextureUsage {
-        ResourceUsage     usage           = ResourceUsage::kUsageUndefined;
-        WGPUShaderStage   stage           = WGPUShaderStage_None;
-        uint32_t          min_mip_level   = 0;
-        uint32_t          max_mip_level   = 0;
-        uint32_t          min_array_layer = 0;
-        uint32_t          max_array_layer = 0;
-        WGPUTextureAspect aspect          = WGPUTextureAspect_Undefined;
-    };
-
-    struct BufferUsage {
-        ResourceUsage   usage = ResourceUsage::kUsageUndefined;
-        WGPUShaderStage stage = WGPUShaderStage_None;
-    };
-
-    HashTable<WGPUTexture, TextureUsage> tex_usages;
-    HashTable<WGPUBuffer, BufferUsage>   buffer_usages;
-};
-
 
 // MARK: Arena
 
@@ -190,137 +140,6 @@ class ScopeGuard {
 template <class T>
 ScopeGuard(T) -> ScopeGuard<T>;
 
-// MARK: Callbacks
 
-enum class CallbackType {
-    BufferMap,
-    CompilationInfo,
-    CreateComputePipeline,
-    CreateRenderPipeline,
-    DeviceLost,
-    PopErrorScope,
-    QueueWorkDone,
-    RequestAdapter,
-    RequestDevice,
-};
 
-struct CallbackData {
-    WGPUProc         callback;
-    WGPUCallbackMode mode;
-    void*            userdata1;
-    void*            userdata2;
-    WGPUStringView   message;
-    CallbackType     type;
-    union {
-        struct {
-            WGPUMapAsyncStatus status;
-        } buffer_map;
-        struct {
-            WGPUCompilationInfoRequestStatus status;
-            WGPUCompilationInfo              info;
-        } compilation_info;
-        struct {
-            WGPUCreatePipelineAsyncStatus status;
-            WGPUComputePipeline           pipeline;
-        } create_compute_pipeline;
-        struct {
-            WGPUCreatePipelineAsyncStatus status;
-            WGPURenderPipeline            pipeline;
-        } create_render_pipeline;
-        struct {
-            WGPUDevice const*    device;
-            WGPUDeviceLostReason reason;
-        } device_lost;
-        struct {
-            WGPUPopErrorScopeStatus status;
-            WGPUErrorType           type;
-        } pop_error_scope;
-        struct {
-            WGPUQueueWorkDoneStatus status;
-        } queue_work_done;
-        struct {
-            WGPURequestAdapterStatus status;
-            WGPUAdapter              adapter;
-        } request_adapter;
-        struct {
-            WGPURequestDeviceStatus status;
-            WGPUDevice              device;
-        } request_device;
-    };
-    bool ready = false;
-};
-
-// MARK: CommandPool
-
-// A caching pool for command buffers
-//
-class CommandPool {
-   public:
-    CommandPool(WGPUDevice device, Arena* arena);
-    ~CommandPool();
-    WGPUCommandBuffer allocate_command_buffer(int64_t current_timeline_value);
-    void              free_command_buffer(WGPUCommandBuffer, int64_t timeline_value);
-
-   private:
-    bool grow();
-
-    std::mutex    mutex;
-    WGPUDevice    device;
-    Arena*        arena;
-    VkCommandPool pool;
-
-    struct RingBufferEntry {
-        WGPUCommandBuffer buffer         = VK_NULL_HANDLE;
-        int64_t           timeline_value = -1;
-        bool              is_reset() const { return timeline_value < 0; }
-    };
-    RingBufferEntry* ring_buffer = nullptr;
-    uint32_t         read_idx    = 0;
-    uint32_t         write_idx   = 0;
-    uint32_t         capacity    = 0;
-};
-
-// MARK: StagingBuffer
-
-class StagingBuffer {
-   public:
-    StagingBuffer() = default;
-    StagingBuffer(WGPUDevice device, size_t size);
-
-    void* get_mapped_range(size_t offset, size_t size);
-    void  unmap(WGPUBuffer target, size_t offset, size_t size);
-
-   private:
-    WGPUBuffer buffer = nullptr;
-};
-
-// MARK: DescriptorSetAllocator
-class DescriptorSetAllocator {
-    struct Pool;
-
-   public:
-    DescriptorSetAllocator() = default;
-    DescriptorSetAllocator(WGPUDevice device);
-
-    struct DescriptorAllocation {
-        Pool*           pool = nullptr;
-        VkDescriptorSet set  = VK_NULL_HANDLE;
-        void            free(WGPUDevice device);
-    };
-
-    DescriptorAllocation alloc(WGPUBindGroupLayout layout);
-
-   private:
-    struct Pool {
-        VkDescriptorPool vk_pool;
-        uint32_t         sets_remaining;
-    };
-    // Had to go for the punny name
-    struct PoolQueue {
-        webgpu::SegmentArray<Pool> pools;
-    };
-    WGPUDevice                             m_device;
-    webgpu::HashTable<uint32_t, PoolQueue> m_pools;
-};
-
-};  // namespace webgpu
+};  // namespace loon::gpu

@@ -308,9 +308,9 @@ struct CommandsMixin {
 };
 
 struct RenderPassLayout {
-    webgpu::Stack<WGPUTextureFormat, webgpu::kMaxColorAttachments> color_formats;
-    WGPUTextureFormat                                              depth_stencil_format;
-    uint32_t                                                       sample_count = 1;
+    loon::gpu::Stack<WGPUTextureFormat, loon::gpu::kMaxColorAttachments> color_formats;
+    WGPUTextureFormat                                                    depth_stencil_format;
+    uint32_t                                                             sample_count = 1;
 };
 
 struct RenderCommandsMixin {
@@ -326,19 +326,19 @@ struct RenderCommandsMixin {
     WGPUIndexFormat    index_format;
     uint64_t           index_buffer_offset;
     uint64_t           index_buffer_size;
-    WGPUBuffer         vertex_buffers[webgpu::kMaxVertexBuffers]      = {0};
-    uint64_t           vertex_buffer_sizes[webgpu::kMaxVertexBuffers] = {0};
-    uint64_t           draw_count                                     = 0;
+    WGPUBuffer         vertex_buffers[loon::gpu::kMaxVertexBuffers]      = {0};
+    uint64_t           vertex_buffer_sizes[loon::gpu::kMaxVertexBuffers] = {0};
+    uint64_t           draw_count                                        = 0;
 };
 
-void record_pipeline_barriers(VkCommandBuffer           cmd_buffer,
-                              WGPUDevice                device,
-                              const webgpu::UsageScope& previous_scope,
-                              const webgpu::UsageScope& new_scope);
+void record_pipeline_barriers(VkCommandBuffer              cmd_buffer,
+                              WGPUDevice                   device,
+                              const loon::gpu::UsageScope& previous_scope,
+                              const loon::gpu::UsageScope& new_scope);
 
-bool record_pre_submit_synchronization_cmd(VkCommandBuffer           cmd_buffer,
-                                           WGPUDevice                device,
-                                           const webgpu::UsageScope& first_usages);
+bool record_pre_submit_synchronization_cmd(VkCommandBuffer              cmd_buffer,
+                                           WGPUDevice                   device,
+                                           const loon::gpu::UsageScope& first_usages);
 }  // namespace webgpu
 
 struct WGPUCommandEncoderImpl : WGPUObjectBase {
@@ -348,26 +348,27 @@ struct WGPUCommandEncoderImpl : WGPUObjectBase {
 
     WGPUCommandBuffer finish(WGPU_NULLABLE WGPUCommandBufferDescriptor const* descriptor);
 
-    webgpu::CommandsMixin commands_mixin;
+    loon::gpu::CommandsMixin commands_mixin;
 };
 
 struct WGPURenderPassEncoderImpl : WGPUObjectBase {
     WGPU_DEVICE_OBJECT_DEFAULT_OPERATORS(WGPURenderPassEncoderImpl);
 
-    webgpu::RenderCommandsMixin render_commands;
-    WGPUCommandEncoder          encoder;
-    VkExtent2D                  attachment_size;
+    loon::gpu::RenderCommandsMixin render_commands;
+    WGPUCommandEncoder             encoder;
+    VkExtent2D                     attachment_size;
 
-    webgpu::Stack<WGPURenderPassColorAttachment, webgpu::kMaxColorAttachments> color_attachments;
+    loon::gpu::Stack<WGPURenderPassColorAttachment, loon::gpu::kMaxColorAttachments>
+                                         color_attachments;
     WGPURenderPassDepthStencilAttachment depth_stencil_attachment;
     bool                                 has_depth_stencil_attachment;
 
-    webgpu::CommandsMixin* commands_mixin;
+    loon::gpu::CommandsMixin* commands_mixin;
 };
 
 struct WGPUComputePassEncoderImpl : WGPUObjectBase {
     WGPU_DEVICE_OBJECT_DEFAULT_OPERATORS(WGPUComputePassEncoderImpl);
-    webgpu::CommandsMixin* commands_mixin;
+    loon::gpu::CommandsMixin* commands_mixin;
 };
 
 struct WGPUCommandBufferImpl : WGPUObjectBase {
@@ -377,13 +378,14 @@ struct WGPUCommandBufferImpl : WGPUObjectBase {
 
     // We have 2 command buffers - one for synchronization that gets recorded during QueueSubmit,
     // and one for the actual commands.
-    webgpu::CommandPool* cmd_pool;  // Since allocation is thread-local, we need to be sure to free
-                                    // using the same one, even if it happens on a different thread.
-    VkCommandBuffer    vk_cmd_buffers[2];
-    webgpu::UsageScope first_usages;
-    webgpu::UsageScope last_usages;
-    bool               touches_surface_image;
-    WGPUCommandEncoder cmd_encoder = nullptr;
-    int64_t            submitted_timeline_value
+    loon::gpu::CommandPool*
+        cmd_pool;  // Since allocation is thread-local, we need to be sure to free
+                   // using the same one, even if it happens on a different thread.
+    VkCommandBuffer       vk_cmd_buffers[2];
+    loon::gpu::UsageScope first_usages;
+    loon::gpu::UsageScope last_usages;
+    bool                  touches_surface_image;
+    WGPUCommandEncoder    cmd_encoder = nullptr;
+    int64_t               submitted_timeline_value
         = -1;  // Value of the queue's timeline semaphore when this work is completed.
 };

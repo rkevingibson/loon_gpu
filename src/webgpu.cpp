@@ -284,11 +284,11 @@ void wgpuSurfaceRelease(WGPUSurface surface) WGPU_FUNCTION_ATTRIBUTE {
 void wgpuSurfaceCapabilitiesFreeMembers(WGPUSurfaceCapabilities surfaceCapabilities)
     WGPU_FUNCTION_ATTRIBUTE {
     const auto output_alloc_size
-        = sizeof(webgpu::Allocator) + sizeof(WGPUTextureFormat) * surfaceCapabilities.formatCount
+        = sizeof(loon::gpu::Allocator) + sizeof(WGPUTextureFormat) * surfaceCapabilities.formatCount
           + sizeof(WGPUPresentMode) * surfaceCapabilities.presentModeCount
           + sizeof(WGPUCompositeAlphaMode) * surfaceCapabilities.alphaModeCount;
 
-    auto allocator = reinterpret_cast<const webgpu::Allocator*>(surfaceCapabilities.formats) - 1;
+    auto allocator = reinterpret_cast<const loon::gpu::Allocator*>(surfaceCapabilities.formats) - 1;
     allocator->free({(void*)allocator, static_cast<uint32_t>(output_alloc_size)});
 }
 /** @} */
@@ -553,7 +553,7 @@ WGPUFuture wgpuDeviceGetLostFuture(WGPUDevice device) WGPU_FUNCTION_ATTRIBUTE {
  * This value is @ref ReturnedWithOwnership.
  */
 WGPUQueue wgpuDeviceGetQueue(WGPUDevice device) WGPU_FUNCTION_ATTRIBUTE {
-    return webgpu::return_with_ownership(&device->queue);
+    return loon::gpu::return_with_ownership(&device->queue);
 }
 
 WGPUBool wgpuDeviceHasFeature(WGPUDevice device, WGPUFeatureName feature) WGPU_FUNCTION_ATTRIBUTE {
@@ -794,7 +794,7 @@ void wgpuBufferAddRef(WGPUBuffer buffer) WGPU_FUNCTION_ATTRIBUTE {
     buffer->add_ref();
 }
 void wgpuBufferRelease(WGPUBuffer buffer) WGPU_FUNCTION_ATTRIBUTE {
-    webgpu::release(buffer);
+    loon::gpu::release(buffer);
 }
 /** @} */
 
@@ -816,7 +816,7 @@ void wgpuCommandBufferAddRef(WGPUCommandBuffer commandBuffer) WGPU_FUNCTION_ATTR
 }
 
 void wgpuCommandBufferRelease(WGPUCommandBuffer commandBuffer) WGPU_FUNCTION_ATTRIBUTE {
-    webgpu::release(commandBuffer);
+    loon::gpu::release(commandBuffer);
 }
 /** @} */
 
@@ -852,13 +852,13 @@ void wgpuCommandEncoderClearBuffer(WGPUCommandEncoder commandEncoder,
                                    uint64_t           offset,
                                    uint64_t           size) WGPU_FUNCTION_ATTRIBUTE {
     buffer->add_ref_internal();
-    commandEncoder->commands_mixin.add(webgpu::Command{
+    commandEncoder->commands_mixin.add(loon::gpu::Command{
         .clear_buffer = {
             .buffer = buffer,
             .offset = offset,
             .size = size,
         },
-        .type = webgpu::CommandType::ClearBuffer,
+        .type = loon::gpu::CommandType::ClearBuffer,
     });
 }
 
@@ -870,13 +870,13 @@ void wgpuCommandEncoderCopyBufferToBuffer(WGPUCommandEncoder commandEncoder,
                                           uint64_t           size) WGPU_FUNCTION_ATTRIBUTE {
     source->add_ref_internal();
     destination->add_ref_internal();
-    commandEncoder->commands_mixin.add(webgpu::Command{
+    commandEncoder->commands_mixin.add(loon::gpu::Command{
         .copy_buffer_to_buffer = {.src        = source,
                                   .dst        = destination,
                                   .src_offset = sourceOffset,
                                   .dst_offset = destinationOffset,
                                   .size       = size,},
-        .type                  = webgpu::CommandType::CopyBufferToBuffer,
+        .type                  = loon::gpu::CommandType::CopyBufferToBuffer,
     });
 }
 void wgpuCommandEncoderCopyBufferToTexture(WGPUCommandEncoder              commandEncoder,
@@ -1003,7 +1003,7 @@ void wgpuPipelineLayoutAddRef(WGPUPipelineLayout pipelineLayout) WGPU_FUNCTION_A
     pipelineLayout->add_ref();
 }
 void wgpuPipelineLayoutRelease(WGPUPipelineLayout pipelineLayout) WGPU_FUNCTION_ATTRIBUTE {
-    webgpu::release(pipelineLayout);
+    loon::gpu::release(pipelineLayout);
 }
 /** @} */
 
@@ -1072,7 +1072,7 @@ void wgpuQueueAddRef(WGPUQueue queue) WGPU_FUNCTION_ATTRIBUTE {
     queue->add_ref();
 }
 void wgpuQueueRelease(WGPUQueue queue) WGPU_FUNCTION_ATTRIBUTE {
-    webgpu::release(queue);
+    loon::gpu::release(queue);
 }
 /** @} */
 
@@ -1170,23 +1170,23 @@ void wgpuRenderPassEncoderDraw(WGPURenderPassEncoder renderPassEncoder,
                                uint32_t              instanceCount,
                                uint32_t              firstVertex,
                                uint32_t              firstInstance) WGPU_FUNCTION_ATTRIBUTE {
-    if (!webgpu::validate_draw(renderPassEncoder,
-                               vertexCount,
-                               instanceCount,
-                               firstVertex,
-                               firstInstance)) {
+    if (!loon::gpu::validate_draw(renderPassEncoder,
+                                  vertexCount,
+                                  instanceCount,
+                                  firstVertex,
+                                  firstInstance)) {
         return;
     }
 
     auto commands = renderPassEncoder->commands_mixin;
-    commands->add(webgpu::Command{
+    commands->add(loon::gpu::Command{
         .draw{
             .vertex_count   = vertexCount,
             .instance_count = instanceCount,
             .first_vertex   = firstVertex,
             .first_instance = firstInstance,
         },
-        .type = webgpu::CommandType::Draw,
+        .type = loon::gpu::CommandType::Draw,
     });
 }
 void wgpuRenderPassEncoderDrawIndexed(WGPURenderPassEncoder renderPassEncoder,
@@ -1196,7 +1196,7 @@ void wgpuRenderPassEncoderDrawIndexed(WGPURenderPassEncoder renderPassEncoder,
                                       int32_t               baseVertex,
                                       uint32_t              firstInstance) WGPU_FUNCTION_ATTRIBUTE {
     auto commands = renderPassEncoder->commands_mixin;
-    commands->add(webgpu::Command{
+    commands->add(loon::gpu::Command{
         .draw_indexed{
             .index_count    = indexCount,
             .instance_count = instanceCount,
@@ -1204,7 +1204,7 @@ void wgpuRenderPassEncoderDrawIndexed(WGPURenderPassEncoder renderPassEncoder,
             .base_vertex    = static_cast<uint32_t>(baseVertex),
             .first_instance = firstInstance,
         },
-        .type = webgpu::CommandType::DrawIndexed,
+        .type = loon::gpu::CommandType::DrawIndexed,
     });
 }
 
@@ -1216,14 +1216,14 @@ void wgpuRenderPassEncoderDrawIndirect(WGPURenderPassEncoder renderPassEncoder,
                                        uint64_t indirectOffset) WGPU_FUNCTION_ATTRIBUTE {}
 
 void wgpuRenderPassEncoderEnd(WGPURenderPassEncoder renderPassEncoder) WGPU_FUNCTION_ATTRIBUTE {
-    if (!webgpu::validate(renderPassEncoder)) { return; }
+    if (!loon::gpu::validate(renderPassEncoder)) { return; }
 
     auto commands = renderPassEncoder->commands_mixin;
-    commands->add(webgpu::Command{
+    commands->add(loon::gpu::Command{
         .end_render_pass{},
-        .type = webgpu::CommandType::EndRenderPass,
+        .type = loon::gpu::CommandType::EndRenderPass,
     });
-    commands->state = webgpu::CommandEncodingState::Open;
+    commands->state = loon::gpu::CommandEncodingState::Open;
 }
 
 void wgpuRenderPassEncoderEndOcclusionQuery(WGPURenderPassEncoder renderPassEncoder)
@@ -1256,33 +1256,33 @@ void wgpuRenderPassEncoderSetIndexBuffer(WGPURenderPassEncoder renderPassEncoder
     auto commands = renderPassEncoder->commands_mixin;
     if (buffer) {
         renderPassEncoder->render_commands.usage_scope.add(buffer,
-                                                           webgpu::ResourceUsage::kUsageInput,
+                                                           loon::gpu::ResourceUsage::kUsageInput,
                                                            WGPUShaderStage_Vertex);
         buffer->add_ref_internal();
     }
-    commands->add(webgpu::Command {
+    commands->add(loon::gpu::Command {
         .set_index_buffer = {
             .buffer = buffer,
             .format = format,
             .offset = offset,
             .size   = size,
         },
-        .type = webgpu::CommandType::SetIndexBuffer,
+        .type = loon::gpu::CommandType::SetIndexBuffer,
     });
 }
 void wgpuRenderPassEncoderSetLabel(WGPURenderPassEncoder renderPassEncoder,
                                    WGPUStringView        label) WGPU_FUNCTION_ATTRIBUTE {}
 void wgpuRenderPassEncoderSetPipeline(WGPURenderPassEncoder renderPassEncoder,
                                       WGPURenderPipeline    pipeline) WGPU_FUNCTION_ATTRIBUTE {
-    if (!webgpu::validate(renderPassEncoder, pipeline)) { return; }
+    if (!loon::gpu::validate(renderPassEncoder, pipeline)) { return; }
 
     auto commands = renderPassEncoder->commands_mixin;
     pipeline->add_ref_internal();
-    commands->add(webgpu::Command{
+    commands->add(loon::gpu::Command{
         .set_render_pipeline{
             .pipeline = pipeline,
         },
-        .type = webgpu::CommandType::SetRenderPipeline,
+        .type = loon::gpu::CommandType::SetRenderPipeline,
     });
 }
 void wgpuRenderPassEncoderSetScissorRect(WGPURenderPassEncoder renderPassEncoder,
@@ -1301,18 +1301,18 @@ void wgpuRenderPassEncoderSetVertexBuffer(WGPURenderPassEncoder    renderPassEnc
 
     if (buffer) {
         renderPassEncoder->render_commands.usage_scope.add(buffer,
-                                                           webgpu::ResourceUsage::kUsageInput,
+                                                           loon::gpu::ResourceUsage::kUsageInput,
                                                            WGPUShaderStage_Vertex);
         buffer->add_ref_internal();
     }
-    commands->add(webgpu::Command{
+    commands->add(loon::gpu::Command{
         .set_vertex_buffer = {
             .slot = slot,
             .buffer = buffer,
             .offset = offset,
             .size = size,
         },
-        .type = webgpu::CommandType::SetVertexBuffer,
+        .type = loon::gpu::CommandType::SetVertexBuffer,
     });
 }
 /**
@@ -1328,10 +1328,10 @@ void wgpuRenderPassEncoderSetViewport(WGPURenderPassEncoder renderPassEncoder,
                                       float                 min_depth,
                                       float                 max_depth) WGPU_FUNCTION_ATTRIBUTE {
     // TODO: Viewport validation
-    // if (!webgpu::validate(renderPassEncoder, pipeline)) { return; }
+    // if (!loon::gpu::validate(renderPassEncoder, pipeline)) { return; }
 
     auto commands = renderPassEncoder->commands_mixin;
-    commands->add(webgpu::Command{
+    commands->add(loon::gpu::Command{
         .set_viewport{
             .x         = x,
             .y         = y,
@@ -1340,14 +1340,14 @@ void wgpuRenderPassEncoderSetViewport(WGPURenderPassEncoder renderPassEncoder,
             .min_depth = min_depth,
             .max_depth = max_depth,
         },
-        .type = webgpu::CommandType::SetViewport,
+        .type = loon::gpu::CommandType::SetViewport,
     });
 }
 void wgpuRenderPassEncoderAddRef(WGPURenderPassEncoder renderPassEncoder) WGPU_FUNCTION_ATTRIBUTE {
     renderPassEncoder->add_ref();
 }
 void wgpuRenderPassEncoderRelease(WGPURenderPassEncoder renderPassEncoder) WGPU_FUNCTION_ATTRIBUTE {
-    webgpu::release(renderPassEncoder);
+    loon::gpu::release(renderPassEncoder);
 }
 /** @} */
 
@@ -1377,7 +1377,7 @@ void wgpuRenderPipelineAddRef(WGPURenderPipeline renderPipeline) WGPU_FUNCTION_A
 }
 
 void wgpuRenderPipelineRelease(WGPURenderPipeline renderPipeline) WGPU_FUNCTION_ATTRIBUTE {
-    webgpu::release(renderPipeline);
+    loon::gpu::release(renderPipeline);
 }
 
 /** @} */
@@ -1410,16 +1410,16 @@ WGPUFuture wgpuShaderModuleGetCompilationInfo(WGPUShaderModule                sh
                                               WGPUCompilationInfoCallbackInfo callbackInfo)
     WGPU_FUNCTION_ATTRIBUTE {
     // We don't really have compilation for shader modules since we're taking just SPIRV.
-    webgpu::CallbackData* cb;
-    WGPUFuture            result = shaderModule->device->get_instance()->create_future(&cb);
+    loon::gpu::CallbackData* cb;
+    WGPUFuture               result = shaderModule->device->get_instance()->create_future(&cb);
 
-    *cb = webgpu::CallbackData{
+    *cb = loon::gpu::CallbackData{
         .callback  = (WGPUProc)callbackInfo.callback,
         .mode      = callbackInfo.mode,
         .userdata1 = callbackInfo.userdata1,
         .userdata2 = callbackInfo.userdata2,
         .message   = WGPU_STRING_VIEW_INIT,
-        .type      = webgpu::CallbackType::CompilationInfo,
+        .type      = loon::gpu::CallbackType::CompilationInfo,
         .compilation_info
         = {.status = WGPUCompilationInfoRequestStatus_Success,
            .info   = {.nextInChain = nullptr, .messageCount = 0, .messages = nullptr}},
@@ -1525,7 +1525,7 @@ void wgpuTextureAddRef(WGPUTexture texture) WGPU_FUNCTION_ATTRIBUTE {
     texture->add_ref();
 }
 void wgpuTextureRelease(WGPUTexture texture) WGPU_FUNCTION_ATTRIBUTE {
-    webgpu::release(texture);
+    loon::gpu::release(texture);
 }
 /** @} */
 
@@ -1547,5 +1547,5 @@ void wgpuTextureViewAddRef(WGPUTextureView textureView) WGPU_FUNCTION_ATTRIBUTE 
 }
 
 void wgpuTextureViewRelease(WGPUTextureView textureView) WGPU_FUNCTION_ATTRIBUTE {
-    webgpu::release(textureView);
+    loon::gpu::release(textureView);
 }

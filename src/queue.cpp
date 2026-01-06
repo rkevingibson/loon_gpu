@@ -174,9 +174,9 @@ void WGPUQueueImpl::submit(size_t command_count, WGPUCommandBuffer const* comman
         auto synchronization_cmd_buffer = commands[cmd_idx]->vk_cmd_buffers[0];
 
         bool synchronization_needed
-            = webgpu::record_pre_submit_synchronization_cmd(synchronization_cmd_buffer,
-                                                            device,
-                                                            commands[cmd_idx]->first_usages);
+            = loon::gpu::record_pre_submit_synchronization_cmd(synchronization_cmd_buffer,
+                                                               device,
+                                                               commands[cmd_idx]->first_usages);
 
         commands[cmd_idx]->last_usages.update_resource_last_usages();
         commands[cmd_idx]->submitted_timeline_value = on_submission_timeline_value;
@@ -298,7 +298,7 @@ WGPUStatus WGPUQueueImpl::present(WGPUTexture    texture,
             .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
             .dstStageMask  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
             .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT,
-            .oldLayout = webgpu::image_layout_from_usage(texture->last_submitted_usage),
+            .oldLayout = loon::gpu::image_layout_from_usage(texture->last_submitted_usage),
             .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
             .srcQueueFamilyIndex = m_queue_family,
             .dstQueueFamilyIndex = m_queue_family,
@@ -311,7 +311,7 @@ WGPUStatus WGPUQueueImpl::present(WGPUTexture    texture,
                 .layerCount = 1,
             },
         };
-        texture->last_submitted_usage = webgpu::kUsagePresent;
+        texture->last_submitted_usage = loon::gpu::kUsagePresent;
         VkDependencyInfo dependency_info{
             .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
             .pNext                    = nullptr,
