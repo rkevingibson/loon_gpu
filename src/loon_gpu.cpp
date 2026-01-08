@@ -2,6 +2,7 @@
 
 #include "containers.h"
 #include "gpu_to_vk.h"
+#include "utilities.h"
 #include "vma_usage.h"
 #include "volk.h"
 #include "vulkan/vulkan_core.h"
@@ -41,7 +42,7 @@ static VkPipelineLayout      create_default_graphics_layout(VkDevice            
                                                             VkDescriptorSetLayout  set_layout);
 
 struct ThreadLocalState {
-    constexpr static size_t kArenaSize = 64ll * 1024;
+    constexpr static size_t kArenaSize = 256ll * 1024;
     loon::gpu::Allocator    allocator;
     MemoryBlock             arena_memory;
     loon::gpu::Arena        arena;
@@ -88,7 +89,7 @@ struct Device::Impl {
 
     // State objects
     Handle<DepthStencilState> createDepthStencilState(GpuDepthStencilDesc desc);
-    Handle<BlendState>        createBlendState(GpuBlendDesc desc);
+    Handle<BlendState>        createBlendState(BlendDesc desc);
     void                      freeDepthStencilState(Handle<DepthStencilState> state);
     void                      freeBlendState(Handle<BlendState> state);
 
@@ -225,9 +226,6 @@ PhysicalDeviceInfo select_physical_device(VkInstance    instance,
                                              extension_properties);
         // Need to check against the list of required extensions and make sure all required
         // extensions are available.
-        for (uint32_t i = 0; i < extension_count; ++i) {
-            printf("%s\n", extension_properties[i].extensionName);
-        }
         bool all_extensions_supported = true;
         for (size_t required_ext_idx = 0;
              required_ext_idx < loon::gpu::kRequiredDeviceExtensionsCount;
@@ -261,8 +259,8 @@ PhysicalDeviceInfo select_physical_device(VkInstance    instance,
             best_device_info = {
                 .device                     = physical_device,
                 .graphics_queue_family      = default_queue_family,
-                .async_compute_queue_family = dedicated_compute_family,
                 .transfer_queue_family      = dedicated_transfer_family,
+                .async_compute_queue_family = dedicated_compute_family,
             };
         }
 
@@ -271,8 +269,8 @@ PhysicalDeviceInfo select_physical_device(VkInstance    instance,
             best_device_info = {
                 .device                     = physical_device,
                 .graphics_queue_family      = default_queue_family,
-                .async_compute_queue_family = dedicated_compute_family,
                 .transfer_queue_family      = dedicated_transfer_family,
+                .async_compute_queue_family = dedicated_compute_family,
             };
         }
 
@@ -281,8 +279,8 @@ PhysicalDeviceInfo select_physical_device(VkInstance    instance,
             best_device_info = {
                 .device                     = physical_device,
                 .graphics_queue_family      = default_queue_family,
-                .async_compute_queue_family = dedicated_compute_family,
                 .transfer_queue_family      = dedicated_transfer_family,
+                .async_compute_queue_family = dedicated_compute_family,
             };
         }
     }
@@ -735,7 +733,7 @@ Handle<Pipeline> Device::Impl::createGraphicsPipeline(ShaderSource vertex,
 
     for (auto& t : desc.colorTargets) {
         // const auto attachment_state = loon::gpu::bridge(target);
-        // color_blend_attachment_states.push(attachment_state);
+        color_blend_attachment_states.push(loon::gpu::bridge(desc.blendstate));
         color_attachment_formats.push(loon::gpu::bridge(t.format));
     }
 
@@ -804,6 +802,14 @@ Handle<Pipeline> Device::Impl::createGraphicsPipeline(ShaderSource vertex,
         VK_DYNAMIC_STATE_STENCIL_REFERENCE,
     };
 
+    VkPipelineViewportStateCreateInfo viewport_state{
+        .sType         = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .pNext         = nullptr,
+        .flags         = 0,
+        .viewportCount = 0,
+        .scissorCount  = 0,
+    };
+
     VkPipelineDynamicStateCreateInfo dynamic_state{
         .sType             = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
         .pNext             = nullptr,
@@ -831,7 +837,7 @@ Handle<Pipeline> Device::Impl::createGraphicsPipeline(ShaderSource vertex,
         .pVertexInputState   = &vertex_input_state,
         .pInputAssemblyState = &input_assembly_state,
         .pTessellationState  = nullptr,
-        .pViewportState      = nullptr,  // Viewport state is dynamic
+        .pViewportState      = &viewport_state,  // Viewport state is dynamic
         .pRasterizationState = &rasterization_state,
         .pMultisampleState   = &multisample_state,
         .pDepthStencilState  = nullptr,
@@ -951,7 +957,8 @@ bool Device::Impl::chk(VkResult result) {
             break;
         case VK_ERROR_FRAGMENTED_POOL: log(LogLevel_Error, "VK_ERROR_FRAGMENTED_POOL"); break;
         case VK_ERROR_UNKNOWN: log(LogLevel_Error, "VK_ERROR_UNKNOWN"); break;
-        case VK_ERROR_VALIDATION_FAILED: log(LogLevel_Error, "VK_ERROR_VALIDATION_FAILED"); break;
+        // case VK_ERROR_VALIDATION_FAILED: log(LogLevel_Error, "VK_ERROR_VALIDATION_FAILED");
+        // break;
         case VK_ERROR_OUT_OF_POOL_MEMORY: log(LogLevel_Error, "VK_ERROR_OUT_OF_POOL_MEMORY"); break;
         case VK_ERROR_INVALID_EXTERNAL_HANDLE:
             log(LogLevel_Error, "VK_ERROR_INVALID_EXTERNAL_HANDLE");
@@ -963,7 +970,7 @@ bool Device::Impl::chk(VkResult result) {
         case VK_PIPELINE_COMPILE_REQUIRED:
             log(LogLevel_Error, "VK_PIPELINE_COMPILE_REQUIRED");
             break;
-        case VK_ERROR_NOT_PERMITTED: log(LogLevel_Error, "VK_ERROR_NOT_PERMITTED"); break;
+        // case VK_ERROR_NOT_PERMITTED: log(LogLevel_Error, "VK_ERROR_NOT_PERMITTED"); break;
         case VK_ERROR_SURFACE_LOST_KHR: log(LogLevel_Error, "VK_ERROR_SURFACE_LOST_KHR"); break;
         case VK_ERROR_NATIVE_WINDOW_IN_USE_KHR:
             log(LogLevel_Error, "VK_ERROR_NATIVE_WINDOW_IN_USE_KHR");
@@ -995,9 +1002,9 @@ bool Device::Impl::chk(VkResult result) {
         case VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT:
             log(LogLevel_Error, "VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT");
             break;
-        case VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT:
-            log(LogLevel_Error, "VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT");
-            break;
+        // case VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT:
+        //     log(LogLevel_Error, "VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT");
+        //     break;
         case VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT:
             log(LogLevel_Error, "VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT");
             break;
@@ -1016,12 +1023,12 @@ bool Device::Impl::chk(VkResult result) {
         case VK_INCOMPATIBLE_SHADER_BINARY_EXT:
             log(LogLevel_Error, "VK_INCOMPATIBLE_SHADER_BINARY_EXT");
             break;
-        case VK_PIPELINE_BINARY_MISSING_KHR:
-            log(LogLevel_Error, "VK_PIPELINE_BINARY_MISSING_KHR");
-            break;
-        case VK_ERROR_NOT_ENOUGH_SPACE_KHR:
-            log(LogLevel_Error, "VK_ERROR_NOT_ENOUGH_SPACE_KHR");
-            break;
+        // case VK_PIPELINE_BINARY_MISSING_KHR:
+        //     log(LogLevel_Error, "VK_PIPELINE_BINARY_MISSING_KHR");
+        //     break;
+        // case VK_ERROR_NOT_ENOUGH_SPACE_KHR:
+        //     log(LogLevel_Error, "VK_ERROR_NOT_ENOUGH_SPACE_KHR");
+        //     break;
         default: log(LogLevel_Error, "Unknown error"_sv); break;
     }
 

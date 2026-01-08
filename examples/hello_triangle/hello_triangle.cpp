@@ -99,6 +99,8 @@ HelloTriangle::HelloTriangle(const WindowState& window_state) {
     const auto   vertex_spirv   = get_spirv(shader.get(), "vertexMain");
     const auto   fragment_spirv = get_spirv(shader.get(), "fragmentMain");
 
+    m_swapchain_format = loon::gpu::FORMAT_RGBA8UnormSrgb;
+
     m_render_pipeline = m_device.createGraphicsPipeline(
         {
             .spirv       = Span(vertex_spirv.data(), vertex_spirv.size()).as_bytes(),

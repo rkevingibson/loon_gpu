@@ -445,7 +445,7 @@ struct GpuDepthStencilDesc {
     Stencil     stencilBack;
 };
 
-struct GpuBlendDesc {
+struct BlendDesc {
     BLEND   colorOp        = BLEND_ADD;
     FACTOR  srcColorFactor = FACTOR_ONE;
     FACTOR  dstColorFactor = FACTOR_ZERO;
@@ -469,7 +469,7 @@ struct RasterDesc {
     FORMAT                  depthFormat               = FORMAT_NONE;
     FORMAT                  stencilFormat             = FORMAT_NONE;
     Span<const ColorTarget> colorTargets              = {};
-    GpuBlendDesc*           blendstate                = nullptr;  // optional embedded blend state
+    BlendDesc               blendstate                = {};
 };
 
 struct RenderAttachment {
@@ -556,7 +556,7 @@ class Device {
 
     // State objects
     Handle<DepthStencilState> createDepthStencilState(GpuDepthStencilDesc desc);
-    Handle<BlendState>        createBlendState(GpuBlendDesc desc);
+    Handle<BlendState>        createBlendState(BlendDesc desc);
     void                      freeDepthStencilState(Handle<DepthStencilState> state);
     void                      freeBlendState(Handle<BlendState> state);
 

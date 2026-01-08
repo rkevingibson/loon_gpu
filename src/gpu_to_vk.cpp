@@ -391,39 +391,26 @@ VkPrimitiveTopology bridge(TOPOLOGY topo) {
 //     }
 // }
 
-// VkBlendFactor bridge(WGPUBlendFactor factor) {
-//     switch (factor) {
-//         case WGPUBlendFactor_Zero: return VK_BLEND_FACTOR_ZERO;
-//         case WGPUBlendFactor_One: return VK_BLEND_FACTOR_ONE;
-//         case WGPUBlendFactor_Src: return VK_BLEND_FACTOR_SRC_COLOR;
-//         case WGPUBlendFactor_OneMinusSrc: return VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
-//         case WGPUBlendFactor_SrcAlpha: return VK_BLEND_FACTOR_SRC_ALPHA;
-//         case WGPUBlendFactor_OneMinusSrcAlpha: return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-//         case WGPUBlendFactor_Dst: return VK_BLEND_FACTOR_DST_COLOR;
-//         case WGPUBlendFactor_OneMinusDst: return VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR;
-//         case WGPUBlendFactor_DstAlpha: return VK_BLEND_FACTOR_DST_ALPHA;
-//         case WGPUBlendFactor_OneMinusDstAlpha: return VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
-//         case WGPUBlendFactor_SrcAlphaSaturated: return VK_BLEND_FACTOR_SRC_ALPHA_SATURATE;
-//         case WGPUBlendFactor_Constant: return VK_BLEND_FACTOR_CONSTANT_COLOR;
-//         case WGPUBlendFactor_OneMinusConstant: return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR;
-//         case WGPUBlendFactor_Src1: return VK_BLEND_FACTOR_SRC1_COLOR;
-//         case WGPUBlendFactor_OneMinusSrc1: return VK_BLEND_FACTOR_ONE_MINUS_SRC1_COLOR;
-//         case WGPUBlendFactor_Src1Alpha: return VK_BLEND_FACTOR_SRC1_ALPHA;
-//         case WGPUBlendFactor_OneMinusSrc1Alpha: return VK_BLEND_FACTOR_ONE_MINUS_SRC1_ALPHA;
-//         default: return VK_BLEND_FACTOR_MAX_ENUM;
-//     }
-// }
+VkBlendFactor bridge(FACTOR factor) {
+    switch (factor) {
+        case FACTOR_ZERO: return VK_BLEND_FACTOR_ZERO;
+        case FACTOR_ONE: return VK_BLEND_FACTOR_ONE;
+        case FACTOR_SRC_COLOR: return VK_BLEND_FACTOR_SRC_COLOR;
+        case FACTOR_DST_COLOR: return VK_BLEND_FACTOR_DST_COLOR;
+        case FACTOR_SRC_ALPHA: return VK_BLEND_FACTOR_SRC_ALPHA;
+    }
+}
 
-// VkBlendOp bridge(WGPUBlendOperation op) {
-//     switch (op) {
-//         case WGPUBlendOperation_Add: return VK_BLEND_OP_ADD;
-//         case WGPUBlendOperation_Subtract: return VK_BLEND_OP_SUBTRACT;
-//         case WGPUBlendOperation_ReverseSubtract: return VK_BLEND_OP_REVERSE_SUBTRACT;
-//         case WGPUBlendOperation_Min: return VK_BLEND_OP_MIN;
-//         case WGPUBlendOperation_Max: return VK_BLEND_OP_MAX;
-//         default: return VK_BLEND_OP_MAX_ENUM;
-//     }
-// }
+VkBlendOp bridge(BLEND op) {
+    switch (op) {
+        case BLEND_ADD: return VK_BLEND_OP_ADD;
+        case BLEND_SUBTRACT: return VK_BLEND_OP_SUBTRACT;
+        case BLEND_REV_SUBTRACT: return VK_BLEND_OP_REVERSE_SUBTRACT;
+        case BLEND_MIN: return VK_BLEND_OP_MIN;
+        case BLEND_MAX: return VK_BLEND_OP_MAX;
+    }
+}
+
 
 // VkColorComponentFlags bridge(WGPUColorWriteMask mask) {
 //     VkColorComponentFlags result = 0;
@@ -434,20 +421,18 @@ VkPrimitiveTopology bridge(TOPOLOGY topo) {
 //     return result;
 // }
 
-// VkPipelineColorBlendAttachmentState bridge(const WGPUColorTargetState& state) {
-//     const bool blend = state.blend != nullptr;
-//     return VkPipelineColorBlendAttachmentState{
-//         .blendEnable         = blend,
-//         .srcColorBlendFactor = blend ? bridge(state.blend->color.srcFactor) :
-//         VK_BLEND_FACTOR_ZERO, .dstColorBlendFactor = blend ? bridge(state.blend->color.dstFactor)
-//         : VK_BLEND_FACTOR_ZERO, .colorBlendOp        = blend ?
-//         bridge(state.blend->color.operation) : VK_BLEND_OP_ADD, .srcAlphaBlendFactor = blend ?
-//         bridge(state.blend->alpha.srcFactor) : VK_BLEND_FACTOR_ZERO, .dstAlphaBlendFactor = blend
-//         ? bridge(state.blend->alpha.dstFactor) : VK_BLEND_FACTOR_ZERO, .alphaBlendOp        =
-//         blend ? bridge(state.blend->alpha.operation) : VK_BLEND_OP_ADD, .colorWriteMask      =
-//         bridge(state.writeMask),
-//     };
-// }
+VkPipelineColorBlendAttachmentState bridge(const BlendDesc& state) {
+    return VkPipelineColorBlendAttachmentState{
+        .blendEnable         = true,
+        .srcColorBlendFactor = bridge(state.srcColorFactor),
+        .dstColorBlendFactor = bridge(state.dstColorFactor),
+        .colorBlendOp        = bridge(state.colorOp),
+        .srcAlphaBlendFactor = bridge(state.srcAlphaFactor),
+        .dstAlphaBlendFactor = bridge(state.dstAlphaFactor),
+        .alphaBlendOp        = bridge(state.alphaOp),
+        .colorWriteMask      = state.colorWriteMask,
+    };
+}
 
 // VkStencilOp bridge(WGPUStencilOperation op) {
 //     switch (op) {

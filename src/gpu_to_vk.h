@@ -1,6 +1,5 @@
 #pragma once
 #include "gpu/loon_gpu.h"
-#include "utilities.h"
 #include "volk.h"
 
 
@@ -8,6 +7,7 @@ namespace loon::gpu {
 
 VkFormat bridge(FORMAT format);
 // WGPUTextureFormat bridge(VkFormat fmt);
+
 
 VkPrimitiveTopology bridge(TOPOLOGY topo);
 // VkCullModeFlags     bridge(WGPUCullMode cull);
@@ -30,7 +30,7 @@ VkPrimitiveTopology bridge(TOPOLOGY topo);
 // Stack<WGPUCompositeAlphaMode, 5> bridge_composite_alpha_mode(VkCompositeAlphaFlagsKHR flags);
 // VkCompositeAlphaFlagBitsKHR      bridge_composite_alpha_mode(WGPUCompositeAlphaMode mode);
 
-// VkPipelineColorBlendAttachmentState   bridge(const WGPUColorTargetState& state);
+VkPipelineColorBlendAttachmentState bridge(const BlendDesc& state);
 // VkPipelineDepthStencilStateCreateInfo bridge(const WGPUDepthStencilState& state);
 
 // VkAttachmentLoadOp  bridge(WGPULoadOp op);

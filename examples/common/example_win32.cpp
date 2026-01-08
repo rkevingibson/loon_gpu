@@ -130,7 +130,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     ShowWindow(window, SW_NORMAL);
     UpdateWindow(window);
 
-    ExampleName selected_example = ExampleName::HelloCube;
+    ExampleName selected_example = ExampleName::HelloTriangle;
 
     std::unique_ptr<Example> current_example = create_example(selected_example, window_state);
 
