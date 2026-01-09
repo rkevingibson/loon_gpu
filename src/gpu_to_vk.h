@@ -6,15 +6,15 @@
 namespace loon::gpu {
 
 VkFormat bridge(FORMAT format);
-// WGPUTextureFormat bridge(VkFormat fmt);
+FORMAT   bridge(VkFormat fmt);
 
 
 VkPrimitiveTopology bridge(TOPOLOGY topo);
 // VkCullModeFlags     bridge(WGPUCullMode cull);
 // VkFrontFace         bridge(WGPUFrontFace ff);
 // VkCompareOp         bridge(WGPUCompareFunction fn);
-// WGPUPresentMode     bridge(VkPresentModeKHR mode);
-// VkPresentModeKHR    bridge(WGPUPresentMode mode);
+PRESENT_MODE     bridge(VkPresentModeKHR mode);
+VkPresentModeKHR bridge(PRESENT_MODE mode);
 // VkImageViewType     bridge(WGPUTextureViewDimension dim);
 // VkImageAspectFlags  bridge(WGPUTextureAspect aspect);
 // VkIndexType         bridge(WGPUIndexFormat fmt);
@@ -23,8 +23,8 @@ VkPrimitiveTopology bridge(TOPOLOGY topo);
 
 // VkSampleCountFlagBits bridge_sample_count(uint32_t sample_count);
 
-// WGPUTextureUsage   bridge_usage_flags(VkImageUsageFlags flags);
-// VkImageUsageFlags  bridge_usage_flags(WGPUTextureUsage usage);
+USAGE_FLAGS       bridge_usage_flags(VkImageUsageFlags flags);
+VkImageUsageFlags bridge_usage_flags(USAGE_FLAGS usage);
 // VkBufferUsageFlags bridge_buffer_usage(WGPUBufferUsage usage);
 
 // Stack<WGPUCompositeAlphaMode, 5> bridge_composite_alpha_mode(VkCompositeAlphaFlagsKHR flags);

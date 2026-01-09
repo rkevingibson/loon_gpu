@@ -16,4 +16,6 @@ class HelloTriangle : public Example {
     Handle<Queue>    m_queue;
     FORMAT           m_swapchain_format;
     Handle<Pipeline> m_render_pipeline;
+
+    Handle<TextureHeap> m_texture_heap;
 };

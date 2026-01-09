@@ -23,40 +23,15 @@ static void LoonLogCallback(loon::gpu::LogLevel         lvl,
     fprintf(stderr, "%.*s", static_cast<int>(message.size()), message.data());
 }
 
-
-// static WGPUSurface create_surface(WGPUInstance instance, const WindowState& window_state) {
-// #if _WIN32
-
-//     WGPUSurfaceSourceWindowsHWND surface_source = WGPU_SURFACE_SOURCE_WINDOWS_HWND_INIT;
-//     surface_source.hwnd      = reinterpret_cast<void*>(window_state.native_window_handle);
-//     surface_source.hinstance = reinterpret_cast<void*>(window_state.native_instance_handle);
-// #elif __linux__
-// #    error "Unsupported platform currently"
-// #elif __APPLE__
-//     WGPUSurfaceSourceMetalLayer surface_source = WGPU_SURFACE_SOURCE_METAL_LAYER_INIT;
-//     surface_source.layer = reinterpret_cast<void*>(window_state.native_window_handle);
-// #endif
-
-
-//     WGPUSurfaceDescriptor surface_descriptor{
-//         .nextInChain = &surface_source.chain,
-//         .label       = "Hello Triangle Surface"_wsv,
-//     };
-
-//     WGPUSurface surface = wgpuInstanceCreateSurface(instance, &surface_descriptor);
-//     return surface;
-// }
-
-// static WGPUTextureFormat select_surface_format(
-//     const WGPUSurfaceCapabilities& surface_capabilities) {
-//     for (size_t format_idx = 0; format_idx < surface_capabilities.formatCount; ++format_idx) {
-//         if (surface_capabilities.formats[format_idx] == WGPUTextureFormat_BGRA8UnormSrgb) {
-//             // Choose 8 bit srgb if we have it
-//             return surface_capabilities.formats[format_idx];
-//         }
-//     }
-//     return surface_capabilities.formats[0];
-// }
+static FORMAT select_surface_format(const loon::gpu::SurfaceCapabilities& surface_capabilities) {
+    for (FORMAT f : surface_capabilities.formats) {
+        if (f == loon::gpu::FORMAT_RGBA8UnormSrgb) {
+            // Choose 8 bit srgb if we have it
+            return f;
+        }
+    }
+    return surface_capabilities.formats[0];
+}
 
 
 HelloTriangle::HelloTriangle(const WindowState& window_state) {
@@ -72,34 +47,21 @@ HelloTriangle::HelloTriangle(const WindowState& window_state) {
     });
 
     // TODO: Surface creation/configuration:
+    auto surface_capabilities = m_device.get_surface_capabilities();
+    m_swapchain_format        = select_surface_format(surface_capabilities);
 
-    // WGPUSurfaceCapabilities surface_capabilities = WGPU_SURFACE_CAPABILITIES_INIT;
-    // wgpuSurfaceGetCapabilities(m_surface, m_adapter, &surface_capabilities);
-    // WGPUTextureFormat surface_format = select_surface_format(surface_capabilities);
-    // m_swapchain_format               = surface_format;
-    // wgpuSurfaceCapabilitiesFreeMembers(surface_capabilities);
-
-    // WGPUSurfaceConfiguration surface_config{
-    //     .nextInChain     = nullptr,
-    //     .device          = m_device,
-    //     .format          = m_swapchain_format,
-    //     .usage           = WGPUTextureUsage_RenderAttachment,
-    //     .width           = window_state.width,
-    //     .height          = window_state.height,
-    //     .viewFormatCount = 0,
-    //     .viewFormats     = nullptr,
-    //     .alphaMode       = WGPUCompositeAlphaMode_Auto,
-    //     .presentMode     = WGPUPresentMode_Fifo,
-    // };
-    // wgpuSurfaceConfigure(m_surface, &surface_config);
+    m_device.configure_surface({
+        .format       = m_swapchain_format,
+        .usages       = loon::gpu::USAGE_COLOR_ATTACHMENT,
+        .width        = window_state.width,
+        .height       = window_state.height,
+        .present_mode = PRESENT_MODE_FIFO,
+    });
 
     // Load shaders and create render pipeline
-
     ShaderModule shader         = window_state.shader_loader->load_module("hello_triangle.slang");
     const auto   vertex_spirv   = get_spirv(shader.get(), "vertexMain");
     const auto   fragment_spirv = get_spirv(shader.get(), "fragmentMain");
-
-    m_swapchain_format = loon::gpu::FORMAT_RGBA8UnormSrgb;
 
     m_render_pipeline = m_device.createGraphicsPipeline(
         {
@@ -119,59 +81,36 @@ HelloTriangle::HelloTriangle(const WindowState& window_state) {
 
 HelloTriangle::~HelloTriangle() {
     m_device.freePipeline(m_render_pipeline);
-    // wgpuSurfaceUnconfigure(m_surface);
-    // wgpuSurfaceRelease(m_surface);
-
-    // wgpuQueueRelease(m_queue);
+    m_device.unconfigure_surface();
 }
 
 void HelloTriangle::Update(const WindowState& window) {
-    // WGPUSurfaceTexture surface_texture = WGPU_SURFACE_TEXTURE_INIT;
-    // wgpuSurfaceGetCurrentTexture(m_surface, &surface_texture);
+    auto surface_texture = m_device.get_current_texture();
+    if (surface_texture.status == loon::gpu::SurfaceTextureInfo::STATUS_OUT_OF_DATE) {
+        m_device.unconfigure_surface();
+        m_device.configure_surface({
+            .format       = m_swapchain_format,
+            .usages       = loon::gpu::USAGE_COLOR_ATTACHMENT,
+            .width        = window.width,
+            .height       = window.height,
+            .present_mode = PRESENT_MODE_FIFO,
+        });
 
-    // if (surface_texture.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal
-    //     || surface_texture.status == WGPUSurfaceGetCurrentTextureStatus_Outdated) {
-    //     wgpuSurfaceUnconfigure(m_surface);
-    //     WGPUSurfaceConfiguration surface_config{
-    //         .nextInChain     = nullptr,
-    //         .device          = m_device,
-    //         .format          = m_swapchain_format,
-    //         .usage           = WGPUTextureUsage_RenderAttachment,
-    //         .width           = window.width,
-    //         .height          = window.height,
-    //         .viewFormatCount = 0,
-    //         .viewFormats     = nullptr,
-    //         .alphaMode       = WGPUCompositeAlphaMode_Auto,
-    //         .presentMode     = WGPUPresentMode_Fifo,
-    //     };
-    //     wgpuSurfaceConfigure(m_surface, &surface_config);
-    //     return;
-    // } else if (surface_texture.status == WGPUSurfaceGetCurrentTextureStatus_Error) {
-    //     // Error, continue?
-    //     fprintf(stderr, "Failed to get Surface texture\n");
-    //     return;
-    // }
+        return;
+    } else if (surface_texture.status == loon::gpu::SurfaceTextureInfo::STATUS_ERROR) {
+        return;
+    }
 
-    // WGPUTextureViewDescriptor view_descriptor = {
-    //     .nextInChain     = nullptr,
-    //     .label           = "Swapchain view"_wsv,
-    //     .format          = m_swapchain_format,
-    //     .dimension       = WGPUTextureViewDimension_2D,
-    //     .baseMipLevel    = 0,
-    //     .mipLevelCount   = 1,
-    //     .baseArrayLayer  = 0,
-    //     .arrayLayerCount = 1,
-    //     .aspect          = WGPUTextureAspect_Undefined,
-    //     .usage           = WGPUTextureUsage_RenderAttachment,
-    // };
-    // WGPUTextureView swapchain_view
-    //     = wgpuTextureCreateView(surface_texture.texture, &view_descriptor);
+    auto swapchain_view = m_device.createTextureView(m_texture_heap,
+                                                     surface_texture.texture,
+                                                     TextureViewDesc{
+                                                         .format     = m_swapchain_format,
+                                                         .baseMip    = 0,
+                                                         .mipCount   = 1,
+                                                         .baseLayer  = 0,
+                                                         .layerCount = 1,
+                                                     });
 
-    // WGPUCommandEncoderDescriptor encoder_descriptor{
-    //     .nextInChain = nullptr,
-    //     .label       = "CommandEncoder"_wsv,
-    // };
-    // WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(m_device, &encoder_descriptor);
     auto commandBuffer = m_device.startCommandRecording(m_queue);
 
     // WGPURenderPassColorAttachment color_attachment{
@@ -201,12 +140,16 @@ void HelloTriangle::Update(const WindowState& window) {
     commandBuffer.draw(0, 0, 3, 1);
 
     commandBuffer.endRenderPass();
-    m_device.submit(m_queue, {commandBuffer});
+    m_device.submit(m_queue,
+                    commandBuffer,
+                    SemaphoreInfo{
+                        .semaphore = surface_texture.acquire_semaphore,
+                        .stage     = loon::gpu::STAGE_RASTER_COLOR_OUT,
+                    });
+
+    m_device.present();
 
 
-
-    // wgpuSurfacePresent(m_surface);
-
-    // wgpuTextureViewRelease(swapchain_view);
+    m_device.freeTextureView(m_texture_heap, swapchain_view);
     // wgpuTextureRelease(surface_texture.texture);
 }

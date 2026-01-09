@@ -105,107 +105,107 @@ VkFormat bridge(FORMAT format) {
     }
 }
 
-// WGPUTextureFormat bridge(VkFormat format) {
-//     switch (format) {
-//         case VK_FORMAT_UNDEFINED: return WGPUTextureFormat_Undefined;
-//         case VK_FORMAT_R8_UNORM: return WGPUTextureFormat_R8Unorm;
-//         case VK_FORMAT_R8_SNORM: return WGPUTextureFormat_R8Snorm;
-//         case VK_FORMAT_R8_UINT: return WGPUTextureFormat_R8Uint;
-//         case VK_FORMAT_R8_SINT: return WGPUTextureFormat_R8Sint;
-//         case VK_FORMAT_R16_UINT: return WGPUTextureFormat_R16Uint;
-//         case VK_FORMAT_R16_SINT: return WGPUTextureFormat_R16Sint;
-//         case VK_FORMAT_R16_SFLOAT: return WGPUTextureFormat_R16Float;
-//         case VK_FORMAT_R8G8_UNORM: return WGPUTextureFormat_RG8Unorm;
-//         case VK_FORMAT_R8G8_SNORM: return WGPUTextureFormat_RG8Snorm;
-//         case VK_FORMAT_R8G8_UINT: return WGPUTextureFormat_RG8Uint;
-//         case VK_FORMAT_R8G8_SINT: return WGPUTextureFormat_RG8Sint;
-//         case VK_FORMAT_R32_SFLOAT: return WGPUTextureFormat_R32Float;
-//         case VK_FORMAT_R32_UINT: return WGPUTextureFormat_R32Uint;
-//         case VK_FORMAT_R32_SINT: return WGPUTextureFormat_R32Sint;
-//         case VK_FORMAT_R16G16_UINT: return WGPUTextureFormat_RG16Uint;
-//         case VK_FORMAT_R16G16_SINT: return WGPUTextureFormat_RG16Sint;
-//         case VK_FORMAT_R16G16_SFLOAT: return WGPUTextureFormat_RG16Float;
-//         case VK_FORMAT_R8G8B8A8_UNORM: return WGPUTextureFormat_RGBA8Unorm;
-//         case VK_FORMAT_R8G8B8A8_SRGB: return WGPUTextureFormat_RGBA8UnormSrgb;
-//         case VK_FORMAT_R8G8B8A8_SNORM: return WGPUTextureFormat_RGBA8Snorm;
-//         case VK_FORMAT_R8G8B8A8_UINT: return WGPUTextureFormat_RGBA8Uint;
-//         case VK_FORMAT_R8G8B8A8_SINT: return WGPUTextureFormat_RGBA8Sint;
-//         case VK_FORMAT_B8G8R8A8_UNORM: return WGPUTextureFormat_BGRA8Unorm;
-//         case VK_FORMAT_B8G8R8A8_SRGB: return WGPUTextureFormat_BGRA8UnormSrgb;
-//         case VK_FORMAT_A2B10G10R10_UINT_PACK32: return WGPUTextureFormat_RGB10A2Uint;
-//         case VK_FORMAT_A2B10G10R10_UNORM_PACK32: return WGPUTextureFormat_RGB10A2Unorm;
-//         case VK_FORMAT_B10G11R11_UFLOAT_PACK32: return WGPUTextureFormat_RG11B10Ufloat;
-//         case VK_FORMAT_E5B9G9R9_UFLOAT_PACK32: return WGPUTextureFormat_RGB9E5Ufloat;
-//         case VK_FORMAT_R32G32_SFLOAT: return WGPUTextureFormat_RG32Float;
-//         case VK_FORMAT_R32G32_UINT: return WGPUTextureFormat_RG32Uint;
-//         case VK_FORMAT_R32G32_SINT: return WGPUTextureFormat_RG32Sint;
-//         case VK_FORMAT_R16G16B16A16_UINT: return WGPUTextureFormat_RGBA16Uint;
-//         case VK_FORMAT_R16G16B16A16_SINT: return WGPUTextureFormat_RGBA16Sint;
-//         case VK_FORMAT_R16G16B16A16_SFLOAT: return WGPUTextureFormat_RGBA16Float;
-//         case VK_FORMAT_R32G32B32A32_SFLOAT: return WGPUTextureFormat_RGBA32Float;
-//         case VK_FORMAT_R32G32B32A32_UINT: return WGPUTextureFormat_RGBA32Uint;
-//         case VK_FORMAT_R32G32B32A32_SINT: return WGPUTextureFormat_RGBA32Sint;
-//         case VK_FORMAT_S8_UINT: return WGPUTextureFormat_Stencil8;
-//         case VK_FORMAT_D16_UNORM: return WGPUTextureFormat_Depth16Unorm;
-//         case VK_FORMAT_X8_D24_UNORM_PACK32: return WGPUTextureFormat_Depth24Plus;
-//         case VK_FORMAT_D24_UNORM_S8_UINT: return WGPUTextureFormat_Depth24PlusStencil8;
-//         case VK_FORMAT_D32_SFLOAT: return WGPUTextureFormat_Depth32Float;
-//         case VK_FORMAT_D32_SFLOAT_S8_UINT: return WGPUTextureFormat_Depth32FloatStencil8;
-//         case VK_FORMAT_BC1_RGBA_UNORM_BLOCK: return WGPUTextureFormat_BC1RGBAUnorm;
-//         case VK_FORMAT_BC1_RGBA_SRGB_BLOCK: return WGPUTextureFormat_BC1RGBAUnormSrgb;
-//         case VK_FORMAT_BC2_UNORM_BLOCK: return WGPUTextureFormat_BC2RGBAUnorm;
-//         case VK_FORMAT_BC2_SRGB_BLOCK: return WGPUTextureFormat_BC2RGBAUnormSrgb;
-//         case VK_FORMAT_BC3_UNORM_BLOCK: return WGPUTextureFormat_BC3RGBAUnorm;
-//         case VK_FORMAT_BC3_SRGB_BLOCK: return WGPUTextureFormat_BC3RGBAUnormSrgb;
-//         case VK_FORMAT_BC4_UNORM_BLOCK: return WGPUTextureFormat_BC4RUnorm;
-//         case VK_FORMAT_BC4_SNORM_BLOCK: return WGPUTextureFormat_BC4RSnorm;
-//         case VK_FORMAT_BC5_UNORM_BLOCK: return WGPUTextureFormat_BC5RGUnorm;
-//         case VK_FORMAT_BC5_SNORM_BLOCK: return WGPUTextureFormat_BC5RGSnorm;
-//         case VK_FORMAT_BC6H_UFLOAT_BLOCK: return WGPUTextureFormat_BC6HRGBUfloat;
-//         case VK_FORMAT_BC6H_SFLOAT_BLOCK: return WGPUTextureFormat_BC6HRGBFloat;
-//         case VK_FORMAT_BC7_UNORM_BLOCK: return WGPUTextureFormat_BC7RGBAUnorm;
-//         case VK_FORMAT_BC7_SRGB_BLOCK: return WGPUTextureFormat_BC7RGBAUnormSrgb;
-//         case VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK: return WGPUTextureFormat_ETC2RGB8Unorm;
-//         case VK_FORMAT_ETC2_R8G8B8_SRGB_BLOCK: return WGPUTextureFormat_ETC2RGB8UnormSrgb;
-//         case VK_FORMAT_ETC2_R8G8B8A1_UNORM_BLOCK: return WGPUTextureFormat_ETC2RGB8A1Unorm;
-//         case VK_FORMAT_ETC2_R8G8B8A1_SRGB_BLOCK: return WGPUTextureFormat_ETC2RGB8A1UnormSrgb;
-//         case VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK: return WGPUTextureFormat_ETC2RGBA8Unorm;
-//         case VK_FORMAT_ETC2_R8G8B8A8_SRGB_BLOCK: return WGPUTextureFormat_ETC2RGBA8UnormSrgb;
-//         case VK_FORMAT_EAC_R11_UNORM_BLOCK: return WGPUTextureFormat_EACR11Unorm;
-//         case VK_FORMAT_EAC_R11_SNORM_BLOCK: return WGPUTextureFormat_EACR11Snorm;
-//         case VK_FORMAT_EAC_R11G11_UNORM_BLOCK: return WGPUTextureFormat_EACRG11Unorm;
-//         case VK_FORMAT_EAC_R11G11_SNORM_BLOCK: return WGPUTextureFormat_EACRG11Snorm;
-//         case VK_FORMAT_ASTC_4x4_UNORM_BLOCK: return WGPUTextureFormat_ASTC4x4Unorm;
-//         case VK_FORMAT_ASTC_4x4_SRGB_BLOCK: return WGPUTextureFormat_ASTC4x4UnormSrgb;
-//         case VK_FORMAT_ASTC_5x4_UNORM_BLOCK: return WGPUTextureFormat_ASTC5x4Unorm;
-//         case VK_FORMAT_ASTC_5x4_SRGB_BLOCK: return WGPUTextureFormat_ASTC5x4UnormSrgb;
-//         case VK_FORMAT_ASTC_5x5_UNORM_BLOCK: return WGPUTextureFormat_ASTC5x5Unorm;
-//         case VK_FORMAT_ASTC_5x5_SRGB_BLOCK: return WGPUTextureFormat_ASTC5x5UnormSrgb;
-//         case VK_FORMAT_ASTC_6x5_UNORM_BLOCK: return WGPUTextureFormat_ASTC6x5Unorm;
-//         case VK_FORMAT_ASTC_6x5_SRGB_BLOCK: return WGPUTextureFormat_ASTC6x5UnormSrgb;
-//         case VK_FORMAT_ASTC_6x6_UNORM_BLOCK: return WGPUTextureFormat_ASTC6x6Unorm;
-//         case VK_FORMAT_ASTC_6x6_SRGB_BLOCK: return WGPUTextureFormat_ASTC6x6UnormSrgb;
-//         case VK_FORMAT_ASTC_8x5_UNORM_BLOCK: return WGPUTextureFormat_ASTC8x5Unorm;
-//         case VK_FORMAT_ASTC_8x5_SRGB_BLOCK: return WGPUTextureFormat_ASTC8x5UnormSrgb;
-//         case VK_FORMAT_ASTC_8x6_UNORM_BLOCK: return WGPUTextureFormat_ASTC8x6Unorm;
-//         case VK_FORMAT_ASTC_8x6_SRGB_BLOCK: return WGPUTextureFormat_ASTC8x6UnormSrgb;
-//         case VK_FORMAT_ASTC_8x8_UNORM_BLOCK: return WGPUTextureFormat_ASTC8x8Unorm;
-//         case VK_FORMAT_ASTC_8x8_SRGB_BLOCK: return WGPUTextureFormat_ASTC8x8UnormSrgb;
-//         case VK_FORMAT_ASTC_10x5_UNORM_BLOCK: return WGPUTextureFormat_ASTC10x5Unorm;
-//         case VK_FORMAT_ASTC_10x5_SRGB_BLOCK: return WGPUTextureFormat_ASTC10x5UnormSrgb;
-//         case VK_FORMAT_ASTC_10x6_UNORM_BLOCK: return WGPUTextureFormat_ASTC10x6Unorm;
-//         case VK_FORMAT_ASTC_10x6_SRGB_BLOCK: return WGPUTextureFormat_ASTC10x6UnormSrgb;
-//         case VK_FORMAT_ASTC_10x8_UNORM_BLOCK: return WGPUTextureFormat_ASTC10x8Unorm;
-//         case VK_FORMAT_ASTC_10x8_SRGB_BLOCK: return WGPUTextureFormat_ASTC10x8UnormSrgb;
-//         case VK_FORMAT_ASTC_10x10_UNORM_BLOCK: return WGPUTextureFormat_ASTC10x10Unorm;
-//         case VK_FORMAT_ASTC_10x10_SRGB_BLOCK: return WGPUTextureFormat_ASTC10x10UnormSrgb;
-//         case VK_FORMAT_ASTC_12x10_UNORM_BLOCK: return WGPUTextureFormat_ASTC12x10Unorm;
-//         case VK_FORMAT_ASTC_12x10_SRGB_BLOCK: return WGPUTextureFormat_ASTC12x10UnormSrgb;
-//         case VK_FORMAT_ASTC_12x12_UNORM_BLOCK: return WGPUTextureFormat_ASTC12x12Unorm;
-//         case VK_FORMAT_ASTC_12x12_SRGB_BLOCK: return WGPUTextureFormat_ASTC12x12UnormSrgb;
-//         default: return WGPUTextureFormat_Force32;
-//     }
-// }
+FORMAT bridge(VkFormat format) {
+    switch (format) {
+        case VK_FORMAT_UNDEFINED: return FORMAT_NONE;
+        case VK_FORMAT_R8_UNORM: return FORMAT_R8Unorm;
+        case VK_FORMAT_R8_SNORM: return FORMAT_R8Snorm;
+        case VK_FORMAT_R8_UINT: return FORMAT_R8Uint;
+        case VK_FORMAT_R8_SINT: return FORMAT_R8Sint;
+        case VK_FORMAT_R16_UINT: return FORMAT_R16Uint;
+        case VK_FORMAT_R16_SINT: return FORMAT_R16Sint;
+        case VK_FORMAT_R16_SFLOAT: return FORMAT_R16Float;
+        case VK_FORMAT_R8G8_UNORM: return FORMAT_RG8Unorm;
+        case VK_FORMAT_R8G8_SNORM: return FORMAT_RG8Snorm;
+        case VK_FORMAT_R8G8_UINT: return FORMAT_RG8Uint;
+        case VK_FORMAT_R8G8_SINT: return FORMAT_RG8Sint;
+        case VK_FORMAT_R32_SFLOAT: return FORMAT_R32Float;
+        case VK_FORMAT_R32_UINT: return FORMAT_R32Uint;
+        case VK_FORMAT_R32_SINT: return FORMAT_R32Sint;
+        case VK_FORMAT_R16G16_UINT: return FORMAT_RG16Uint;
+        case VK_FORMAT_R16G16_SINT: return FORMAT_RG16Sint;
+        case VK_FORMAT_R16G16_SFLOAT: return FORMAT_RG16Float;
+        case VK_FORMAT_R8G8B8A8_UNORM: return FORMAT_RGBA8Unorm;
+        case VK_FORMAT_R8G8B8A8_SRGB: return FORMAT_RGBA8UnormSrgb;
+        case VK_FORMAT_R8G8B8A8_SNORM: return FORMAT_RGBA8Snorm;
+        case VK_FORMAT_R8G8B8A8_UINT: return FORMAT_RGBA8Uint;
+        case VK_FORMAT_R8G8B8A8_SINT: return FORMAT_RGBA8Sint;
+        case VK_FORMAT_B8G8R8A8_UNORM: return FORMAT_BGRA8Unorm;
+        case VK_FORMAT_B8G8R8A8_SRGB: return FORMAT_BGRA8UnormSrgb;
+        case VK_FORMAT_A2B10G10R10_UINT_PACK32: return FORMAT_RGB10A2Uint;
+        case VK_FORMAT_A2B10G10R10_UNORM_PACK32: return FORMAT_RGB10A2Unorm;
+        case VK_FORMAT_B10G11R11_UFLOAT_PACK32: return FORMAT_RG11B10Ufloat;
+        case VK_FORMAT_E5B9G9R9_UFLOAT_PACK32: return FORMAT_RGB9E5Ufloat;
+        case VK_FORMAT_R32G32_SFLOAT: return FORMAT_RG32Float;
+        case VK_FORMAT_R32G32_UINT: return FORMAT_RG32Uint;
+        case VK_FORMAT_R32G32_SINT: return FORMAT_RG32Sint;
+        case VK_FORMAT_R16G16B16A16_UINT: return FORMAT_RGBA16Uint;
+        case VK_FORMAT_R16G16B16A16_SINT: return FORMAT_RGBA16Sint;
+        case VK_FORMAT_R16G16B16A16_SFLOAT: return FORMAT_RGBA16Float;
+        case VK_FORMAT_R32G32B32A32_SFLOAT: return FORMAT_RGBA32Float;
+        case VK_FORMAT_R32G32B32A32_UINT: return FORMAT_RGBA32Uint;
+        case VK_FORMAT_R32G32B32A32_SINT: return FORMAT_RGBA32Sint;
+        case VK_FORMAT_S8_UINT: return FORMAT_Stencil8;
+        case VK_FORMAT_D16_UNORM: return FORMAT_Depth16Unorm;
+        case VK_FORMAT_X8_D24_UNORM_PACK32: return FORMAT_Depth24Plus;
+        case VK_FORMAT_D24_UNORM_S8_UINT: return FORMAT_Depth24PlusStencil8;
+        case VK_FORMAT_D32_SFLOAT: return FORMAT_Depth32Float;
+        case VK_FORMAT_D32_SFLOAT_S8_UINT: return FORMAT_Depth32FloatStencil8;
+        case VK_FORMAT_BC1_RGBA_UNORM_BLOCK: return FORMAT_BC1RGBAUnorm;
+        case VK_FORMAT_BC1_RGBA_SRGB_BLOCK: return FORMAT_BC1RGBAUnormSrgb;
+        case VK_FORMAT_BC2_UNORM_BLOCK: return FORMAT_BC2RGBAUnorm;
+        case VK_FORMAT_BC2_SRGB_BLOCK: return FORMAT_BC2RGBAUnormSrgb;
+        case VK_FORMAT_BC3_UNORM_BLOCK: return FORMAT_BC3RGBAUnorm;
+        case VK_FORMAT_BC3_SRGB_BLOCK: return FORMAT_BC3RGBAUnormSrgb;
+        case VK_FORMAT_BC4_UNORM_BLOCK: return FORMAT_BC4RUnorm;
+        case VK_FORMAT_BC4_SNORM_BLOCK: return FORMAT_BC4RSnorm;
+        case VK_FORMAT_BC5_UNORM_BLOCK: return FORMAT_BC5RGUnorm;
+        case VK_FORMAT_BC5_SNORM_BLOCK: return FORMAT_BC5RGSnorm;
+        case VK_FORMAT_BC6H_UFLOAT_BLOCK: return FORMAT_BC6HRGBUfloat;
+        case VK_FORMAT_BC6H_SFLOAT_BLOCK: return FORMAT_BC6HRGBFloat;
+        case VK_FORMAT_BC7_UNORM_BLOCK: return FORMAT_BC7RGBAUnorm;
+        case VK_FORMAT_BC7_SRGB_BLOCK: return FORMAT_BC7RGBAUnormSrgb;
+        case VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK: return FORMAT_ETC2RGB8Unorm;
+        case VK_FORMAT_ETC2_R8G8B8_SRGB_BLOCK: return FORMAT_ETC2RGB8UnormSrgb;
+        case VK_FORMAT_ETC2_R8G8B8A1_UNORM_BLOCK: return FORMAT_ETC2RGB8A1Unorm;
+        case VK_FORMAT_ETC2_R8G8B8A1_SRGB_BLOCK: return FORMAT_ETC2RGB8A1UnormSrgb;
+        case VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK: return FORMAT_ETC2RGBA8Unorm;
+        case VK_FORMAT_ETC2_R8G8B8A8_SRGB_BLOCK: return FORMAT_ETC2RGBA8UnormSrgb;
+        case VK_FORMAT_EAC_R11_UNORM_BLOCK: return FORMAT_EACR11Unorm;
+        case VK_FORMAT_EAC_R11_SNORM_BLOCK: return FORMAT_EACR11Snorm;
+        case VK_FORMAT_EAC_R11G11_UNORM_BLOCK: return FORMAT_EACRG11Unorm;
+        case VK_FORMAT_EAC_R11G11_SNORM_BLOCK: return FORMAT_EACRG11Snorm;
+        case VK_FORMAT_ASTC_4x4_UNORM_BLOCK: return FORMAT_ASTC4x4Unorm;
+        case VK_FORMAT_ASTC_4x4_SRGB_BLOCK: return FORMAT_ASTC4x4UnormSrgb;
+        case VK_FORMAT_ASTC_5x4_UNORM_BLOCK: return FORMAT_ASTC5x4Unorm;
+        case VK_FORMAT_ASTC_5x4_SRGB_BLOCK: return FORMAT_ASTC5x4UnormSrgb;
+        case VK_FORMAT_ASTC_5x5_UNORM_BLOCK: return FORMAT_ASTC5x5Unorm;
+        case VK_FORMAT_ASTC_5x5_SRGB_BLOCK: return FORMAT_ASTC5x5UnormSrgb;
+        case VK_FORMAT_ASTC_6x5_UNORM_BLOCK: return FORMAT_ASTC6x5Unorm;
+        case VK_FORMAT_ASTC_6x5_SRGB_BLOCK: return FORMAT_ASTC6x5UnormSrgb;
+        case VK_FORMAT_ASTC_6x6_UNORM_BLOCK: return FORMAT_ASTC6x6Unorm;
+        case VK_FORMAT_ASTC_6x6_SRGB_BLOCK: return FORMAT_ASTC6x6UnormSrgb;
+        case VK_FORMAT_ASTC_8x5_UNORM_BLOCK: return FORMAT_ASTC8x5Unorm;
+        case VK_FORMAT_ASTC_8x5_SRGB_BLOCK: return FORMAT_ASTC8x5UnormSrgb;
+        case VK_FORMAT_ASTC_8x6_UNORM_BLOCK: return FORMAT_ASTC8x6Unorm;
+        case VK_FORMAT_ASTC_8x6_SRGB_BLOCK: return FORMAT_ASTC8x6UnormSrgb;
+        case VK_FORMAT_ASTC_8x8_UNORM_BLOCK: return FORMAT_ASTC8x8Unorm;
+        case VK_FORMAT_ASTC_8x8_SRGB_BLOCK: return FORMAT_ASTC8x8UnormSrgb;
+        case VK_FORMAT_ASTC_10x5_UNORM_BLOCK: return FORMAT_ASTC10x5Unorm;
+        case VK_FORMAT_ASTC_10x5_SRGB_BLOCK: return FORMAT_ASTC10x5UnormSrgb;
+        case VK_FORMAT_ASTC_10x6_UNORM_BLOCK: return FORMAT_ASTC10x6Unorm;
+        case VK_FORMAT_ASTC_10x6_SRGB_BLOCK: return FORMAT_ASTC10x6UnormSrgb;
+        case VK_FORMAT_ASTC_10x8_UNORM_BLOCK: return FORMAT_ASTC10x8Unorm;
+        case VK_FORMAT_ASTC_10x8_SRGB_BLOCK: return FORMAT_ASTC10x8UnormSrgb;
+        case VK_FORMAT_ASTC_10x10_UNORM_BLOCK: return FORMAT_ASTC10x10Unorm;
+        case VK_FORMAT_ASTC_10x10_SRGB_BLOCK: return FORMAT_ASTC10x10UnormSrgb;
+        case VK_FORMAT_ASTC_12x10_UNORM_BLOCK: return FORMAT_ASTC12x10Unorm;
+        case VK_FORMAT_ASTC_12x10_SRGB_BLOCK: return FORMAT_ASTC12x10UnormSrgb;
+        case VK_FORMAT_ASTC_12x12_UNORM_BLOCK: return FORMAT_ASTC12x12Unorm;
+        case VK_FORMAT_ASTC_12x12_SRGB_BLOCK: return FORMAT_ASTC12x12UnormSrgb;
+        default: return FORMAT_Force32;
+    }
+}
 
 VkPrimitiveTopology bridge(TOPOLOGY topo) {
     switch (topo) {
@@ -251,15 +251,25 @@ VkPrimitiveTopology bridge(TOPOLOGY topo) {
 //     }
 // }
 
-// WGPUPresentMode bridge(VkPresentModeKHR mode) {
-//     switch (mode) {
-//         case VK_PRESENT_MODE_FIFO_KHR: return WGPUPresentMode_Fifo;
-//         case VK_PRESENT_MODE_FIFO_RELAXED_KHR: return WGPUPresentMode_FifoRelaxed;
-//         case VK_PRESENT_MODE_IMMEDIATE_KHR: return WGPUPresentMode_Immediate;
-//         case VK_PRESENT_MODE_MAILBOX_KHR: return WGPUPresentMode_Mailbox;
-//         default: return WGPUPresentMode_Undefined;
-//     }
-// }
+PRESENT_MODE bridge(VkPresentModeKHR mode) {
+    switch (mode) {
+        case VK_PRESENT_MODE_IMMEDIATE_KHR: return PRESENT_MODE_IMMEDIATE;
+        case VK_PRESENT_MODE_MAILBOX_KHR: return PRESENT_MODE_MAILBOX;
+        case VK_PRESENT_MODE_FIFO_KHR: return PRESENT_MODE_FIFO;
+        case VK_PRESENT_MODE_FIFO_RELAXED_KHR: return PRESENT_MODE_FIFO_RELAXED;
+        default: return PRESENT_MODE_VALID_COUNT;
+    }
+}
+
+VkPresentModeKHR bridge(PRESENT_MODE mode) {
+    switch (mode) {
+        case PRESENT_MODE_IMMEDIATE: return VK_PRESENT_MODE_IMMEDIATE_KHR;
+        case PRESENT_MODE_MAILBOX: return VK_PRESENT_MODE_MAILBOX_KHR;
+        case PRESENT_MODE_FIFO: return VK_PRESENT_MODE_FIFO_KHR;
+        case PRESENT_MODE_FIFO_RELAXED: return VK_PRESENT_MODE_FIFO_RELAXED_KHR;
+        default: return VK_PRESENT_MODE_MAX_ENUM_KHR;
+    }
+}
 
 // VkImageViewType bridge(WGPUTextureViewDimension dim) {
 //     switch (dim) {
@@ -301,16 +311,6 @@ VkPrimitiveTopology bridge(TOPOLOGY topo) {
 //     return out;
 // }
 
-// VkPresentModeKHR bridge(WGPUPresentMode mode) {
-//     switch (mode) {
-//         case WGPUPresentMode_Fifo: return VK_PRESENT_MODE_FIFO_KHR;
-//         case WGPUPresentMode_FifoRelaxed: return VK_PRESENT_MODE_FIFO_RELAXED_KHR;
-//         case WGPUPresentMode_Immediate: return VK_PRESENT_MODE_IMMEDIATE_KHR;
-//         case WGPUPresentMode_Mailbox: return VK_PRESENT_MODE_MAILBOX_KHR;
-//         default: return VK_PRESENT_MODE_MAX_ENUM_KHR;
-//     }
-// }
-
 // VkSampleCountFlagBits bridge_sample_count(uint32_t sample_count) {
 //     switch (sample_count) {
 //         case 1: return VK_SAMPLE_COUNT_1_BIT;
@@ -323,28 +323,31 @@ VkPrimitiveTopology bridge(TOPOLOGY topo) {
 //     return VK_SAMPLE_COUNT_FLAG_BITS_MAX_ENUM;
 // }
 
-// WGPUTextureUsage bridge_usage_flags(VkImageUsageFlags flags) {
-//     WGPUTextureUsage usage = WGPUTextureUsage_None;
-//     usage |= (flags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ? WGPUTextureUsage_CopySrc : 0;
-//     usage |= (flags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) ? WGPUTextureUsage_CopyDst : 0;
-//     usage |= (flags & VK_IMAGE_USAGE_SAMPLED_BIT) ? WGPUTextureUsage_TextureBinding : 0;
-//     usage |= (flags & VK_IMAGE_USAGE_STORAGE_BIT) ? WGPUTextureUsage_StorageBinding : 0;
-//     usage |= (flags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) ? WGPUTextureUsage_RenderAttachment :
-//     0;
-//     // NOTE: Should VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT also count as a render attachment
-//     // usage?
-//     return usage;
-// }
+USAGE_FLAGS bridge_usage_flags(VkImageUsageFlags flags) {
+    int usage = USAGE_NONE;
+    usage |= (flags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ? USAGE_TRANSFER_SRC : 0;
+    usage |= (flags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) ? USAGE_TRANSFER_DST : 0;
+    usage |= (flags & VK_IMAGE_USAGE_SAMPLED_BIT) ? USAGE_SAMPLED : 0;
+    usage |= (flags & VK_IMAGE_USAGE_STORAGE_BIT) ? USAGE_STORAGE : 0;
+    usage |= (flags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) ? USAGE_COLOR_ATTACHMENT : 0;
+    usage |= (flags & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) ? USAGE_DEPTH_STENCIL_ATTACHMENT
+                                                                   : 0;
+    // NOTE: Should VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT also count as a render attachment
+    // usage?
+    return USAGE_FLAGS(usage);
+}
 
-// VkImageUsageFlags bridge_usage_flags(WGPUTextureUsage usage) {
-//     VkImageUsageFlags flags = 0;
-//     flags |= (usage & WGPUTextureUsage_CopySrc) ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0;
-//     flags |= (usage & WGPUTextureUsage_CopyDst) ? VK_IMAGE_USAGE_TRANSFER_DST_BIT : 0;
-//     flags |= (usage & WGPUTextureUsage_TextureBinding) ? VK_IMAGE_USAGE_SAMPLED_BIT : 0;
-//     flags |= (usage & WGPUTextureUsage_StorageBinding) ? VK_IMAGE_USAGE_STORAGE_BIT : 0;
-//     flags |= (usage & WGPUTextureUsage_RenderAttachment) ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT :
-//     0; return flags;
-// }
+VkImageUsageFlags bridge_usage_flags(USAGE_FLAGS usage) {
+    VkImageUsageFlags flags = 0;
+    flags |= (usage & USAGE_TRANSFER_SRC) ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0;
+    flags |= (usage & USAGE_TRANSFER_DST) ? VK_IMAGE_USAGE_TRANSFER_DST_BIT : 0;
+    flags |= (usage & USAGE_SAMPLED) ? VK_IMAGE_USAGE_SAMPLED_BIT : 0;
+    flags |= (usage & USAGE_STORAGE) ? VK_IMAGE_USAGE_STORAGE_BIT : 0;
+    flags |= (usage & USAGE_COLOR_ATTACHMENT) ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0;
+    flags |= (usage & USAGE_DEPTH_STENCIL_ATTACHMENT) ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
+                                                      : 0;
+    return flags;
+}
 
 // VkBufferUsageFlags bridge_buffer_usage(WGPUBufferUsage usage) {
 //     VkBufferUsageFlags flags = 0;

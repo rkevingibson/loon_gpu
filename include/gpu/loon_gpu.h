@@ -13,7 +13,7 @@
 namespace loon::gpu {
 
 constexpr size_t kMaxColorAttachments = 16;
-constexpr size_t kMaxNumBuffers       = 64ull * 1024;
+constexpr size_t kMaxNumBuffers       = 32ull * 1024;
 constexpr size_t kMaxTextureHeapSize  = 32ull * 1024;
 
 template <class T>
@@ -50,6 +50,9 @@ class Span {
     constexpr Span(std::initializer_list<T> v) noexcept REQUIRES(is_const<T>) :
         Span(v.begin(), v.size()) {}
 
+    // Construct from a single value - same rules as for initializer list, useful for passing one
+    // element to a function which takes a span
+    constexpr Span(const T& v) noexcept REQUIRES(is_const<T>) : Span(&v, 1) {}
 
     template <typename U>
     constexpr Span(const Span<U>& src) noexcept REQUIRES((is_const_of<U, T>)) :
@@ -147,7 +150,7 @@ class Span {
         return Span<T>(ptr, len);
     }
 
-    friend bool operator==(Span<const T> lhs, Span<const T> rhs)
+    friend inline bool operator==(Span<const T> lhs, Span<const T> rhs)
     // requires is_byte_type<T>
     {
         return lhs.size() == rhs.size() && memcmp(lhs.data(), rhs.data(), lhs.size()) == 0;
@@ -345,18 +348,23 @@ enum FORMAT {
     FORMAT_ASTC12x10UnormSrgb   = 0x00000063,
     FORMAT_ASTC12x12Unorm       = 0x00000064,
     FORMAT_ASTC12x12UnormSrgb   = 0x00000065,
-    FORMAT_Force32              = 0x7FFFFFFF
+
+    FORMAT_ValidCount,
+    FORMAT_Force32 = 0x7FFFFFFF
 };
 
 enum USAGE_FLAGS {
-    USAGE_NONE = 0,
-    USAGE_SAMPLED,
-    USAGE_STORAGE,
-    USAGE_COLOR_ATTACHMENT,
-    USAGE_DEPTH_STENCIL_ATTACHMENT,
+    USAGE_NONE                     = 0,
+    USAGE_SAMPLED                  = 0x01,
+    USAGE_STORAGE                  = 0x02,
+    USAGE_COLOR_ATTACHMENT         = 0x04,
+    USAGE_DEPTH_STENCIL_ATTACHMENT = 0x08,
+    USAGE_TRANSFER_SRC             = 0x10,
+    USAGE_TRANSFER_DST             = 0x20,
 };
 
 enum STAGE {
+    STAGE_NONE = 0,
     STAGE_TRANSFER,
     STAGE_COMPUTE,
     STAGE_RASTER_COLOR_OUT,
@@ -392,6 +400,15 @@ enum QUEUE_TYPE {
     QUEUE_DEFAULT,
     QUEUE_COMPUTE,
     QUEUE_TRANSFER,
+};
+
+enum PRESENT_MODE {
+    PRESENT_MODE_IMMEDIATE,
+    PRESENT_MODE_MAILBOX,
+    PRESENT_MODE_FIFO,
+    PRESENT_MODE_FIFO_RELAXED,
+
+    PRESENT_MODE_VALID_COUNT,
 };
 
 // Custom allocation callback - essentially a realloc function but not exactly
@@ -509,6 +526,40 @@ struct ShaderSource {
     Span<const char> entry_point;
 };
 
+struct SurfaceCapabilities {
+    USAGE_FLAGS              usages;
+    Span<const FORMAT>       formats;
+    Span<const PRESENT_MODE> present_modes;
+};
+
+struct SurfaceConfiguration {
+    FORMAT       format;
+    USAGE_FLAGS  usages;
+    uint32_t     width;
+    uint32_t     height;
+    PRESENT_MODE present_mode;
+};
+
+struct SurfaceTextureInfo {
+    enum {
+        STATUS_SUCCESS,
+        STATUS_OUT_OF_DATE,
+        STATUS_ERROR,
+    } status;
+
+    Handle<Texture> texture;
+
+    // Semaphore needs to be waited on before the texture can safely be used.
+    Handle<Semaphore> acquire_semaphore;
+};
+
+struct SemaphoreInfo {
+    Handle<Semaphore> semaphore;
+    uint64_t          wait_value;
+    STAGE stage = STAGE_NONE;  // Ignored on signal operations, what stage must be blocked on the
+                               // wait operation
+};
+
 // Initialization
 class Device {
    public:
@@ -523,6 +574,12 @@ class Device {
         return *this;
     }
 
+    // Surface:
+    SurfaceCapabilities get_surface_capabilities();
+    bool                configure_surface(const SurfaceConfiguration& config);
+    void                unconfigure_surface();
+    SurfaceTextureInfo  get_current_texture();
+    void                present();
 
     // Buffers:
     Handle<Buffer> malloc(size_t bytes, MEMORY memory = MEMORY_DEFAULT);
@@ -563,7 +620,12 @@ class Device {
     // Queue
     Handle<Queue>         getQueue(QUEUE_TYPE type = QUEUE_DEFAULT);
     Handle<CommandBuffer> startCommandRecording(Handle<Queue> queue);
-    void submit(Handle<Queue> queue, Span<const Handle<CommandBuffer>> commandBuffers);
+
+    // TODO: May want to wrap these args in a struct.
+    void submit(Handle<Queue>                     queue,
+                Span<const Handle<CommandBuffer>> commandBuffers,
+                Span<const SemaphoreInfo>         wait_semaphores,
+                Span<const SemaphoreInfo>         signal_semaphores = {});
     void cancel(Handle<Queue> queue, Span<const Handle<CommandBuffer>> commandBuffers);
 
     // Semaphores

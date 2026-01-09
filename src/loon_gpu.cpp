@@ -41,6 +41,28 @@ static VkPipelineLayout      create_default_graphics_layout(VkDevice            
                                                             const VolkDeviceTable& api,
                                                             VkDescriptorSetLayout  set_layout);
 
+struct Surface {
+    static constexpr uint32_t kMaxSwapchainImages = 8;
+
+    VkSurfaceKHR   surface   = VK_NULL_HANDLE;
+    VkSwapchainKHR swapchain = VK_NULL_HANDLE;
+
+    // No swapchain will support all the formats, but makes memory allocation simpler.
+    static constexpr size_t kMaxNumFormats      = FORMAT_ValidCount;
+    static constexpr size_t kMaxNumPresentModes = PRESENT_MODE_VALID_COUNT;
+    FORMAT                  supported_formats[kMaxNumFormats];
+    PRESENT_MODE            supported_present_modes[kMaxNumPresentModes];
+    size_t                  num_supported_formats       = 0;
+    size_t                  num_supported_present_modes = 0;
+
+    VkFormat   swapchain_format = VK_FORMAT_UNDEFINED;
+    VkExtent2D swapchain_extent = {0, 0};
+
+    uint32_t    current_image_idx = 0;
+    VkImage     swapchain_images[kMaxSwapchainImages];
+    VkSemaphore acquire_semaphores[kMaxSwapchainImages];
+};
+
 struct ThreadLocalState {
     constexpr static size_t kArenaSize = 256ll * 1024;
     loon::gpu::Allocator    allocator;
@@ -57,6 +79,13 @@ struct Device::Impl {
     bool initialize(const DeviceDesc& desc);
 
     void shutdown();
+
+    // Surface:
+    SurfaceCapabilities get_surface_capabilities();
+    bool                configure_surface(const SurfaceConfiguration& config);
+    void                unconfigure_surface();
+    SurfaceTextureInfo  get_current_texture();
+    void                present();
 
     // Buffers:
     Handle<Buffer> malloc(size_t bytes, MEMORY memory = MEMORY_DEFAULT);
@@ -96,7 +125,10 @@ struct Device::Impl {
     // Queue
     Handle<Queue>         getQueue(QUEUE_TYPE type);
     Handle<CommandBuffer> startCommandRecording(Handle<Queue> queue);
-    void                  submit(Handle<Queue> queue, Span<Handle<CommandBuffer>> commandBuffers);
+    void                  submit(Handle<Queue>                     queue,
+                                 Span<const Handle<CommandBuffer>> commandBuffers,
+                                 Span<const SemaphoreInfo>         wait_semaphores,
+                                 Span<const SemaphoreInfo>         signal_semaphores);
     void                  cancel(Handle<Queue> queue, Span<Handle<CommandBuffer>> commandBuffers);
 
     // Semaphores
@@ -113,11 +145,12 @@ struct Device::Impl {
     loon::gpu::tls_key m_tls_key;
 
     VkInstance       m_instance                   = VK_NULL_HANDLE;
-    VkSurfaceKHR     m_surface                    = VK_NULL_HANDLE;
     VkPhysicalDevice m_physical_device            = VK_NULL_HANDLE;
     uint32_t         m_graphics_queue_family      = -1;
     uint32_t         m_transfer_queue_family      = -1;
     uint32_t         m_async_compute_queue_family = -1;
+
+    Surface m_surface;
 
     VkDevice        m_device;
     VolkDeviceTable m_api;
@@ -409,6 +442,7 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
     volkLoadInstanceOnly(m_instance);
 
     // Create surface if requested:
+    VkSurfaceKHR surface = VK_NULL_HANDLE;
     if (desc.native_instance_handle != 0 || desc.native_window_handle != 0) {
 #if defined(VK_USE_PLATFORM_WIN32_KHR)
         const VkWin32SurfaceCreateInfoKHR surface_info = {
@@ -418,7 +452,7 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
             .hinstance = (HINSTANCE)desc.native_instance_handle,
             .hwnd      = (HWND)desc.native_window_handle,
         };
-        if (!chk(vkCreateWin32SurfaceKHR(m_instance, &surface_info, nullptr, &m_surface))) {
+        if (!chk(vkCreateWin32SurfaceKHR(m_instance, &surface_info, nullptr, &surface))) {
             return false;
         }
 #elif defined(VK_USE_PLATFORM_XLIB_KHR)
@@ -429,7 +463,7 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
             .dpy    = reinterpret_cast<Display*>(desc.native_instance_handle),
             .window = desc.native_window_handle,
         };
-        if (!chk(vkCreateXlibSurfaceKHR(m_instance, &surface_info, nullptr, &m_surface))) {
+        if (!chk(vkCreateXlibSurfaceKHR(m_instance, &surface_info, nullptr, &surface))) {
             return false;
         }
 #elif defined(VK_USE_PLATFORM_METAL_EXT)
@@ -439,7 +473,7 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
             .flags  = 0,
             .pLayer = reinterpret_cast<CAMetalLayer*>(desc.native_window_handle),
         };
-        VkResult result = vkCreateMetalSurfaceEXT(m_instance, &surface_info, nullptr, &m_surface);
+        VkResult result = vkCreateMetalSurfaceEXT(m_instance, &surface_info, nullptr, &surface);
         if (result != VK_SUCCESS) return false;
 #else
         default: log(LogLevel_Error, "Unsupported surface source"); return false;
@@ -447,7 +481,7 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
     }
 
     auto physical_device_info = select_physical_device(m_instance,
-                                                       m_surface,
+                                                       surface,
                                                        desc.gpu_preference,
                                                        *get_thread_local_arena());
     if (physical_device_info.device == VK_NULL_HANDLE) {
@@ -569,6 +603,9 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
     vma_create_info.physicalDevice   = m_physical_device;
     vmaCreateAllocator(&vma_create_info, &m_vma);
 
+    // Initialize the surface objects:
+    m_surface.surface = surface;
+
     m_default_descriptor_layout = create_default_descriptor_layout(m_device, m_api);
     m_default_graphics_layout
         = create_default_graphics_layout(m_device, m_api, m_default_descriptor_layout);
@@ -580,6 +617,143 @@ void Device::Impl::shutdown() {
     vkDestroyInstance(m_instance, nullptr);
     volkFinalize();
 }
+
+// MARK: Surface
+
+SurfaceCapabilities Device::Impl::get_surface_capabilities() {
+    // Surface formats:
+    uint32_t format_count = 0;
+    vkGetPhysicalDeviceSurfaceFormatsKHR(m_physical_device,
+                                         m_surface.surface,
+                                         &format_count,
+                                         nullptr);
+
+    Arena arena = *get_thread_local_arena();  // Just copy the arena so all memory will be "freed"
+                                              // at function exit.
+
+    auto vk_formats = reinterpret_cast<VkSurfaceFormatKHR*>(
+        arena.alloc(sizeof(VkSurfaceFormatKHR) * format_count));
+    vkGetPhysicalDeviceSurfaceFormatsKHR(m_physical_device,
+                                         m_surface.surface,
+                                         &format_count,
+                                         vk_formats);
+
+    m_surface.num_supported_formats = 0;
+    for (uint32_t i = 0; i < format_count; ++i) {
+        FORMAT fmt = bridge(vk_formats[i].format);
+        if (fmt < FORMAT_ValidCount) {
+            m_surface.supported_formats[m_surface.num_supported_formats] = fmt;
+            m_surface.num_supported_formats++;
+        }
+    }
+
+    // Present modes:
+    uint32_t present_mode_count = 0;
+    vkGetPhysicalDeviceSurfacePresentModesKHR(m_physical_device,
+                                              m_surface.surface,
+                                              &present_mode_count,
+                                              nullptr);
+    auto vk_modes = reinterpret_cast<VkPresentModeKHR*>(
+        arena.alloc(sizeof(VkPresentModeKHR) * present_mode_count));
+
+    vkGetPhysicalDeviceSurfacePresentModesKHR(m_physical_device,
+                                              m_surface.surface,
+                                              &present_mode_count,
+                                              vk_modes);
+
+    for (uint32_t i = 0; i < present_mode_count; ++i) {
+        PRESENT_MODE mode = bridge(vk_modes[i]);
+        if (mode < PRESENT_MODE_VALID_COUNT) {
+            m_surface.supported_present_modes[m_surface.num_supported_present_modes] = mode;
+            m_surface.num_supported_present_modes++;
+        }
+    }
+
+    // Capabilities has usages
+    VkSurfaceCapabilitiesKHR vk_capabilities;
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(m_physical_device,
+                                              m_surface.surface,
+                                              &vk_capabilities);
+
+    return SurfaceCapabilities{
+        .usages  = bridge_usage_flags(vk_capabilities.supportedUsageFlags),
+        .formats = Span<const FORMAT>(m_surface.supported_formats, m_surface.num_supported_formats),
+        .present_modes = Span<const PRESENT_MODE>(m_surface.supported_present_modes,
+                                                  m_surface.num_supported_present_modes),
+    };
+}
+
+bool Device::Impl::configure_surface(const SurfaceConfiguration& config) {
+    // Create the VkSwapchain based on the configuration
+    VkSurfaceCapabilitiesKHR vk_capabilities;
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(m_physical_device,
+                                              m_surface.surface,
+                                              &vk_capabilities);
+
+    uint32_t image_count = vk_capabilities.minImageCount + 1;
+    if (vk_capabilities.maxImageCount > 0 && image_count > vk_capabilities.maxImageCount) {
+        image_count = vk_capabilities.maxImageCount;
+    }
+
+    const auto extent = VkExtent2D{
+        .width  = config.width,
+        .height = config.height,
+    };
+
+    VkSwapchainCreateInfoKHR swapchain_info{
+        .sType                 = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+        .pNext                 = nullptr,
+        .flags                 = 0,
+        .surface               = m_surface.surface,
+        .minImageCount         = image_count,
+        .imageFormat           = loon::gpu::bridge(config.format),
+        .imageColorSpace       = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,  // TODO: Colorspace support?
+        .imageExtent           = extent,
+        .imageArrayLayers      = 1,
+        .imageUsage            = loon::gpu::bridge_usage_flags(config.usages),
+        .imageSharingMode      = VK_SHARING_MODE_EXCLUSIVE,  // We only support one queue.
+        .queueFamilyIndexCount = 0,
+        .pQueueFamilyIndices   = nullptr,
+        .preTransform          = vk_capabilities.currentTransform,
+        .compositeAlpha        = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+        .presentMode           = loon::gpu::bridge(config.present_mode),
+        .clipped               = true,
+        .oldSwapchain          = m_surface.swapchain,
+    };
+
+    if (!chk(
+            m_api.vkCreateSwapchainKHR(m_device, &swapchain_info, nullptr, &m_surface.swapchain))) {
+        log(LogLevel_Error, "Failed in call to vkCreateSwapchainKHR"_sv);
+        return false;
+    }
+
+    image_count = 0;
+    if (!chk(m_api.vkGetSwapchainImagesKHR(m_device, m_surface.swapchain, &image_count, nullptr))) {
+        log(LogLevel_Error, "Failed in call to vkGetSwapchainImagesKHR"_sv);
+        return false;
+    }
+
+    if (image_count > Surface::kMaxSwapchainImages) {
+        log(LogLevel_Error, "Swapchain creating too many images"_sv);
+        return false;
+    }
+
+    if (!chk(m_api.vkGetSwapchainImagesKHR(m_device,
+                                           m_surface.swapchain,
+                                           &image_count,
+                                           m_surface.swapchain_images))) {
+        log(LogLevel_Error, "Swapchain failed to retrieve images"_sv);
+        return false;
+    }
+
+    return true;
+}
+
+void Device::Impl::unconfigure_surface() {}
+
+SurfaceTextureInfo Device::Impl::get_current_texture() {}
+
+void Device::Impl::present() {}
 
 // MARK: Buffers
 
@@ -726,7 +900,6 @@ Handle<Pipeline> Device::Impl::createGraphicsPipeline(ShaderSource vertex,
     // TODO: Depth stencil formats
 
     // Color blend state
-    // TODO: Color blend state:
     loon::gpu::Stack<VkPipelineColorBlendAttachmentState, loon::gpu::kMaxColorAttachments>
                                                                 color_blend_attachment_states{};
     loon::gpu::Stack<VkFormat, loon::gpu::kMaxColorAttachments> color_attachment_formats{};
@@ -1060,6 +1233,14 @@ Device::~Device() {
     if (impl) { delete impl; }
 }
 
+SurfaceCapabilities Device::get_surface_capabilities() {
+    return impl->get_surface_capabilities();
+}
+
+bool Device::configure_surface(const SurfaceConfiguration& config) {
+    return impl->configure_surface(config);
+}
+
 Handle<Buffer> Device::malloc(size_t bytes, MEMORY memory) {
     return impl->malloc(bytes, memory);
 }
@@ -1094,7 +1275,12 @@ Handle<CommandBuffer> Device::startCommandRecording(Handle<Queue> queue) {
     return {};
 }
 
-void Device::submit(Handle<Queue> queue, Span<const Handle<CommandBuffer>> commandBuffers) {}
+void Device::submit(Handle<Queue>                     queue,
+                    Span<const Handle<CommandBuffer>> commandBuffers,
+                    Span<const SemaphoreInfo>         wait_semaphores,
+                    Span<const SemaphoreInfo>         signal_semaphores) {
+    impl->submit(queue, commandBuffers, wait_semaphores, signal_semaphores);
+}
 
 void Device::cancel(Handle<Queue> queue, Span<const Handle<CommandBuffer>> commandBuffers) {}
 
