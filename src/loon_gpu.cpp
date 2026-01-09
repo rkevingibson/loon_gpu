@@ -21,6 +21,11 @@ struct Buffer {
     VmaAllocation vk_allocation;
 };
 
+struct Texture {
+    VkImage       vk_image;
+    VmaAllocation vk_allocation;
+};
+
 struct PhysicalDeviceInfo {
     VkPhysicalDevice device                     = VK_NULL_HANDLE;
     uint32_t         graphics_queue_family      = 0;
@@ -58,8 +63,13 @@ struct Surface {
     VkFormat   swapchain_format = VK_FORMAT_UNDEFINED;
     VkExtent2D swapchain_extent = {0, 0};
 
-    uint32_t    current_image_idx = 0;
-    VkImage     swapchain_images[kMaxSwapchainImages];
+    uint32_t        current_image_idx = 0;
+    uint32_t        image_count       = 0;
+    Handle<Texture> swapchain_images[kMaxSwapchainImages];
+
+    // Semaphores are ticked around the ring buffer independently from images, since we need to know
+    // which semaphore to use before we know which image index we have.
+    uint32_t    current_semaphore_idx = 0;
     VkSemaphore acquire_semaphores[kMaxSwapchainImages];
 };
 
@@ -159,7 +169,8 @@ struct Device::Impl {
     VkDescriptorSetLayout m_default_descriptor_layout;
     VkPipelineLayout      m_default_graphics_layout;
 
-    ObjectPool<Buffer, kMaxNumBuffers> buffer_pool;
+    ObjectPool<Buffer, kMaxNumBuffers>   m_buffer_pool;
+    ObjectPool<Texture, kMaxNumTextures> m_texture_pool;
 
     void              log(LogLevel lvl, Span<const char> msg);
     bool              chk(VkResult result);
@@ -738,22 +749,72 @@ bool Device::Impl::configure_surface(const SurfaceConfiguration& config) {
         return false;
     }
 
+    VkImage swapchain_images[Surface::kMaxSwapchainImages];
+
     if (!chk(m_api.vkGetSwapchainImagesKHR(m_device,
                                            m_surface.swapchain,
                                            &image_count,
-                                           m_surface.swapchain_images))) {
+                                           swapchain_images))) {
         log(LogLevel_Error, "Swapchain failed to retrieve images"_sv);
         return false;
+    }
+
+    // Convert the swapchain images here to handles, by inserting them into the object pool.
+    for (int i = 0; i < image_count; ++i) {
+        const uint32_t handle_idx  = m_texture_pool.get();
+        m_texture_pool[handle_idx] = {
+            .vk_image = swapchain_images[i],
+        };
+        m_surface.swapchain_images[i] = Handle<Texture>{.h = handle_idx};
     }
 
     return true;
 }
 
-void Device::Impl::unconfigure_surface() {}
+void Device::Impl::unconfigure_surface() {
+    m_api.vkDestroySwapchainKHR(m_device, m_surface.swapchain, nullptr);
+    m_surface.swapchain         = VK_NULL_HANDLE;
+    m_surface.image_count       = 0;
+    m_surface.current_image_idx = 0;
+}
 
-SurfaceTextureInfo Device::Impl::get_current_texture() {}
+SurfaceTextureInfo Device::Impl::get_current_texture() {
+    auto semaphore = m_surface.acquire_semaphores[m_surface.current_semaphore_idx];
+    m_surface.current_semaphore_idx
+        = (m_surface.current_semaphore_idx + 1) % Surface::kMaxSwapchainImages;
+    VkAcquireNextImageInfoKHR acquire_info{
+        .sType      = VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR,
+        .pNext      = nullptr,
+        .swapchain  = m_surface.swapchain,
+        .timeout    = 0,
+        .semaphore  = semaphore,
+        .fence      = VK_NULL_HANDLE,
+        .deviceMask = 0,
+    };
+    uint32_t           image_idx = 0;
+    VkResult           result = m_api.vkAcquireNextImage2KHR(m_device, &acquire_info, &image_idx);
+    SurfaceTextureInfo info{
+        .status            = SurfaceTextureInfo::STATUS_SUCCESS,
+        .texture           = m_surface.swapchain_images[image_idx],
+        .acquire_semaphore = {.h = reinterpret_cast<uintptr_t>(semaphore)},
+    };
+    m_surface.current_image_idx = image_idx;
 
-void Device::Impl::present() {}
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        info.status = SurfaceTextureInfo::STATUS_OUT_OF_DATE;
+    } else if (result == VK_SUBOPTIMAL_KHR) {
+        info.status = SurfaceTextureInfo::STATUS_SUBOPTIMAL;
+    } else if (result < 0) {
+        log(LogLevel_Error, "Error in swapchain acquireNextImage"_sv);
+        info.status = SurfaceTextureInfo::STATUS_ERROR;
+    }
+
+    return info;
+}
+
+void Device::Impl::present() {
+    auto presenting_texture_handle = m_surface.swapchain_images[m_surface.current_image_idx];
+}
 
 // MARK: Buffers
 
@@ -805,16 +866,16 @@ Handle<Buffer> Device::Impl::malloc(size_t bytes, size_t align, MEMORY memory) {
     VmaAllocation vk_allocation = nullptr;
     chk(vmaCreateBuffer(m_vma, &create_info, &alloc_info, &vk_buffer, &vk_allocation, nullptr));
 
-    const uint32_t buffer_idx = buffer_pool.get();
-    buffer_pool[buffer_idx]   = {
-          .vk_buffer     = vk_buffer,
-          .vk_allocation = vk_allocation,
+    const uint32_t buffer_idx = m_buffer_pool.get();
+    m_buffer_pool[buffer_idx] = {
+        .vk_buffer     = vk_buffer,
+        .vk_allocation = vk_allocation,
     };
     return {.h = buffer_idx};
 }
 
 void Device::Impl::free(Handle<Buffer> buffer) {
-    auto& b = buffer_pool[buffer.h];
+    auto& b = m_buffer_pool[buffer.h];
     vmaDestroyBuffer(m_vma, b.vk_buffer, b.vk_allocation);
 }
 
@@ -822,7 +883,7 @@ GpuPtr Device::Impl::getDevicePointer(Handle<Buffer> buffer) {
     VkBufferDeviceAddressInfo addr_info{
         .sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
         .pNext  = nullptr,
-        .buffer = buffer_pool[buffer.h].vk_buffer,
+        .buffer = m_buffer_pool[buffer.h].vk_buffer,
     };
     return m_api.vkGetBufferDeviceAddress(m_device, &addr_info);
 }
@@ -1048,6 +1109,11 @@ Handle<Queue> Device::Impl::getQueue(QUEUE_TYPE type) {
     return {.h = 0};
 }
 
+void Device::Impl::submit(Handle<Queue>                     queue,
+                          Span<const Handle<CommandBuffer>> commandBuffers,
+                          Span<const SemaphoreInfo>         wait_semaphores,
+                          Span<const SemaphoreInfo>         signal_semaphores) {}
+
 // MARK: Sempahores
 
 Handle<Semaphore> Device::Impl::createSemaphore(uint64_t initValue) {
@@ -1241,6 +1307,18 @@ bool Device::configure_surface(const SurfaceConfiguration& config) {
     return impl->configure_surface(config);
 }
 
+void Device::unconfigure_surface() {
+    return impl->unconfigure_surface();
+}
+
+SurfaceTextureInfo Device::get_current_texture() {
+    return impl->get_current_texture();
+}
+
+void Device::present() {
+    impl->present();
+}
+
 Handle<Buffer> Device::malloc(size_t bytes, MEMORY memory) {
     return impl->malloc(bytes, memory);
 }
@@ -1256,6 +1334,28 @@ void Device::free(Handle<Buffer> buffer) {
 GpuPtr Device::getDevicePointer(Handle<Buffer> buffer) {
     return impl->getDevicePointer(buffer);
 }
+
+Handle<Texture> Device::createTexture(const GpuTextureDesc& desc) {
+    return {};
+}
+Handle<TextureHeap> Device::createTextureHeap(size_t size) {
+    return {};
+}
+
+uint32_t Device::createTextureView(Handle<TextureHeap> heap,
+                                   Handle<Texture>     texture,
+                                   TextureViewDesc     desc) {
+    return 0;
+}
+uint32_t Device::createRWTextureView(Handle<TextureHeap> heap,
+                                     Handle<Texture>     texture,
+                                     TextureViewDesc     desc) {
+    return 0;
+}
+void Device::free(Handle<Texture>) {}
+void Device::free(Handle<TextureHeap>) {}
+void Device::freeTextureView(Handle<TextureHeap> heap, uint32_t view) {}
+
 
 Handle<Pipeline> Device::createGraphicsPipeline(ShaderSource      vertex,
                                                 ShaderSource      fragment,

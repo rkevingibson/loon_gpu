@@ -14,6 +14,7 @@ namespace loon::gpu {
 
 constexpr size_t kMaxColorAttachments = 16;
 constexpr size_t kMaxNumBuffers       = 32ull * 1024;
+constexpr size_t kMaxNumTextures      = 64ull * 1024;
 constexpr size_t kMaxTextureHeapSize  = 32ull * 1024;
 
 template <class T>
@@ -543,6 +544,7 @@ struct SurfaceConfiguration {
 struct SurfaceTextureInfo {
     enum {
         STATUS_SUCCESS,
+        STATUS_SUBOPTIMAL,
         STATUS_OUT_OF_DATE,
         STATUS_ERROR,
     } status;
@@ -579,7 +581,7 @@ class Device {
     bool                configure_surface(const SurfaceConfiguration& config);
     void                unconfigure_surface();
     SurfaceTextureInfo  get_current_texture();
-    void                present();
+    void                present(Handle<Queue> queue);
 
     // Buffers:
     Handle<Buffer> malloc(size_t bytes, MEMORY memory = MEMORY_DEFAULT);

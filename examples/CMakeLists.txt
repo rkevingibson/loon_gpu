@@ -5,8 +5,7 @@ if(WIN32)
     )
 elseif(APPLE)
     set(SLANG_URL
-        https://github.com/shader-slang/slang/releases/download/v2025.10/slang-2025.10-macos-aarch64.tar.gz
-    )
+        https://github.com/shader-slang/slang/releases/download/v2025.24.3/slang-2025.24.3-macos-aarch64.tar.gz)
 elseif(UNIX)
 set(SLANG_URL
     https://github.com/shader-slang/slang/releases/download/v2025.10/slang-2025.10-linux-x86_64.zip
