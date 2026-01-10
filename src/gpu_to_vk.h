@@ -15,10 +15,12 @@ VkPrimitiveTopology bridge(TOPOLOGY topo);
 // VkCompareOp         bridge(WGPUCompareFunction fn);
 PRESENT_MODE     bridge(VkPresentModeKHR mode);
 VkPresentModeKHR bridge(PRESENT_MODE mode);
+
 // VkImageViewType     bridge(WGPUTextureViewDimension dim);
 // VkImageAspectFlags  bridge(WGPUTextureAspect aspect);
 // VkIndexType         bridge(WGPUIndexFormat fmt);
 
+VkPipelineStageFlags2 bridge_pipeline_stage(STAGE stage);
 // VkShaderStageFlags bridge_shader_stage(WGPUShaderStage shader_stage);
 
 // VkSampleCountFlagBits bridge_sample_count(uint32_t sample_count);

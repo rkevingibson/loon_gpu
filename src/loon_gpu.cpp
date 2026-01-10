@@ -71,6 +71,13 @@ struct Surface {
     // which semaphore to use before we know which image index we have.
     uint32_t    current_semaphore_idx = 0;
     VkSemaphore acquire_semaphores[kMaxSwapchainImages];
+    VkSemaphore present_semaphores[kMaxSwapchainImages];
+};
+
+struct Queue {
+    VkQueue       queue        = VK_NULL_HANDLE;
+    VkCommandPool command_pool = VK_NULL_HANDLE;
+    uint32_t      queue_family = 0;
 };
 
 struct ThreadLocalState {
@@ -95,7 +102,7 @@ struct Device::Impl {
     bool                configure_surface(const SurfaceConfiguration& config);
     void                unconfigure_surface();
     SurfaceTextureInfo  get_current_texture();
-    void                present();
+    void                present(Handle<Queue> queue);
 
     // Buffers:
     Handle<Buffer> malloc(size_t bytes, MEMORY memory = MEMORY_DEFAULT);
@@ -133,13 +140,13 @@ struct Device::Impl {
     void                      freeBlendState(Handle<BlendState> state);
 
     // Queue
-    Handle<Queue>         getQueue(QUEUE_TYPE type);
-    Handle<CommandBuffer> startCommandRecording(Handle<Queue> queue);
-    void                  submit(Handle<Queue>                     queue,
-                                 Span<const Handle<CommandBuffer>> commandBuffers,
-                                 Span<const SemaphoreInfo>         wait_semaphores,
-                                 Span<const SemaphoreInfo>         signal_semaphores);
-    void                  cancel(Handle<Queue> queue, Span<Handle<CommandBuffer>> commandBuffers);
+    Handle<Queue> getQueue(QUEUE_TYPE type);
+    CommandBuffer startCommandRecording(Handle<Queue> queue);
+    void          submit(Handle<Queue>             queue,
+                         Span<const CommandBuffer> commandBuffers,
+                         Span<const SemaphoreInfo> wait_semaphores,
+                         Span<const SemaphoreInfo> signal_semaphores);
+    void          cancel(Handle<Queue> queue, Span<Handle<CommandBuffer>> commandBuffers);
 
     // Semaphores
     Handle<Semaphore> createSemaphore(uint64_t initValue);
@@ -148,6 +155,8 @@ struct Device::Impl {
 
 
    private:
+    friend class CommandBuffer;
+
     Allocator          m_allocator;
     ProcLogCallback    m_log_callback = nullptr;
     void*              m_log_userdata = nullptr;
@@ -171,6 +180,8 @@ struct Device::Impl {
 
     ObjectPool<Buffer, kMaxNumBuffers>   m_buffer_pool;
     ObjectPool<Texture, kMaxNumTextures> m_texture_pool;
+
+    Queue m_queues[QUEUE_VALID_COUNT];
 
     void              log(LogLevel lvl, Span<const char> msg);
     bool              chk(VkResult result);
@@ -616,6 +627,19 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
 
     // Initialize the surface objects:
     m_surface.surface = surface;
+    const VkSemaphoreCreateInfo semaphore_create_info{
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+    };
+    for (uint32_t i = 0; i < Surface::kMaxSwapchainImages; ++i) {
+        VkSemaphore s = VK_NULL_HANDLE;
+        chk(m_api.vkCreateSemaphore(m_device, &semaphore_create_info, nullptr, &s));
+        m_surface.acquire_semaphores[i] = s;
+
+        chk(m_api.vkCreateSemaphore(m_device, &semaphore_create_info, nullptr, &s));
+        m_surface.present_semaphores[i] = s;
+    }
 
     m_default_descriptor_layout = create_default_descriptor_layout(m_device, m_api);
     m_default_graphics_layout
@@ -789,7 +813,7 @@ SurfaceTextureInfo Device::Impl::get_current_texture() {
         .timeout    = 0,
         .semaphore  = semaphore,
         .fence      = VK_NULL_HANDLE,
-        .deviceMask = 0,
+        .deviceMask = 1,
     };
     uint32_t           image_idx = 0;
     VkResult           result = m_api.vkAcquireNextImage2KHR(m_device, &acquire_info, &image_idx);
@@ -812,8 +836,21 @@ SurfaceTextureInfo Device::Impl::get_current_texture() {
     return info;
 }
 
-void Device::Impl::present() {
+void Device::Impl::present(Handle<Queue> queue) {
     auto presenting_texture_handle = m_surface.swapchain_images[m_surface.current_image_idx];
+
+    VkPresentInfoKHR present_info{
+        .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .pNext              = nullptr,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores    = &m_surface.present_semaphores[m_surface.current_semaphore_idx],
+        .swapchainCount     = 1,
+        .pSwapchains        = &m_surface.swapchain,
+        .pImageIndices      = &m_surface.current_image_idx,
+        .pResults           = nullptr,
+    };
+
+    m_api.vkQueuePresentKHR(m_queues[queue.h].queue, &present_info);
 }
 
 // MARK: Buffers
@@ -1091,8 +1128,6 @@ Handle<Pipeline> Device::Impl::createGraphicsPipeline(ShaderSource vertex,
                                         nullptr,
                                         &vk_pipeline));
 
-
-
     m_api.vkDestroyShaderModule(m_device, vert_module, nullptr);
     m_api.vkDestroyShaderModule(m_device, frag_module, nullptr);
 
@@ -1106,13 +1141,134 @@ void Device::Impl::freePipeline(Handle<Pipeline> pipeline) {
 // MARK: Queue
 
 Handle<Queue> Device::Impl::getQueue(QUEUE_TYPE type) {
-    return {.h = 0};
+    // Initialize the queue on-demand.
+    if (m_queues[type].queue == VK_NULL_HANDLE) {
+        uint32_t queue_family = 0;
+        switch (type) {
+            case QUEUE_DEFAULT: queue_family = m_graphics_queue_family; break;
+            case QUEUE_COMPUTE: queue_family = m_async_compute_queue_family; break;
+            case QUEUE_TRANSFER: queue_family = m_transfer_queue_family; break;
+            case QUEUE_VALID_COUNT: break;
+        }
+
+        VkQueue queue;
+        m_api.vkGetDeviceQueue(m_device, queue_family, 0, &queue);
+
+        VkCommandPoolCreateInfo pool_info{
+            .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            .pNext            = nullptr,
+            .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+            .queueFamilyIndex = queue_family,
+        };
+        VkCommandPool command_pool;
+        chk(m_api.vkCreateCommandPool(m_device, &pool_info, nullptr, &command_pool));
+
+        m_queues[type] = {
+            .queue        = queue,
+            .command_pool = command_pool,
+            .queue_family = queue_family,
+        };
+    }
+
+    return {.h = (uint64_t)type};
 }
 
-void Device::Impl::submit(Handle<Queue>                     queue,
-                          Span<const Handle<CommandBuffer>> commandBuffers,
-                          Span<const SemaphoreInfo>         wait_semaphores,
-                          Span<const SemaphoreInfo>         signal_semaphores) {}
+CommandBuffer Device::Impl::startCommandRecording(Handle<Queue> queue) {
+    const VkCommandBufferAllocateInfo alloc_info{
+        .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .pNext              = nullptr,
+        .commandPool        = m_queues[queue.h].command_pool,
+        .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    chk(m_api.vkAllocateCommandBuffers(m_device, &alloc_info, &cmd));
+
+    const VkCommandBufferBeginInfo begin_info{
+        .sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext            = nullptr,
+        .flags            = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        .pInheritanceInfo = nullptr,
+    };
+    m_api.vkBeginCommandBuffer(cmd, &begin_info);
+
+    return CommandBuffer(reinterpret_cast<uint64_t>(cmd), reinterpret_cast<uint64_t>(this));
+}
+
+void Device::Impl::submit(Handle<Queue>             queue,
+                          Span<const CommandBuffer> command_buffers,
+                          Span<const SemaphoreInfo> wait_semaphores,
+                          Span<const SemaphoreInfo> signal_semaphores)
+
+{
+    auto q = m_queues[queue.h];
+
+    auto arena = *get_thread_local_arena();
+
+    auto* wait_info = reinterpret_cast<VkSemaphoreSubmitInfo*>(
+        arena.alloc(sizeof(VkSemaphoreSubmitInfo) * wait_semaphores.size()));
+    auto* command_info = reinterpret_cast<VkCommandBufferSubmitInfo*>(
+        arena.alloc(sizeof(VkCommandBufferSubmitInfo) * command_buffers.size()));
+    auto* signal_info = reinterpret_cast<VkSemaphoreSubmitInfo*>(
+        arena.alloc(sizeof(VkSemaphoreSubmitInfo) * signal_semaphores.size()));
+
+    if (signal_info == nullptr || command_info == nullptr || wait_info == nullptr) {
+        // Submission failed, need to figure out a fallback or error situation.
+        log(LogLevel_Error, "Out of memory in queue submission"_sv);
+    }
+
+    for (uint32_t i = 0; i < wait_semaphores.size(); ++i) {
+        wait_info[i] = VkSemaphoreSubmitInfo{
+            .sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+            .pNext       = nullptr,
+            .semaphore   = reinterpret_cast<VkSemaphore>(wait_semaphores[i].semaphore.h),
+            .value       = wait_semaphores[i].value,
+            .stageMask   = bridge_pipeline_stage(wait_semaphores[i].stage),
+            .deviceIndex = 0,
+        };
+    }
+
+    for (uint32_t i = 0; i < command_buffers.size(); i++) {
+        auto buf = reinterpret_cast<VkCommandBuffer>(command_buffers[i].buffer);
+
+        chk(m_api.vkEndCommandBuffer(buf));
+
+        command_info[i] = VkCommandBufferSubmitInfo{
+            .sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+            .pNext         = nullptr,
+            .commandBuffer = buf,
+            .deviceMask    = 1,
+        };
+    }
+
+    for (uint32_t i = 0; i < signal_semaphores.size(); ++i) {
+        signal_info[i] = VkSemaphoreSubmitInfo{
+            .sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+            .pNext       = nullptr,
+            .semaphore   = reinterpret_cast<VkSemaphore>(signal_semaphores[i].semaphore.h),
+            .value       = signal_semaphores[i].value,
+            .stageMask   = bridge_pipeline_stage(signal_semaphores[i].stage),
+            .deviceIndex = 0,
+        };
+    }
+
+    VkSubmitInfo2 submit_info{
+        .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+        .pNext                    = nullptr,
+        .flags                    = 0,
+        .waitSemaphoreInfoCount   = static_cast<uint32_t>(wait_semaphores.size()),
+        .pWaitSemaphoreInfos      = wait_info,
+        .commandBufferInfoCount   = static_cast<uint32_t>(command_buffers.size()),
+        .pCommandBufferInfos      = command_info,
+        .signalSemaphoreInfoCount = static_cast<uint32_t>(signal_semaphores.size()),
+        .pSignalSemaphoreInfos    = signal_info,
+    };
+
+    m_api.vkQueueSubmit2(q.queue, 1, &submit_info, VK_NULL_HANDLE);
+
+    // TODO: Need to free/reset the command buffers once this submission is done - consider a
+    // deletion queue?
+}
 
 // MARK: Sempahores
 
@@ -1315,8 +1471,8 @@ SurfaceTextureInfo Device::get_current_texture() {
     return impl->get_current_texture();
 }
 
-void Device::present() {
-    impl->present();
+void Device::present(Handle<Queue> queue) {
+    impl->present(queue);
 }
 
 Handle<Buffer> Device::malloc(size_t bytes, MEMORY memory) {
@@ -1371,14 +1527,14 @@ Handle<Queue> Device::getQueue(QUEUE_TYPE type) {
     return impl->getQueue(type);
 }
 
-Handle<CommandBuffer> Device::startCommandRecording(Handle<Queue> queue) {
-    return {};
+CommandBuffer Device::startCommandRecording(Handle<Queue> queue) {
+    return impl->startCommandRecording(queue);
 }
 
-void Device::submit(Handle<Queue>                     queue,
-                    Span<const Handle<CommandBuffer>> commandBuffers,
-                    Span<const SemaphoreInfo>         wait_semaphores,
-                    Span<const SemaphoreInfo>         signal_semaphores) {
+void Device::submit(Handle<Queue>             queue,
+                    Span<const CommandBuffer> commandBuffers,
+                    Span<const SemaphoreInfo> wait_semaphores,
+                    Span<const SemaphoreInfo> signal_semaphores) {
     impl->submit(queue, commandBuffers, wait_semaphores, signal_semaphores);
 }
 
@@ -1387,16 +1543,112 @@ void Device::cancel(Handle<Queue> queue, Span<const Handle<CommandBuffer>> comma
 
 // MARK: Commmand Buffer
 
-void Handle<CommandBuffer>::setPipeline(Handle<Pipeline> pipeline) {}
-void Handle<CommandBuffer>::beginRenderPass(RenderPassDesc desc) {}
+void CommandBuffer::setPipeline(Handle<Pipeline> pipeline) {
+    auto impl = reinterpret_cast<Device::Impl*>(device);
+    impl->m_api.vkCmdBindPipeline(
+        reinterpret_cast<VkCommandBuffer>(buffer),
+        VK_PIPELINE_BIND_POINT_GRAPHICS,  // TODO: Fix this, can't be hardcoded.
+        reinterpret_cast<VkPipeline>(pipeline.h));
+}
 
-void Handle<CommandBuffer>::endRenderPass() {}
+void CommandBuffer::beginRenderPass(RenderPassDesc desc) {}
 
-void Handle<CommandBuffer>::draw(GpuPtr   vertexDataGpu,
-                                 GpuPtr   fragmentDataGpu,
-                                 uint32_t vertexCount,
-                                 uint32_t instanceCount,
-                                 uint32_t firstVertex,
-                                 uint32_t firstInstance) {}
+void CommandBuffer::endRenderPass() {}
+
+void CommandBuffer::draw(GpuPtr   vertexDataGpu,
+                         GpuPtr   fragmentDataGpu,
+                         uint32_t vertexCount,
+                         uint32_t instanceCount,
+                         uint32_t firstVertex,
+                         uint32_t firstInstance) {
+    auto impl = reinterpret_cast<Device::Impl*>(device);
+    impl->m_api.vkCmdDraw(reinterpret_cast<VkCommandBuffer>(buffer),
+                          vertexCount,
+                          instanceCount,
+                          firstVertex,
+                          firstInstance);
+}
+
+void CommandBuffer::make_surface_writable() {
+    auto impl = reinterpret_cast<Device::Impl*>(device);
+
+    auto image           = impl->m_surface.swapchain_images[impl->m_surface.current_image_idx];
+    auto swapchain_image = impl->m_texture_pool[image.h].vk_image;
+
+    const VkImageMemoryBarrier2 barrier {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .pNext = nullptr,
+        .srcStageMask  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+        .dstStageMask  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .srcQueueFamilyIndex = 0,
+        .dstQueueFamilyIndex = 0,
+        .image = swapchain_image,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+    };
+
+    const VkDependencyInfo info{
+        .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .pNext                    = nullptr,
+        .dependencyFlags          = 0,
+        .memoryBarrierCount       = 0,
+        .pMemoryBarriers          = nullptr,
+        .bufferMemoryBarrierCount = 0,
+        .pBufferMemoryBarriers    = nullptr,
+        .imageMemoryBarrierCount  = 1,
+        .pImageMemoryBarriers     = &barrier,
+    };
+    impl->m_api.vkCmdPipelineBarrier2(reinterpret_cast<VkCommandBuffer>(buffer), &info);
+}
+
+void CommandBuffer::make_surface_presentable() {
+    auto impl = reinterpret_cast<Device::Impl*>(device);
+
+    auto image           = impl->m_surface.swapchain_images[impl->m_surface.current_image_idx];
+    auto swapchain_image = impl->m_texture_pool[image.h].vk_image;
+
+    const VkImageMemoryBarrier2 barrier {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .pNext = nullptr,
+        .srcStageMask  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+        .dstStageMask  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .srcQueueFamilyIndex = 0,
+        .dstQueueFamilyIndex = 0,
+        .image = swapchain_image,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+    };
+
+    const VkDependencyInfo info{
+        .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .pNext                    = nullptr,
+        .dependencyFlags          = 0,
+        .memoryBarrierCount       = 0,
+        .pMemoryBarriers          = nullptr,
+        .bufferMemoryBarrierCount = 0,
+        .pBufferMemoryBarriers    = nullptr,
+        .imageMemoryBarrierCount  = 1,
+        .pImageMemoryBarriers     = &barrier,
+    };
+    impl->m_api.vkCmdPipelineBarrier2(reinterpret_cast<VkCommandBuffer>(buffer), &info);
+}
 
 }  // namespace loon::gpu

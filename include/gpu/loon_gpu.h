@@ -401,6 +401,8 @@ enum QUEUE_TYPE {
     QUEUE_DEFAULT,
     QUEUE_COMPUTE,
     QUEUE_TRANSFER,
+
+    QUEUE_VALID_COUNT,
 };
 
 enum PRESENT_MODE {
@@ -557,7 +559,7 @@ struct SurfaceTextureInfo {
 
 struct SemaphoreInfo {
     Handle<Semaphore> semaphore;
-    uint64_t          wait_value;
+    uint64_t          value;
     STAGE stage = STAGE_NONE;  // Ignored on signal operations, what stage must be blocked on the
                                // wait operation
 };
@@ -620,14 +622,14 @@ class Device {
     void                      freeBlendState(Handle<BlendState> state);
 
     // Queue
-    Handle<Queue>         getQueue(QUEUE_TYPE type = QUEUE_DEFAULT);
-    Handle<CommandBuffer> startCommandRecording(Handle<Queue> queue);
+    Handle<Queue> getQueue(QUEUE_TYPE type = QUEUE_DEFAULT);
+    CommandBuffer startCommandRecording(Handle<Queue> queue);
 
     // TODO: May want to wrap these args in a struct.
-    void submit(Handle<Queue>                     queue,
-                Span<const Handle<CommandBuffer>> commandBuffers,
-                Span<const SemaphoreInfo>         wait_semaphores,
-                Span<const SemaphoreInfo>         signal_semaphores = {});
+    void submit(Handle<Queue>             queue,
+                Span<const CommandBuffer> commandBuffers,
+                Span<const SemaphoreInfo> wait_semaphores,
+                Span<const SemaphoreInfo> signal_semaphores = {});
     void cancel(Handle<Queue> queue, Span<const Handle<CommandBuffer>> commandBuffers);
 
     // Semaphores
@@ -638,12 +640,12 @@ class Device {
    private:
     struct Impl;
     Impl* impl = nullptr;
+    friend class CommandBuffer;
 
     Device(Impl* impl) : impl{impl} {};
 };
 
-template <>
-class Handle<CommandBuffer> {
+class CommandBuffer {
    public:
     // Commands
     void memcpy(GpuPtr destGpu, GpuPtr srcGpu, size_t size);
@@ -701,9 +703,18 @@ void gpuWaitBefore(Handle<CommandBuffer> cb, STAGE after, GpuPtr ptrGpu,
     void drawMeshlets(GpuPtr meshletDataGpu, GpuPtr pixelDataGpu, const Dimension3D& dim);
     void drawMeshletsIndirect(GpuPtr meshletDataGpu, GpuPtr pixelDataGpu, GpuPtr dimGpu);
 
+
+    // Surface special functions - these introduce barriers to
+    void make_surface_writable();
+    void make_surface_presentable();
+
    private:
-    struct Impl;
-    Impl* impl;
+    // Internally, we don't bother keeping these as an indirect handle, and instead store the small
+    // amount of data we need inline.
+    friend class Device::Impl;
+    CommandBuffer(uint64_t buffer, uint64_t device) : buffer{buffer}, device(device) {};
+    uint64_t buffer;
+    uint64_t device;
 };
 
 }  // namespace loon::gpu

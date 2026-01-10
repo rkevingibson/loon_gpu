@@ -311,6 +311,18 @@ VkPresentModeKHR bridge(PRESENT_MODE mode) {
 //     return out;
 // }
 
+VkPipelineStageFlags2 bridge_pipeline_stage(STAGE stage) {
+    VkPipelineStageFlags2 out = 0;
+    switch (stage) {
+        case STAGE_NONE: return 0;
+        case STAGE_TRANSFER: return VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
+        case STAGE_COMPUTE: return VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        case STAGE_RASTER_COLOR_OUT: return VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        case STAGE_PIXEL_SHADER: return VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+        case STAGE_VERTEX_SHADER: return VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+    }
+}
+
 // VkSampleCountFlagBits bridge_sample_count(uint32_t sample_count) {
 //     switch (sample_count) {
 //         case 1: return VK_SAMPLE_COUNT_1_BIT;

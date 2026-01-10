@@ -131,7 +131,7 @@ void HelloTriangle::Update(const WindowState& window) {
     //     .occlusionQuerySet      = nullptr,
     //     .timestampWrites        = nullptr,
     // };
-
+    commandBuffer.make_surface_writable();
     commandBuffer.beginRenderPass({
         // TODO: Need to fill in stuff here.
     });
@@ -140,6 +140,7 @@ void HelloTriangle::Update(const WindowState& window) {
     commandBuffer.draw(0, 0, 3, 1);
 
     commandBuffer.endRenderPass();
+    commandBuffer.make_surface_presentable();
     m_device.submit(m_queue,
                     commandBuffer,
                     SemaphoreInfo{
@@ -147,7 +148,8 @@ void HelloTriangle::Update(const WindowState& window) {
                         .stage     = loon::gpu::STAGE_RASTER_COLOR_OUT,
                     });
 
-    m_device.present();
+
+    m_device.present(m_queue);
 
 
     m_device.freeTextureView(m_texture_heap, swapchain_view);
