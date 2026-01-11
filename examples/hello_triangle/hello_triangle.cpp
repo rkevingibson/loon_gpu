@@ -100,7 +100,6 @@ void HelloTriangle::Update(const WindowState& window) {
             .height       = window.height,
             .present_mode = PRESENT_MODE_FIFO,
         });
-
         return;
     } else if (surface_texture.status == loon::gpu::SurfaceTextureInfo::STATUS_ERROR) {
         return;

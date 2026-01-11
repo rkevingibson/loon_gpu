@@ -104,8 +104,7 @@ struct ThreadLocalState {
     ~ThreadLocalState() { allocator.free(arena_memory); }
 };
 
-// We force wider alignment to enable some pointer packing in low bits.
-struct alignas(max_align_t) Device::Impl {
+struct Device::Impl {
     bool initialize(const DeviceDesc& desc);
 
     void shutdown();
@@ -1688,6 +1687,21 @@ void CommandBuffer::draw(GpuPtr   vertexDataGpu,
                          uint32_t firstVertex,
                          uint32_t firstInstance) {
     auto impl = reinterpret_cast<Device::Impl*>(device);
+
+    if (vertexDataGpu != 0 || fragmentDataGpu != 0) {
+        VkDeviceAddress           addresses[2] = {vertexDataGpu, fragmentDataGpu};
+        const VkPushConstantsInfo info{
+            .sType      = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
+            .pNext      = nullptr,
+            .layout     = impl->m_default_graphics_layout,
+            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            .offset     = 0,
+            .size       = sizeof(addresses),
+            .pValues    = addresses,
+        };
+        impl->m_api.vkCmdPushConstants2(reinterpret_cast<VkCommandBuffer>(buffer), &info);
+    }
+
     impl->m_api.vkCmdDraw(reinterpret_cast<VkCommandBuffer>(buffer),
                           vertexCount,
                           instanceCount,
@@ -1707,7 +1721,7 @@ void CommandBuffer::make_surface_writable() {
         .srcStageMask  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
         .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
         .dstStageMask  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT,
+        .dstAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
         .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
         .newLayout = VK_IMAGE_LAYOUT_GENERAL,
         .srcQueueFamilyIndex = 0,
