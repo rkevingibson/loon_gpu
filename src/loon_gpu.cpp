@@ -1,5 +1,7 @@
 #include "gpu/loon_gpu.h"
 
+#include <cstddef>
+
 #include "containers.h"
 #include "gpu_to_vk.h"
 #include "utilities.h"
@@ -22,8 +24,13 @@ struct Buffer {
 };
 
 struct Texture {
-    VkImage       vk_image;
-    VmaAllocation vk_allocation;
+    VkImage         vk_image;
+    VmaAllocation   vk_allocation;
+    VkImageViewType vk_type = VK_IMAGE_VIEW_TYPE_2D;
+};
+
+struct TextureView {
+    VkImageView vk_image_view;
 };
 
 struct PhysicalDeviceInfo {
@@ -72,6 +79,11 @@ struct Surface {
     uint32_t    current_semaphore_idx = 0;
     VkSemaphore acquire_semaphores[kMaxSwapchainImages];
     VkSemaphore present_semaphores[kMaxSwapchainImages];
+
+    // We store the command buffer that recording
+    // the transition to PRESENT_KHR, so we can
+    // signal an extra semaphore on submission.
+    VkCommandBuffer transitioning_command[kMaxSwapchainImages];
 };
 
 struct Queue {
@@ -92,7 +104,8 @@ struct ThreadLocalState {
     ~ThreadLocalState() { allocator.free(arena_memory); }
 };
 
-struct Device::Impl {
+// We force wider alignment to enable some pointer packing in low bits.
+struct alignas(max_align_t) Device::Impl {
     bool initialize(const DeviceDesc& desc);
 
     void shutdown();
@@ -113,15 +126,14 @@ struct Device::Impl {
     // Textures:
     Handle<Texture>     createTexture(const GpuTextureDesc& desc);
     Handle<TextureHeap> createTextureHeap(size_t size);
-    uint32_t            createTextureView(Handle<TextureHeap> heap,
-                                          Handle<Texture>     texture,
-                                          TextureViewDesc     desc);
-    uint32_t            createRWTextureView(Handle<TextureHeap> heap,
-                                            Handle<Texture>     texture,
-                                            TextureViewDesc     desc);
-    void                free(Handle<Texture>);
-    void                free(Handle<TextureHeap>);
-    void                freeTextureView(Handle<TextureHeap> heap, uint32_t view);
+    Handle<TextureView> createTextureView(Handle<Texture> texture, TextureViewDesc desc);
+
+    uint32_t addTextureViewToHeap(Handle<TextureHeap>, Handle<TextureView>);
+    void     removeTextureViewFromHeap(Handle<TextureHeap>, uint32_t);
+
+    void free(Handle<Texture>);
+    void free(Handle<TextureHeap>);
+    void freeTextureView(Handle<TextureHeap> heap, uint32_t view);
 
     // Pipelines
     Handle<Pipeline> createComputePipeline(ShaderSource computeIR);
@@ -178,8 +190,9 @@ struct Device::Impl {
     VkDescriptorSetLayout m_default_descriptor_layout;
     VkPipelineLayout      m_default_graphics_layout;
 
-    ObjectPool<Buffer, kMaxNumBuffers>   m_buffer_pool;
-    ObjectPool<Texture, kMaxNumTextures> m_texture_pool;
+    ObjectPool<Buffer, kMaxNumBuffers>           m_buffer_pool;
+    ObjectPool<Texture, kMaxNumTextures>         m_texture_pool;
+    ObjectPool<TextureView, kMaxNumTextureViews> m_texture_view_pool;
 
     Queue m_queues[QUEUE_VALID_COUNT];
 
@@ -925,6 +938,41 @@ GpuPtr Device::Impl::getDevicePointer(Handle<Buffer> buffer) {
     return m_api.vkGetBufferDeviceAddress(m_device, &addr_info);
 }
 
+// MARK: Textures
+
+Handle<Texture> Device::Impl::createTexture(const GpuTextureDesc& desc) {
+    return {};
+}
+
+Handle<TextureView> Device::Impl::createTextureView(Handle<Texture> tex, TextureViewDesc desc) {
+    auto& texture = m_texture_pool[tex.h];
+    const VkImageViewCreateInfo info {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .pNext = nullptr,
+        .flags      = 0,
+        .image      = texture.vk_image,
+        .viewType   = texture.vk_type,
+        .format     = bridge(desc.format),
+        .components = {VK_COMPONENT_SWIZZLE_IDENTITY,
+                        VK_COMPONENT_SWIZZLE_IDENTITY,
+                        VK_COMPONENT_SWIZZLE_IDENTITY,
+                        VK_COMPONENT_SWIZZLE_IDENTITY,},
+        .subresourceRange = {
+        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel = desc.baseMip,
+        .levelCount = desc.mipCount,
+        .baseArrayLayer = desc.baseLayer,
+        .layerCount = desc.layerCount,
+        },
+    };
+    VkImageView image_view;
+    if (!chk(m_api.vkCreateImageView(m_device, &info, nullptr, &image_view))) { return {}; }
+    const auto handle = m_texture_view_pool.get();
+
+    m_texture_view_pool[handle].vk_image_view = image_view;
+    return {.h = handle};
+}
+
 // MARK: Pipelines
 Handle<Pipeline> Device::Impl::createGraphicsPipeline(ShaderSource vertex,
                                                       ShaderSource fragment,
@@ -1210,7 +1258,9 @@ void Device::Impl::submit(Handle<Queue>             queue,
     auto* command_info = reinterpret_cast<VkCommandBufferSubmitInfo*>(
         arena.alloc(sizeof(VkCommandBufferSubmitInfo) * command_buffers.size()));
     auto* signal_info = reinterpret_cast<VkSemaphoreSubmitInfo*>(
-        arena.alloc(sizeof(VkSemaphoreSubmitInfo) * signal_semaphores.size()));
+        arena.alloc(sizeof(VkSemaphoreSubmitInfo) * signal_semaphores.size() + 1));
+
+    uint32_t num_signals = signal_semaphores.size();
 
     if (signal_info == nullptr || command_info == nullptr || wait_info == nullptr) {
         // Submission failed, need to figure out a fallback or error situation.
@@ -1239,6 +1289,19 @@ void Device::Impl::submit(Handle<Queue>             queue,
             .commandBuffer = buf,
             .deviceMask    = 1,
         };
+
+        if (buf == m_surface.transitioning_command[m_surface.current_semaphore_idx]) {
+            // TODO:
+            signal_info[num_signals] = VkSemaphoreSubmitInfo{
+                .sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+                .pNext       = nullptr,
+                .semaphore   = m_surface.present_semaphores[m_surface.current_semaphore_idx],
+                .value       = 0,
+                .stageMask   = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                .deviceIndex = 0,
+            };
+            num_signals++;
+        }
     }
 
     for (uint32_t i = 0; i < signal_semaphores.size(); ++i) {
@@ -1260,7 +1323,7 @@ void Device::Impl::submit(Handle<Queue>             queue,
         .pWaitSemaphoreInfos      = wait_info,
         .commandBufferInfoCount   = static_cast<uint32_t>(command_buffers.size()),
         .pCommandBufferInfos      = command_info,
-        .signalSemaphoreInfoCount = static_cast<uint32_t>(signal_semaphores.size()),
+        .signalSemaphoreInfoCount = num_signals,
         .pSignalSemaphoreInfos    = signal_info,
     };
 
@@ -1498,19 +1561,13 @@ Handle<TextureHeap> Device::createTextureHeap(size_t size) {
     return {};
 }
 
-uint32_t Device::createTextureView(Handle<TextureHeap> heap,
-                                   Handle<Texture>     texture,
-                                   TextureViewDesc     desc) {
-    return 0;
+Handle<TextureView> Device::createTextureView(Handle<Texture> texture, TextureViewDesc desc) {
+    return impl->createTextureView(texture, desc);
 }
-uint32_t Device::createRWTextureView(Handle<TextureHeap> heap,
-                                     Handle<Texture>     texture,
-                                     TextureViewDesc     desc) {
-    return 0;
-}
+
 void Device::free(Handle<Texture>) {}
 void Device::free(Handle<TextureHeap>) {}
-void Device::freeTextureView(Handle<TextureHeap> heap, uint32_t view) {}
+void Device::free(Handle<TextureView>) {}
 
 
 Handle<Pipeline> Device::createGraphicsPipeline(ShaderSource      vertex,
@@ -1540,6 +1597,18 @@ void Device::submit(Handle<Queue>             queue,
 
 void Device::cancel(Handle<Queue> queue, Span<const Handle<CommandBuffer>> commandBuffers) {}
 
+Handle<Semaphore> Device::createSemaphore(uint64_t initValue) {
+    return impl->createSemaphore(initValue);
+}
+
+void Device::waitSemaphore(Handle<Semaphore> sema, uint64_t value) {
+    impl->waitSemaphore(sema, value);
+}
+
+void Device::destroySemaphore(Handle<Semaphore> sema) {
+    impl->destroySemaphore(sema);
+}
+
 
 // MARK: Commmand Buffer
 
@@ -1551,9 +1620,66 @@ void CommandBuffer::setPipeline(Handle<Pipeline> pipeline) {
         reinterpret_cast<VkPipeline>(pipeline.h));
 }
 
-void CommandBuffer::beginRenderPass(RenderPassDesc desc) {}
+void CommandBuffer::beginRenderPass(RenderPassDesc desc) {
+    auto impl = reinterpret_cast<Device::Impl*>(device);
 
-void CommandBuffer::endRenderPass() {}
+    loon::gpu::Stack<VkRenderingAttachmentInfo, kMaxColorAttachments> color_attachments;
+
+    for (const auto& attachment : desc.color_attachments) {
+        color_attachments.push({
+            .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+            .pNext              = nullptr,
+            .imageView          = impl->m_texture_view_pool[attachment.texture_view.h].vk_image_view,
+            .imageLayout        = VK_IMAGE_LAYOUT_GENERAL,
+            .resolveMode        = VK_RESOLVE_MODE_NONE,  // TODO: Multisampling support
+            .resolveImageView   = VK_NULL_HANDLE,
+            .resolveImageLayout = VK_IMAGE_LAYOUT_GENERAL,
+            .loadOp             = bridge(attachment.load_op),
+            .storeOp            = bridge(attachment.store_op),
+            .clearValue         = {.color = {.uint32 = {attachment.clear_color.r,attachment.clear_color.g,attachment.clear_color.b,attachment.clear_color.a},},},
+        });
+    }
+
+    // TODO: Depth/stencil values
+    const VkRect2D render_rect = {
+            .offset = {.x = (int32_t)desc.render_area.offset_x, .y = (int32_t)desc.render_area.offset_y,},
+            .extent = {.width = desc.render_area.width, .height = desc.render_area.height,},
+        };
+    const VkRenderingInfo rendering_info{
+        .sType                = VK_STRUCTURE_TYPE_RENDERING_INFO,
+        .pNext                = nullptr,
+        .flags                = 0,
+        .renderArea           = render_rect,
+        .layerCount           = 1,
+        .viewMask             = 0,
+        .colorAttachmentCount = color_attachments.size(),
+        .pColorAttachments    = color_attachments.data(),
+        .pDepthAttachment     = nullptr,
+        .pStencilAttachment   = nullptr,
+    };
+    impl->m_api.vkCmdBeginRendering(reinterpret_cast<VkCommandBuffer>(buffer), &rendering_info);
+
+    // Set default values for dynamic state:
+    impl->m_api.vkCmdSetDepthTestEnable(reinterpret_cast<VkCommandBuffer>(buffer), false);
+    impl->m_api.vkCmdSetStencilTestEnable(reinterpret_cast<VkCommandBuffer>(buffer), false);
+    VkViewport viewport{
+        .x        = 0,
+        .y        = 0,
+        .width    = (float)desc.render_area.width,
+        .height   = (float)desc.render_area.height,
+        .minDepth = 0,
+        .maxDepth = 1.0,
+    };
+    impl->m_api.vkCmdSetViewportWithCount(reinterpret_cast<VkCommandBuffer>(buffer), 1, &viewport);
+    impl->m_api.vkCmdSetScissorWithCount(reinterpret_cast<VkCommandBuffer>(buffer),
+                                         1,
+                                         &render_rect);
+}
+
+void CommandBuffer::endRenderPass() {
+    auto impl = reinterpret_cast<Device::Impl*>(device);
+    impl->m_api.vkCmdEndRendering(reinterpret_cast<VkCommandBuffer>(buffer));
+}
 
 void CommandBuffer::draw(GpuPtr   vertexDataGpu,
                          GpuPtr   fragmentDataGpu,
@@ -1649,6 +1775,8 @@ void CommandBuffer::make_surface_presentable() {
         .pImageMemoryBarriers     = &barrier,
     };
     impl->m_api.vkCmdPipelineBarrier2(reinterpret_cast<VkCommandBuffer>(buffer), &info);
+    impl->m_surface.transitioning_command[impl->m_surface.current_semaphore_idx]
+        = reinterpret_cast<VkCommandBuffer>(buffer);
 }
 
 }  // namespace loon::gpu

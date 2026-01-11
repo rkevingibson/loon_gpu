@@ -1,5 +1,7 @@
 #include "gpu_to_vk.h"
 
+#include "vulkan/vulkan_core.h"
+
 namespace loon::gpu {
 
 
@@ -447,6 +449,22 @@ VkPipelineColorBlendAttachmentState bridge(const BlendDesc& state) {
         .alphaBlendOp        = bridge(state.alphaOp),
         .colorWriteMask      = state.colorWriteMask,
     };
+}
+
+VkAttachmentLoadOp bridge(LOAD_OP op) {
+    switch (op) {
+        case LOAD_OP_UNDEFINED: return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        case LOAD_OP_LOAD: return VK_ATTACHMENT_LOAD_OP_LOAD;
+        case LOAD_OP_CLEAR: return VK_ATTACHMENT_LOAD_OP_CLEAR;
+    }
+}
+
+VkAttachmentStoreOp bridge(STORE_OP op) {
+    switch (op) {
+        case STORE_OP_UNDEFINED: return VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        case STORE_OP_STORE: return VK_ATTACHMENT_STORE_OP_STORE;
+        case STORE_OP_DISCARD: return VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    }
 }
 
 // VkStencilOp bridge(WGPUStencilOperation op) {

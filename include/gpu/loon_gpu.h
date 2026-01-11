@@ -15,6 +15,7 @@ namespace loon::gpu {
 constexpr size_t kMaxColorAttachments = 16;
 constexpr size_t kMaxNumBuffers       = 32ull * 1024;
 constexpr size_t kMaxNumTextures      = 64ull * 1024;
+constexpr size_t kMaxNumTextureViews  = 128ull * 1024;
 constexpr size_t kMaxTextureHeapSize  = 32ull * 1024;
 
 template <class T>
@@ -189,6 +190,7 @@ struct Pipeline;
 struct Buffer;
 struct Texture;
 struct TextureHeap;
+struct TextureView;
 struct DepthStencilState;
 struct BlendState;
 struct Queue;
@@ -234,6 +236,7 @@ enum FACTOR {
     FACTOR_DST_COLOR,
     FACTOR_SRC_ALPHA,
 };
+
 
 enum TOPOLOGY { TOPOLOGY_TRIANGLE_LIST, TOPOLOGY_TRIANGLE_STRIP, TOPOLOGY_TRIANGLE_FAN };
 
@@ -432,6 +435,20 @@ struct Dimension3D {
     uint32_t x, y, z;
 };
 
+struct Rect2D {
+    uint32_t offset_x = 0;
+    uint32_t offset_y = 0;
+    uint32_t width;
+    uint32_t height;
+};
+
+struct Color {
+    uint32_t r;
+    uint32_t g;
+    uint32_t b;
+    uint32_t a;
+};
+
 struct Stencil {
     OP      test        = OP_ALWAYS;
     OP      failOp      = OP_KEEP;
@@ -493,12 +510,15 @@ struct RasterDesc {
 };
 
 struct RenderAttachment {
-    OP load_op;
-    OP store_op;
+    Handle<TextureView> texture_view;
+    LOAD_OP             load_op;
+    STORE_OP            store_op;
+    Color               clear_color;
 };
 
 struct RenderPassDesc {
     Span<const RenderAttachment> color_attachments;
+    Rect2D                       render_area;
 };
 
 struct GpuTextureDesc {
@@ -595,15 +615,14 @@ class Device {
     Handle<Texture>     createTexture(const GpuTextureDesc& desc);
     Handle<TextureHeap> createTextureHeap(size_t size);
 
-    uint32_t createTextureView(Handle<TextureHeap> heap,
-                               Handle<Texture>     texture,
-                               TextureViewDesc     desc);
-    uint32_t createRWTextureView(Handle<TextureHeap> heap,
-                                 Handle<Texture>     texture,
-                                 TextureViewDesc     desc);
-    void     free(Handle<Texture>);
-    void     free(Handle<TextureHeap>);
-    void     freeTextureView(Handle<TextureHeap> heap, uint32_t view);
+    Handle<TextureView> createTextureView(Handle<Texture> texture, TextureViewDesc desc);
+
+    uint32_t addTextureViewToHeap(Handle<TextureHeap>, Handle<TextureView>);
+    void     removeTextureViewFromHeap(Handle<TextureHeap>, uint32_t);
+
+    void free(Handle<Texture>);
+    void free(Handle<TextureHeap>);
+    void free(Handle<TextureView>);
 
     // Pipelines
     Handle<Pipeline> createComputePipeline(ByteSpan computeIR);

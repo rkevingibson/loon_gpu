@@ -12,10 +12,10 @@ class HelloTriangle : public Example {
     void Update(const WindowState& window) override;
 
    private:
-    Device           m_device;
-    Handle<Queue>    m_queue;
-    FORMAT           m_swapchain_format;
-    Handle<Pipeline> m_render_pipeline;
-
-    Handle<TextureHeap> m_texture_heap;
+    Device            m_device;
+    Handle<Queue>     m_queue;
+    FORMAT            m_swapchain_format;
+    Handle<Pipeline>  m_render_pipeline;
+    Handle<Semaphore> m_semaphore;
+    uint64_t          m_frame_idx = 0;
 };

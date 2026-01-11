@@ -35,8 +35,8 @@ VkImageUsageFlags bridge_usage_flags(USAGE_FLAGS usage);
 VkPipelineColorBlendAttachmentState bridge(const BlendDesc& state);
 // VkPipelineDepthStencilStateCreateInfo bridge(const WGPUDepthStencilState& state);
 
-// VkAttachmentLoadOp  bridge(WGPULoadOp op);
-// VkAttachmentStoreOp bridge(WGPUStoreOp op);
+VkAttachmentLoadOp  bridge(LOAD_OP op);
+VkAttachmentStoreOp bridge(STORE_OP op);
 // VkClearColorValue   bridge_clear_color_value(WGPUColor color, VkFormat format);
 
 // uint32_t texel_block_width(WGPUTextureFormat format);

@@ -14,6 +14,7 @@
 #include <cassert>
 
 #include "common/shaders.h"
+#include "vulkan/vulkan_core.h"
 
 using namespace loon::gpu;
 
@@ -76,7 +77,8 @@ HelloTriangle::HelloTriangle(const WindowState& window_state) {
 
     assert(m_render_pipeline.h != 0);
 
-    m_queue = m_device.getQueue();
+    m_queue     = m_device.getQueue();
+    m_semaphore = m_device.createSemaphore(0);
 }
 
 HelloTriangle::~HelloTriangle() {
@@ -85,6 +87,9 @@ HelloTriangle::~HelloTriangle() {
 }
 
 void HelloTriangle::Update(const WindowState& window) {
+    constexpr uint64_t kMaxFramesInFlight = 3;
+    m_device.waitSemaphore(m_semaphore,
+                           std::max(m_frame_idx, kMaxFramesInFlight) - kMaxFramesInFlight);
     auto surface_texture = m_device.get_current_texture();
     if (surface_texture.status == loon::gpu::SurfaceTextureInfo::STATUS_OUT_OF_DATE) {
         m_device.unconfigure_surface();
@@ -101,8 +106,7 @@ void HelloTriangle::Update(const WindowState& window) {
         return;
     }
 
-    auto swapchain_view = m_device.createTextureView(m_texture_heap,
-                                                     surface_texture.texture,
+    auto swapchain_view = m_device.createTextureView(surface_texture.texture,
                                                      TextureViewDesc{
                                                          .format     = m_swapchain_format,
                                                          .baseMip    = 0,
@@ -113,28 +117,14 @@ void HelloTriangle::Update(const WindowState& window) {
 
     auto commandBuffer = m_device.startCommandRecording(m_queue);
 
-    // WGPURenderPassColorAttachment color_attachment{
-    //     .nextInChain   = nullptr,
-    //     .view          = swapchain_view,
-    //     .depthSlice    = WGPU_DEPTH_SLICE_UNDEFINED,
-    //     .resolveTarget = nullptr,
-    //     .loadOp        = WGPULoadOp_Clear,
-    //     .storeOp       = WGPUStoreOp_Store,
-    //     .clearValue    = WGPUColor{.r = 0.f, .g = 0.f, .b = 0.f, .a = 1.f},
-    // };
-    // WGPURenderPassDescriptor render_pass_descriptor{
-    //     .nextInChain            = nullptr,
-    //     .label                  = "Render pass"_wsv,
-    //     .colorAttachmentCount   = 1,
-    //     .colorAttachments       = &color_attachment,
-    //     .depthStencilAttachment = nullptr,
-    //     .occlusionQuerySet      = nullptr,
-    //     .timestampWrites        = nullptr,
-    // };
     commandBuffer.make_surface_writable();
-    commandBuffer.beginRenderPass({
-        // TODO: Need to fill in stuff here.
-    });
+    commandBuffer.beginRenderPass({.render_area = {.width = window.width, .height = window.height},
+                                   .color_attachments = RenderAttachment{
+                                       .texture_view = swapchain_view,
+                                       .load_op      = loon::gpu::LOAD_OP_CLEAR,
+                                       .store_op     = loon::gpu::STORE_OP_STORE,
+                                       .clear_color  = Color(0, 0, 0, 0),
+                                   }});
 
     commandBuffer.setPipeline(m_render_pipeline);
     commandBuffer.draw(0, 0, 3, 1);
@@ -146,12 +136,12 @@ void HelloTriangle::Update(const WindowState& window) {
                     SemaphoreInfo{
                         .semaphore = surface_texture.acquire_semaphore,
                         .stage     = loon::gpu::STAGE_RASTER_COLOR_OUT,
+                    },
+                    SemaphoreInfo{
+                        .semaphore = m_semaphore,
+                        .value     = ++m_frame_idx,
                     });
 
-
     m_device.present(m_queue);
-
-
-    m_device.freeTextureView(m_texture_heap, swapchain_view);
-    // wgpuTextureRelease(surface_texture.texture);
+    m_device.free(swapchain_view);
 }
