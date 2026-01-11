@@ -728,6 +728,8 @@ void gpuWaitBefore(Handle<CommandBuffer> cb, STAGE after, GpuPtr ptrGpu,
     void make_surface_presentable();
 
    private:
+    void set_graphics_ptrs(GpuPtr vertexDataGpu, GpuPtr fragmentDataGpu);
+
     // Internally, we don't bother keeping these as an indirect handle, and instead store the small
     // amount of data we need inline.
     friend class Device::Impl;

@@ -362,28 +362,6 @@ class HashTable {
     NO_UNIQUE_ADDR std::hash<Key> m_hasher{};
 };
 
-// MARK: Stack
-
-template <class T, uint32_t Size>
-class Stack {
-   public:
-    void                      push(const T& val) { m_data[m_size++] = val; }
-    void                      resize(uint32_t size) { m_size = size; }
-    T*                        data() { return m_data; }
-    const T*                  data() const { return m_data; }
-    const T*                  begin() const { return m_data; }
-    const T*                  end() const { return m_data + m_size; }
-    uint32_t                  size() const { return m_size; }
-    static constexpr uint32_t capacity() { return Size; }
-    T&                        operator[](uint32_t i) { return m_data[i]; }
-    const T&                  operator[](uint32_t i) const { return m_data[i]; }
-
-   private:
-    T        m_data[Size];
-    uint32_t m_size = 0;
-};
-
-
 // MARK: Implementations:
 
 
