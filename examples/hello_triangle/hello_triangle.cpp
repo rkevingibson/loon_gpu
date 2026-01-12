@@ -56,6 +56,8 @@ HelloTriangle::HelloTriangle(const WindowState& window_state) {
         .height       = window_state.height,
         .present_mode = PRESENT_MODE_FIFO,
     });
+    m_swapchain_width  = window_state.width;
+    m_swapchain_height = window_state.height;
 
     // Load shaders and create render pipeline
     ShaderModule shader         = window_state.shader_loader->load_module("hello_triangle.slang");
@@ -80,6 +82,7 @@ HelloTriangle::HelloTriangle(const WindowState& window_state) {
 }
 
 HelloTriangle::~HelloTriangle() {
+    m_device.wait_for_device_idle();
     m_device.freePipeline(m_render_pipeline);
     m_device.unconfigure_surface();
 }
@@ -89,7 +92,8 @@ void HelloTriangle::Update(const WindowState& window) {
     m_device.waitSemaphore(m_semaphore,
                            std::max(m_frame_idx, kMaxFramesInFlight) - kMaxFramesInFlight);
     auto surface_texture = m_device.get_current_texture();
-    if (surface_texture.status == loon::gpu::SurfaceTextureInfo::STATUS_OUT_OF_DATE) {
+    if (surface_texture.status == loon::gpu::SurfaceTextureInfo::STATUS_OUT_OF_DATE
+        || surface_texture.status == loon::gpu::SurfaceTextureInfo::STATUS_SUBOPTIMAL) {
         m_device.unconfigure_surface();
         m_device.configure_surface({
             .format       = m_swapchain_format,
@@ -98,6 +102,8 @@ void HelloTriangle::Update(const WindowState& window) {
             .height       = window.height,
             .present_mode = PRESENT_MODE_FIFO,
         });
+        m_swapchain_width  = window.width;
+        m_swapchain_height = window.height;
         return;
     } else if (surface_texture.status == loon::gpu::SurfaceTextureInfo::STATUS_ERROR) {
         return;
@@ -121,7 +127,7 @@ void HelloTriangle::Update(const WindowState& window) {
                                        .load_op      = loon::gpu::LOAD_OP_CLEAR,
                                        .store_op     = loon::gpu::STORE_OP_STORE,
                                        .clear_color  = Color(0, 0, 0, 0),
-                                   }, .render_area = {.width = window.width, .height = window.height},});
+                                   }, .render_area = {.width = m_swapchain_width, .height = m_swapchain_height},});
 
     commandBuffer.setPipeline(m_render_pipeline);
     commandBuffer.draw(0, 0, 3, 1);

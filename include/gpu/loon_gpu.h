@@ -669,6 +669,8 @@ class Device {
         return *this;
     }
 
+    void wait_for_device_idle();
+
     // Surface:
     SurfaceCapabilities get_surface_capabilities();
     bool                configure_surface(const SurfaceConfiguration& config);

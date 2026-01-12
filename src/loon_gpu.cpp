@@ -124,6 +124,8 @@ struct Device::Impl {
 
     void shutdown();
 
+    void wait_for_device_idle();
+
     // Surface:
     SurfaceCapabilities get_surface_capabilities();
     bool                configure_surface(const SurfaceConfiguration& config);
@@ -689,6 +691,11 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
 void Device::Impl::shutdown() {
     vkDestroyInstance(m_instance, nullptr);
     volkFinalize();
+}
+
+
+void Device::Impl::wait_for_device_idle() {
+    chk(m_api.vkDeviceWaitIdle(m_device));
 }
 
 // MARK: Surface
@@ -1602,6 +1609,10 @@ Device::~Device() {
     if (impl) { delete impl; }
 }
 
+void Device::wait_for_device_idle() {
+    impl->wait_for_device_idle();
+}
+
 SurfaceCapabilities Device::get_surface_capabilities() {
     return impl->get_surface_capabilities();
 }
@@ -1715,6 +1726,7 @@ void CommandBuffer::setPipeline(Handle<Pipeline> pipeline) {
 
 void CommandBuffer::beginRenderPass(RenderPassDesc desc) {
     auto impl = reinterpret_cast<Device::Impl*>(device);
+    auto cmd  = reinterpret_cast<VkCommandBuffer>(buffer);
 
     Arena                           arena = *impl->get_thread_local_arena();
     Span<VkRenderingAttachmentInfo> color_attachments;
@@ -1751,11 +1763,21 @@ void CommandBuffer::beginRenderPass(RenderPassDesc desc) {
         .pDepthAttachment     = nullptr,
         .pStencilAttachment   = nullptr,
     };
-    impl->m_api.vkCmdBeginRendering(reinterpret_cast<VkCommandBuffer>(buffer), &rendering_info);
+    impl->m_api.vkCmdBeginRendering(cmd, &rendering_info);
 
     // Set default values for dynamic state:
-    impl->m_api.vkCmdSetDepthTestEnable(reinterpret_cast<VkCommandBuffer>(buffer), false);
-    impl->m_api.vkCmdSetStencilTestEnable(reinterpret_cast<VkCommandBuffer>(buffer), false);
+    impl->m_api.vkCmdSetDepthWriteEnable(cmd, false);
+    impl->m_api.vkCmdSetDepthTestEnable(cmd, false);
+    impl->m_api.vkCmdSetDepthCompareOp(cmd, VK_COMPARE_OP_ALWAYS);
+    impl->m_api.vkCmdSetDepthBoundsTestEnable(cmd, true);
+    impl->m_api.vkCmdSetStencilTestEnable(cmd, false);
+    impl->m_api.vkCmdSetStencilOp(cmd,
+                                  VK_STENCIL_FACE_FRONT_AND_BACK,
+                                  VK_STENCIL_OP_KEEP,
+                                  VK_STENCIL_OP_KEEP,
+                                  VK_STENCIL_OP_KEEP,
+                                  VK_COMPARE_OP_ALWAYS);
+
     VkViewport viewport{
         .x        = 0,
         .y        = 0,
