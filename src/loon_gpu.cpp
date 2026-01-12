@@ -1778,17 +1778,13 @@ void CommandBuffer::endRenderPass() {
 void CommandBuffer::set_graphics_ptrs(GpuPtr vertexDataGpu, GpuPtr fragmentDataGpu) {
     auto impl = reinterpret_cast<Device::Impl*>(device);
     if (vertexDataGpu != 0 || fragmentDataGpu != 0) {
-        VkDeviceAddress           addresses[2] = {vertexDataGpu, fragmentDataGpu};
-        const VkPushConstantsInfo info{
-            .sType      = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
-            .pNext      = nullptr,
-            .layout     = impl->m_default_graphics_layout,
-            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-            .offset     = 0,
-            .size       = sizeof(addresses),
-            .pValues    = addresses,
-        };
-        impl->m_api.vkCmdPushConstants2(reinterpret_cast<VkCommandBuffer>(buffer), &info);
+        VkDeviceAddress addresses[2] = {vertexDataGpu, fragmentDataGpu};
+        impl->m_api.vkCmdPushConstants(reinterpret_cast<VkCommandBuffer>(buffer),
+                                       impl->m_default_graphics_layout,
+                                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                                       0,
+                                       sizeof(addresses),
+                                       addresses);
     }
 }
 

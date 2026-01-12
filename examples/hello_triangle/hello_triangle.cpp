@@ -115,13 +115,13 @@ void HelloTriangle::Update(const WindowState& window) {
     auto commandBuffer = m_device.startCommandRecording(m_queue);
 
     commandBuffer.make_surface_writable();
-    commandBuffer.beginRenderPass({.render_area = {.width = window.width, .height = window.height},
+    commandBuffer.beginRenderPass({
                                    .color_attachments = RenderAttachment{
                                        .texture_view = swapchain_view,
                                        .load_op      = loon::gpu::LOAD_OP_CLEAR,
                                        .store_op     = loon::gpu::STORE_OP_STORE,
                                        .clear_color  = Color(0, 0, 0, 0),
-                                   }});
+                                   }, .render_area = {.width = window.width, .height = window.height},});
 
     commandBuffer.setPipeline(m_render_pipeline);
     commandBuffer.draw(0, 0, 3, 1);
