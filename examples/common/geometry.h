@@ -12,7 +12,7 @@
 // towards camera, out of the screen.)
 ///
 
-struct alignas(16) float3 {
+struct float3 {
     float x, y, z;
 };
 

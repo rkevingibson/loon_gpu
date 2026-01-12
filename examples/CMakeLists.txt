@@ -1,7 +1,7 @@
 # If we're building examples, we need a copy of slang.
 if(WIN32)
     set(SLANG_URL
-        https://github.com/shader-slang/slang/releases/download/v2025.10/slang-2025.10-windows-x86_64.zip
+        https://github.com/shader-slang/slang/releases/download/v2025.24.3/slang-2025.24.3-windows-x86_64.zip
     )
 elseif(APPLE)
     set(SLANG_URL
@@ -28,7 +28,7 @@ if(WIN32)
     )
     # TODO: Copy the dlls to the install directory on install.
 
-    set(SLANG_DLLS slang.dll slang-llvm.dll slang-rt.dll slang-glslang.dll)
+    set(SLANG_DLLS slang.dll slang-llvm.dll slang-rt.dll slang-glslang.dll slang-compiler.dll)
 
     list(
         TRANSFORM SLANG_DLLS

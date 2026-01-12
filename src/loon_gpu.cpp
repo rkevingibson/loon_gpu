@@ -23,6 +23,8 @@ static constexpr size_t kRequiredDeviceExtensionsCount
 struct Buffer {
     VkBuffer      vk_buffer;
     VmaAllocation vk_allocation;
+    void*         host_ptr;
+    GpuPtr        device_ptr;
 };
 
 struct Texture {
@@ -138,6 +140,7 @@ struct Device::Impl {
     Handle<Buffer>  malloc(size_t bytes, size_t align, MEMORY memory = MEMORY_DEFAULT);
     void            free(Handle<Buffer> buffer);
     GpuPtr          get_device_pointer(Handle<Buffer> buffer);
+    void*           get_host_pointer(Handle<Buffer> buffer);
     BufferAndOffset buffer_and_offset_from_ptr(GpuPtr ptr);
 
 
@@ -214,6 +217,14 @@ struct Device::Impl {
     ObjectPool<Buffer, kMaxNumBuffers>           m_buffer_pool;
     ObjectPool<Texture, kMaxNumTextures>         m_texture_pool;
     ObjectPool<TextureView, kMaxNumTextureViews> m_texture_view_pool;
+
+    struct GpuPtrMap {
+        GpuPtr   ptr;
+        uint32_t buffer_idx;
+    };
+    static constexpr auto kPtrMapCompare
+        = [](const GpuPtrMap& a, const GpuPtrMap& b) -> bool { return a.ptr > b.ptr; };
+    Vector<GpuPtrMap> m_ptr_map;
 
     Queue m_queues[QUEUE_VALID_COUNT];
 
@@ -644,7 +655,7 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
     // Initialize VMA:
 
     VmaAllocatorCreateInfo vma_create_info{
-        .flags                          = 0,
+        .flags                          = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
         .physicalDevice                 = m_physical_device,
         .device                         = m_device,
         .preferredLargeHeapBlockSize    = 0,
@@ -659,10 +670,6 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
     VmaVulkanFunctions vulkan_functions;
     vmaImportVulkanFunctionsFromVolk(&vma_create_info, &vulkan_functions);
     vma_create_info.pVulkanFunctions = &vulkan_functions;
-
-    vma_create_info.flags            = 0;
-    vma_create_info.vulkanApiVersion = VK_API_VERSION_1_3;
-    vma_create_info.physicalDevice   = m_physical_device;
     vmaCreateAllocator(&vma_create_info, &m_vma);
 
     // Initialize the surface objects:
@@ -944,35 +951,70 @@ Handle<Buffer> Device::Impl::malloc(size_t bytes, size_t align, MEMORY memory) {
         .priority       = 0.,
     };
 
-    VkBuffer      vk_buffer     = nullptr;
-    VmaAllocation vk_allocation = nullptr;
-    chk(vmaCreateBuffer(m_vma, &create_info, &alloc_info, &vk_buffer, &vk_allocation, nullptr));
+    VkBuffer          vk_buffer     = nullptr;
+    VmaAllocation     vk_allocation = nullptr;
+    VmaAllocationInfo vma_alloc_info;
+    chk(vmaCreateBuffer(m_vma,
+                        &create_info,
+                        &alloc_info,
+                        &vk_buffer,
+                        &vk_allocation,
+                        &vma_alloc_info));
+
+    VkBufferDeviceAddressInfo addr_info{
+        .sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+        .pNext  = nullptr,
+        .buffer = vk_buffer,
+    };
+    GpuPtr device_ptr = m_api.vkGetBufferDeviceAddress(m_device, &addr_info);
 
     const uint32_t buffer_idx = m_buffer_pool.get();
     m_buffer_pool[buffer_idx] = {
         .vk_buffer     = vk_buffer,
         .vk_allocation = vk_allocation,
+        .host_ptr      = vma_alloc_info.pMappedData,
+        .device_ptr    = device_ptr,
     };
+
+
+    // TODO: Don't re-sort the whole thing, insert in the right spot.
+    m_ptr_map.push_back({.ptr = device_ptr, .buffer_idx = buffer_idx});
+    std::sort(m_ptr_map.begin(), m_ptr_map.end(), kPtrMapCompare);
+
     return {.h = buffer_idx};
 }
 
 void Device::Impl::free(Handle<Buffer> buffer) {
     auto& b = m_buffer_pool[buffer.h];
     vmaDestroyBuffer(m_vma, b.vk_buffer, b.vk_allocation);
+    auto it = std::lower_bound(
+        m_ptr_map.begin(),
+        m_ptr_map.end(),
+        GpuPtrMap{.ptr = b.device_ptr, .buffer_idx = static_cast<uint32_t>(buffer.h)},
+        kPtrMapCompare);
+    m_ptr_map.erase(it, it + 1);
 }
 
 GpuPtr Device::Impl::get_device_pointer(Handle<Buffer> buffer) {
-    VkBufferDeviceAddressInfo addr_info{
-        .sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
-        .pNext  = nullptr,
-        .buffer = m_buffer_pool[buffer.h].vk_buffer,
-    };
-    return m_api.vkGetBufferDeviceAddress(m_device, &addr_info);
+    return m_buffer_pool[buffer.h].device_ptr;
+}
+
+void* Device::Impl::get_host_pointer(Handle<Buffer> buffer) {
+    return m_buffer_pool[buffer.h].host_ptr;
 }
 
 BufferAndOffset Device::Impl::buffer_and_offset_from_ptr(GpuPtr ptr) {
     // TODO: On buffer creation, store the ptr in a sorted list, so we can look it up later.
-    return {.buffer = VK_NULL_HANDLE, .offset = 0};
+
+    const auto  it = std::lower_bound(m_ptr_map.begin(),
+                                     m_ptr_map.end(),
+                                     GpuPtrMap{.ptr = ptr},
+                                     kPtrMapCompare);
+    const auto& b  = m_buffer_pool[it->buffer_idx];
+    return {
+        .buffer = b.vk_buffer,
+        .offset = static_cast<uint32_t>(ptr - b.device_ptr),
+    };
 }
 
 // MARK: Textures
@@ -1645,8 +1687,12 @@ void Device::free(Handle<Buffer> buffer) {
     return impl->free(buffer);
 }
 
-GpuPtr Device::getDevicePointer(Handle<Buffer> buffer) {
+GpuPtr Device::get_device_pointer(Handle<Buffer> buffer) {
     return impl->get_device_pointer(buffer);
+}
+
+void* Device::get_host_pointer(Handle<Buffer> buffer) {
+    return impl->get_host_pointer(buffer);
 }
 
 Handle<Texture> Device::create_texture(const GpuTextureDesc& desc) {
@@ -1716,11 +1762,55 @@ void Device::free(Handle<Semaphore> sema) {
 
 // MARK: Commmand Buffer
 
+void CommandBuffer::memcpy(GpuPtr destGpu, GpuPtr srcGpu, size_t size) {
+    auto impl = reinterpret_cast<Device::Impl*>(device);
+
+    auto src = impl->buffer_and_offset_from_ptr(srcGpu);
+    auto dst = impl->buffer_and_offset_from_ptr(destGpu);
+
+    VkBufferCopy region{
+        .srcOffset = src.offset,
+        .dstOffset = dst.offset,
+        .size      = size,
+    };
+    impl->m_api.vkCmdCopyBuffer(reinterpret_cast<VkCommandBuffer>(buffer),
+                                src.buffer,
+                                dst.buffer,
+                                1,
+                                &region);
+}
+
+void CommandBuffer::barrier(STAGE before, STAGE after, HAZARD_FLAGS hazards) {
+    auto                   impl = reinterpret_cast<Device::Impl*>(device);
+    const VkMemoryBarrier2 barrier_info{
+        .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+        .pNext         = nullptr,
+        .srcStageMask  = bridge_pipeline_stage(before),
+        .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+        .dstStageMask  = bridge_pipeline_stage(after),
+        .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_INDEX_READ_BIT,
+    };
+
+    const VkDependencyInfo info{
+        .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .pNext                    = nullptr,
+        .dependencyFlags          = 0,
+        .memoryBarrierCount       = 1,
+        .pMemoryBarriers          = &barrier_info,
+        .bufferMemoryBarrierCount = 0,
+        .pBufferMemoryBarriers    = nullptr,
+        .imageMemoryBarrierCount  = 0,
+        .pImageMemoryBarriers     = nullptr,
+    };
+    impl->m_api.vkCmdPipelineBarrier2(reinterpret_cast<VkCommandBuffer>(buffer), &info);
+}
+
 void CommandBuffer::set_pipeline(Handle<Pipeline> pipeline) {
     auto impl = reinterpret_cast<Device::Impl*>(device);
     impl->m_api.vkCmdBindPipeline(
         reinterpret_cast<VkCommandBuffer>(buffer),
-        VK_PIPELINE_BIND_POINT_GRAPHICS,  // TODO: Fix this, can't be hardcoded.
+        VK_PIPELINE_BIND_POINT_GRAPHICS,  // TODO: Fix this, can't be hardcoded - need something in
+                                          // the pipeline.
         reinterpret_cast<VkPipeline>(pipeline.h));
 }
 
@@ -1799,14 +1889,23 @@ void CommandBuffer::end_render_pass() {
 
 void CommandBuffer::set_graphics_ptrs(GpuPtr vertexDataGpu, GpuPtr fragmentDataGpu) {
     auto impl = reinterpret_cast<Device::Impl*>(device);
-    if (vertexDataGpu != 0 || fragmentDataGpu != 0) {
-        VkDeviceAddress addresses[2] = {vertexDataGpu, fragmentDataGpu};
+    if (vertexDataGpu != 0) {
+        VkDeviceAddress addresses = vertexDataGpu;
         impl->m_api.vkCmdPushConstants(reinterpret_cast<VkCommandBuffer>(buffer),
                                        impl->m_default_graphics_layout,
-                                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                                       VK_SHADER_STAGE_VERTEX_BIT,
                                        0,
-                                       sizeof(addresses),
-                                       addresses);
+                                       sizeof(VkDeviceAddress),
+                                       &addresses);
+    }
+    if (fragmentDataGpu != 0) {
+        VkDeviceAddress addresses = fragmentDataGpu;
+        impl->m_api.vkCmdPushConstants(reinterpret_cast<VkCommandBuffer>(buffer),
+                                       impl->m_default_graphics_layout,
+                                       VK_SHADER_STAGE_VERTEX_BIT,
+                                       sizeof(VkDeviceAddress),
+                                       sizeof(VkDeviceAddress),
+                                       &addresses);
     }
 }
 
@@ -1820,21 +1919,22 @@ void CommandBuffer::draw(GpuPtr   vertexDataGpu,
     impl->m_api.vkCmdDraw(reinterpret_cast<VkCommandBuffer>(buffer),
                           vertexCount,
                           instanceCount,
-                          0,0);
+                          0,
+                          0);
 }
 
 void CommandBuffer::draw_indexed_instanced(GpuPtr   vertexDataGpu,
-                                         GpuPtr   fragmentDataGpu,
-                                         GpuPtr   indicesGpu,
-                                         uint32_t indexCount,
-                                         uint32_t instanceCount) {
+                                           GpuPtr   fragmentDataGpu,
+                                           GpuPtr   indicesGpu,
+                                           uint32_t indexCount,
+                                           uint32_t instanceCount) {
     auto impl = reinterpret_cast<Device::Impl*>(device);
     set_graphics_ptrs(vertexDataGpu, fragmentDataGpu);
     const auto indices = impl->buffer_and_offset_from_ptr(indicesGpu);
     impl->m_api.vkCmdBindIndexBuffer(reinterpret_cast<VkCommandBuffer>(buffer),
                                      indices.buffer,
                                      indices.offset,
-                                     VK_INDEX_TYPE_UINT32);
+                                     VK_INDEX_TYPE_UINT16);
     impl->m_api.vkCmdDrawIndexed(reinterpret_cast<VkCommandBuffer>(buffer),
                                  indexCount,
                                  instanceCount,

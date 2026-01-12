@@ -1,9 +1,10 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <iterator>
 #include <utility>
-#include <initializer_list>
+
 
 #ifdef __cpp_concepts
 #    define REQUIRES(x) requires x
@@ -619,7 +620,8 @@ class Device {
     Handle<Buffer> malloc(size_t bytes, MEMORY memory = MEMORY_DEFAULT);
     Handle<Buffer> malloc(size_t bytes, size_t align, MEMORY memory = MEMORY_DEFAULT);
     void           free(Handle<Buffer> buffer);
-    GpuPtr         getDevicePointer(Handle<Buffer> buffer);
+    GpuPtr         get_device_pointer(Handle<Buffer> buffer);
+    void*          get_host_pointer(Handle<Buffer> buffer);
 
     // Textures:
     Handle<Texture>     create_texture(const GpuTextureDesc& desc);
@@ -707,20 +709,20 @@ class CommandBuffer {
               uint32_t vertexCount,
               uint32_t instanceCount);
     void draw_indexed_instanced(GpuPtr   vertexDataGpu,
-                              GpuPtr   pixelDataGpu,
-                              GpuPtr   indicesGpu,
-                              uint32_t indexCount,
-                              uint32_t instanceCount);
+                                GpuPtr   pixelDataGpu,
+                                GpuPtr   indicesGpu,
+                                uint32_t indexCount,
+                                uint32_t instanceCount);
     void draw_indexed_instanced_indirect(GpuPtr vertexDataGpu,
-                                      GpuPtr pixelDataGpu,
-                                      GpuPtr indicesGpu,
-                                      GpuPtr argsGpu);
+                                         GpuPtr pixelDataGpu,
+                                         GpuPtr indicesGpu,
+                                         GpuPtr argsGpu);
     void draw_indexed_instanced_indirect_multi(GpuPtr   dataVxGpu,
-                                           uint32_t vxStride,
-                                           GpuPtr   dataPxGpu,
-                                           uint32_t pxStride,
-                                           GpuPtr   argsGpu,
-                                           GpuPtr   drawCountGpu);
+                                               uint32_t vxStride,
+                                               GpuPtr   dataPxGpu,
+                                               uint32_t pxStride,
+                                               GpuPtr   argsGpu,
+                                               GpuPtr   drawCountGpu);
 
     void draw_meshlets(GpuPtr meshletDataGpu, GpuPtr pixelDataGpu, const Dimension3D& dim);
     void draw_meshlets_indirect(GpuPtr meshletDataGpu, GpuPtr pixelDataGpu, GpuPtr dimGpu);

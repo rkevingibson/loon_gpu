@@ -20,4 +20,9 @@ class HelloCube : public Example {
     uint64_t          m_frame_idx        = 0;
     uint32_t          m_swapchain_width  = 0;
     uint32_t          m_swapchain_height = 0;
+
+    Handle<Buffer> m_geometry_buffer;
+    GpuPtr         m_vertex_ptr;
+
+    Handle<Buffer> m_constant_buffer;
 };

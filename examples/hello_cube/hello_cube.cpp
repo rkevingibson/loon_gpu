@@ -16,20 +16,23 @@
 #include "common/geometry.h"
 #include "common/shaders.h"
 
-struct Vertex {
-    float3 position;
-    float3 color;
+
+struct Mesh {
+    float3 position[8];
+    float3 color[8];
 };
 
-constexpr Vertex kCubeVerts[] = {
-    {.position = {1, 1, 1}, .color = {1, 0, 0}},
-    {.position = {1, 1, -1}, .color = {0, 1, 0}},
-    {.position = {1, -1, 1}, .color = {0, 0, 1}},
-    {.position = {1, -1, -1}, .color = {1, 0, 1}},
-    {.position = {-1, 1, 1}, .color = {0, 1, 1}},
-    {.position = {-1, 1, -1}, .color = {1, 1, 0}},
-    {.position = {-1, -1, 1}, .color = {0, 1, 0}},
-    {.position = {-1, -1, -1}, .color = {0, 0, 1}},
+constexpr Mesh kCubeVerts = {
+    .position = {{1, 1, 1},
+                 {1, 1, -1},
+                 {1, -1, 1},
+                 {1, -1, -1},
+                 {-1, 1, 1},
+                 {-1, 1, -1},
+                 {-1, -1, 1},
+                 {-1, -1, -1},},
+    .color
+    = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}, {1, 0, 1}, {0, 1, 1}, {1, 1, 0}, {0, 1, 0}, {0, 0, 1},},
 };
 
 constexpr uint16_t kCubeIndices[] = {0, 2, 1, 1, 2, 3, 0, 6, 2, 0, 4, 6, 4, 5, 6, 6, 5, 7,
@@ -39,6 +42,12 @@ struct CameraInfo {
     float3   position                = {0, 0, 5.f};
     quatf    rotationCameraFromWorld = {};
     float4x4 projection              = {};
+};
+
+struct ShaderArgs {
+    CameraInfo camera;
+    GpuPtr     positions;
+    GpuPtr     colors;
 };
 
 static FORMAT select_surface_format(const loon::gpu::SurfaceCapabilities& surface_capabilities) {
@@ -96,6 +105,37 @@ HelloCube::HelloCube(const WindowState& window_state) {
 
     m_queue     = m_device.get_queue();
     m_semaphore = m_device.create_semaphore(0);
+
+    m_geometry_buffer = m_device.malloc(sizeof(kCubeVerts) + sizeof(kCubeIndices), MEMORY_GPU);
+    m_vertex_ptr      = m_device.get_device_pointer(m_geometry_buffer);
+
+    m_constant_buffer = m_device.malloc(1024ull * 1024);
+    // Copy over the geometry to the geometry buffer
+    void* dst = m_device.get_host_pointer(m_constant_buffer);
+    memcpy(dst, &kCubeVerts, sizeof(kCubeVerts));
+    memcpy((char*)dst + sizeof(kCubeVerts), kCubeIndices, sizeof(kCubeIndices));
+
+    auto cmd = m_device.start_command_recording(m_queue);
+    cmd.memcpy(m_vertex_ptr,
+               m_device.get_device_pointer(m_constant_buffer),
+               sizeof(kCubeVerts) + sizeof(kCubeIndices));
+
+    // A little excessive, but wait for the copy to be done before returning.
+    cmd.barrier(loon::gpu::STAGE_TRANSFER, loon::gpu::STAGE_VERTEX_SHADER);
+    auto copy_semaphore = m_device.create_semaphore(0);
+    m_device.submit(
+        m_queue,
+        cmd,
+        {},
+        SemaphoreInfo{.semaphore = copy_semaphore, .value = 1, .stage = STAGE_TRANSFER});
+    m_device.wait_semaphore(copy_semaphore, 1);
+    m_device.free(copy_semaphore);
+
+
+    // TODO: Set up a ring buffer on the constant buffer for writing to each frame
+    auto args       = reinterpret_cast<ShaderArgs*>(m_device.get_host_pointer(m_constant_buffer));
+    args->positions = m_vertex_ptr;
+    args->colors    = m_vertex_ptr + offsetof(Mesh, color);
 }
 
 HelloCube::~HelloCube() {
@@ -108,7 +148,7 @@ HelloCube::~HelloCube() {
 void HelloCube::Update(const WindowState& window) {
     constexpr uint64_t kMaxFramesInFlight = 3;
     m_device.wait_semaphore(m_semaphore,
-                           std::max(m_frame_idx, kMaxFramesInFlight) - kMaxFramesInFlight);
+                            std::max(m_frame_idx, kMaxFramesInFlight) - kMaxFramesInFlight);
     auto surface_texture = m_device.get_current_texture();
     if (surface_texture.status == loon::gpu::SurfaceTextureInfo::STATUS_OUT_OF_DATE
         || surface_texture.status == loon::gpu::SurfaceTextureInfo::STATUS_SUBOPTIMAL) {
@@ -128,13 +168,13 @@ void HelloCube::Update(const WindowState& window) {
     }
 
     auto swapchain_view = m_device.create_texture_view(surface_texture.texture,
-                                                     TextureViewDesc{
-                                                         .format     = m_swapchain_format,
-                                                         .baseMip    = 0,
-                                                         .mipCount   = 1,
-                                                         .baseLayer  = 0,
-                                                         .layerCount = 1,
-                                                     });
+                                                       TextureViewDesc{
+                                                           .format     = m_swapchain_format,
+                                                           .baseMip    = 0,
+                                                           .mipCount   = 1,
+                                                           .baseLayer  = 0,
+                                                           .layerCount = 1,
+                                                       });
 
     auto commandBuffer = m_device.start_command_recording(m_queue);
 
@@ -148,7 +188,11 @@ void HelloCube::Update(const WindowState& window) {
                                    }, .render_area = {.width = m_swapchain_width, .height = m_swapchain_height},});
 
     commandBuffer.set_pipeline(m_render_pipeline);
-    commandBuffer.draw(0, 0, 3, 1);
+    commandBuffer.draw_indexed_instanced(m_device.get_device_pointer(m_constant_buffer),
+                                         0,
+                                         m_vertex_ptr + sizeof(Mesh),
+                                         36,
+                                         1);
 
     commandBuffer.end_render_pass();
     commandBuffer.make_surface_presentable();

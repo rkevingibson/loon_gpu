@@ -1,40 +1,39 @@
 
 struct CameraData {
-    float3 translationWorldToCamera;
     float4 rotationWorldToCamera;
-
     float4x4 projection;
+    float3 translationWorldToCamera;
 };
 
-struct AssembledVertex
+struct Mesh
 {
-    float3 position : POSITION;
-    float3 color : COLOR;
+    float3* position;
+    float3* color;
 };
 
-struct CoarseVertex {
-    float3 color;
+struct InputData {
+    CameraData camera;
+    Mesh mesh;
 };
 
 struct VertexStageOutput
 {
     float4 position : SV_Position;
-    CoarseVertex coarse_vertex: VertexInterpolant;
+    float3 color;
 };
 
-ParameterBlock<CameraData> cameraData;
-
 [shader("vertex")]
-VertexStageOutput vertexMain(AssembledVertex assembledVertex, uint32_t vertexIdx : SV_VertexID)
+VertexStageOutput vertexMain(uniform InputData* args, uint32_t vertexIdx : SV_VertexID)
 {
     VertexStageOutput output; 
-    output.position = float4(assembledVertex.position - cameraData.translationWorldToCamera, 1.0);
-    output.coarse_vertex.color = assembledVertex.color;
+    const Mesh mesh = args->mesh;
+    output.position = float4(mesh.position[vertexIdx], 1.0);
+    output.color = mesh.color[vertexIdx];
     return output;
 }
 
 [shader("fragment")]
-float4 fragmentMain(CoarseVertex coarse_vertex : VertexInterpolant) : SV_Target
+float4 fragmentMain(VertexStageOutput coarse_vertex ) : SV_Target
 {
     float4 out_color = float4(coarse_vertex.color, 1.0);
     return out_color;
