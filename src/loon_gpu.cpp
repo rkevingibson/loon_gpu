@@ -137,41 +137,41 @@ struct Device::Impl {
     Handle<Buffer>  malloc(size_t bytes, MEMORY memory = MEMORY_DEFAULT);
     Handle<Buffer>  malloc(size_t bytes, size_t align, MEMORY memory = MEMORY_DEFAULT);
     void            free(Handle<Buffer> buffer);
-    GpuPtr          getDevicePointer(Handle<Buffer> buffer);
+    GpuPtr          get_device_pointer(Handle<Buffer> buffer);
     BufferAndOffset buffer_and_offset_from_ptr(GpuPtr ptr);
 
 
     // Textures:
-    Handle<Texture>     createTexture(const GpuTextureDesc& desc);
-    Handle<TextureHeap> createTextureHeap(size_t size);
-    Handle<TextureView> createTextureView(Handle<Texture> texture, TextureViewDesc desc);
+    Handle<Texture>     create_texture(const GpuTextureDesc& desc);
+    Handle<TextureHeap> create_texture_heap(size_t size);
+    Handle<TextureView> create_texture_view(Handle<Texture> texture, TextureViewDesc desc);
 
-    uint32_t addTextureViewToHeap(Handle<TextureHeap>, Handle<TextureView>);
-    void     removeTextureViewFromHeap(Handle<TextureHeap>, uint32_t);
+    uint32_t add_texture_view_to_heap(Handle<TextureHeap>, Handle<TextureView>);
+    void     remove_texture_view_from_heap(Handle<TextureHeap>, uint32_t);
 
     void free(Handle<Texture>);
     void free(Handle<TextureHeap>);
     void free(Handle<TextureView> view);
 
     // Pipelines
-    Handle<Pipeline> createComputePipeline(ShaderSource computeIR);
-    Handle<Pipeline> createGraphicsPipeline(ShaderSource vertex,
-                                            ShaderSource fragment,
-                                            RasterDesc   desc);
-    Handle<Pipeline> createGraphicsMeshletPipeline(ShaderSource meshletIR,
-                                                   ShaderSource pixelIR,
-                                                   RasterDesc   desc);
-    void             freePipeline(Handle<Pipeline> pipeline);
+    Handle<Pipeline> create_compute_pipeline(ShaderSource computeIR);
+    Handle<Pipeline> create_graphics_pipeline(ShaderSource vertex,
+                                              ShaderSource fragment,
+                                              RasterDesc   desc);
+    Handle<Pipeline> create_graphics_meshlet_pipeline(ShaderSource meshletIR,
+                                                      ShaderSource pixelIR,
+                                                      RasterDesc   desc);
+    void             free(Handle<Pipeline> pipeline);
 
     // State objects
-    Handle<DepthStencilState> createDepthStencilState(GpuDepthStencilDesc desc);
-    Handle<BlendState>        createBlendState(BlendDesc desc);
-    void                      freeDepthStencilState(Handle<DepthStencilState> state);
-    void                      freeBlendState(Handle<BlendState> state);
+    Handle<DepthStencilState> create_depth_stencil_state(GpuDepthStencilDesc desc);
+    Handle<BlendState>        create_blend_state(BlendDesc desc);
+    void                      free(Handle<DepthStencilState> state);
+    void                      free(Handle<BlendState> state);
 
     // Queue
-    Handle<Queue> getQueue(QUEUE_TYPE type);
-    CommandBuffer startCommandRecording(Handle<Queue> queue);
+    Handle<Queue> get_queue(QUEUE_TYPE type);
+    CommandBuffer start_command_recording(Handle<Queue> queue);
     void          submit(Handle<Queue>             queue,
                          Span<const CommandBuffer> commandBuffers,
                          Span<const SemaphoreInfo> wait_semaphores,
@@ -182,9 +182,9 @@ struct Device::Impl {
     void process_events(Handle<Queue> queue);
 
     // Semaphores
-    Handle<Semaphore> createSemaphore(uint64_t initValue);
-    void              waitSemaphore(Handle<Semaphore> sema, uint64_t value);
-    void              destroySemaphore(Handle<Semaphore> sema);
+    Handle<Semaphore> create_semaphore(uint64_t initValue);
+    void              wait_semaphore(Handle<Semaphore> sema, uint64_t value);
+    void              free(Handle<Semaphore> sema);
 
 
    private:
@@ -961,7 +961,7 @@ void Device::Impl::free(Handle<Buffer> buffer) {
     vmaDestroyBuffer(m_vma, b.vk_buffer, b.vk_allocation);
 }
 
-GpuPtr Device::Impl::getDevicePointer(Handle<Buffer> buffer) {
+GpuPtr Device::Impl::get_device_pointer(Handle<Buffer> buffer) {
     VkBufferDeviceAddressInfo addr_info{
         .sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
         .pNext  = nullptr,
@@ -977,11 +977,11 @@ BufferAndOffset Device::Impl::buffer_and_offset_from_ptr(GpuPtr ptr) {
 
 // MARK: Textures
 
-Handle<Texture> Device::Impl::createTexture(const GpuTextureDesc& desc) {
+Handle<Texture> Device::Impl::create_texture(const GpuTextureDesc& desc) {
     return {};
 }
 
-Handle<TextureView> Device::Impl::createTextureView(Handle<Texture> tex, TextureViewDesc desc) {
+Handle<TextureView> Device::Impl::create_texture_view(Handle<Texture> tex, TextureViewDesc desc) {
     auto& texture = m_texture_pool[tex.h];
     const VkImageViewCreateInfo info {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -1016,9 +1016,9 @@ void Device::Impl::free(Handle<TextureView> view) {
 }
 
 // MARK: Pipelines
-Handle<Pipeline> Device::Impl::createGraphicsPipeline(ShaderSource vertex,
-                                                      ShaderSource fragment,
-                                                      RasterDesc   desc) {
+Handle<Pipeline> Device::Impl::create_graphics_pipeline(ShaderSource vertex,
+                                                        ShaderSource fragment,
+                                                        RasterDesc   desc) {
     VkShaderModuleCreateInfo vert_info{
         .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .pNext    = nullptr,
@@ -1226,13 +1226,13 @@ Handle<Pipeline> Device::Impl::createGraphicsPipeline(ShaderSource vertex,
     return {.h = reinterpret_cast<uintptr_t>(vk_pipeline)};
 }
 
-void Device::Impl::freePipeline(Handle<Pipeline> pipeline) {
+void Device::Impl::free(Handle<Pipeline> pipeline) {
     m_api.vkDestroyPipeline(m_device, reinterpret_cast<VkPipeline>(pipeline.h), nullptr);
 }
 
 // MARK: Queue
 
-Handle<Queue> Device::Impl::getQueue(QUEUE_TYPE type) {
+Handle<Queue> Device::Impl::get_queue(QUEUE_TYPE type) {
     // Initialize the queue on-demand.
     if (m_queues[type].queue == VK_NULL_HANDLE) {
         uint32_t queue_family = 0;
@@ -1255,7 +1255,7 @@ Handle<Queue> Device::Impl::getQueue(QUEUE_TYPE type) {
         VkCommandPool command_pool;
         chk(m_api.vkCreateCommandPool(m_device, &pool_info, nullptr, &command_pool));
 
-        VkSemaphore timeline = reinterpret_cast<VkSemaphore>(createSemaphore(0).h);
+        VkSemaphore timeline = reinterpret_cast<VkSemaphore>(create_semaphore(0).h);
 
         m_queues[type] = {
             .queue          = queue,
@@ -1270,7 +1270,7 @@ Handle<Queue> Device::Impl::getQueue(QUEUE_TYPE type) {
     return {.h = (uint64_t)type};
 }
 
-CommandBuffer Device::Impl::startCommandRecording(Handle<Queue> queue) {
+CommandBuffer Device::Impl::start_command_recording(Handle<Queue> queue) {
     const VkCommandBufferAllocateInfo alloc_info{
         .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
         .pNext              = nullptr,
@@ -1426,7 +1426,7 @@ void Device::Impl::process_events(Handle<Queue> queue) {
 
 // MARK: Sempahores
 
-Handle<Semaphore> Device::Impl::createSemaphore(uint64_t initValue) {
+Handle<Semaphore> Device::Impl::create_semaphore(uint64_t initValue) {
     VkSemaphoreTypeCreateInfo semaphore_type{
         .sType         = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
         .pNext         = nullptr,
@@ -1449,7 +1449,7 @@ Handle<Semaphore> Device::Impl::createSemaphore(uint64_t initValue) {
     return {.h = reinterpret_cast<uintptr_t>(s)};
 }
 
-void Device::Impl::waitSemaphore(Handle<Semaphore> sema, uint64_t value) {
+void Device::Impl::wait_semaphore(Handle<Semaphore> sema, uint64_t value) {
     VkSemaphore         s = reinterpret_cast<VkSemaphore>(sema.h);
     VkSemaphoreWaitInfo wait_info{
         .sType          = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
@@ -1462,7 +1462,7 @@ void Device::Impl::waitSemaphore(Handle<Semaphore> sema, uint64_t value) {
     chk(m_api.vkWaitSemaphores(m_device, &wait_info, UINT64_MAX));
 }
 
-void Device::Impl::destroySemaphore(Handle<Semaphore> sema) {
+void Device::Impl::free(Handle<Semaphore> sema) {
     m_api.vkDestroySemaphore(m_device, reinterpret_cast<VkSemaphore>(sema.h), nullptr);
 }
 
@@ -1646,18 +1646,18 @@ void Device::free(Handle<Buffer> buffer) {
 }
 
 GpuPtr Device::getDevicePointer(Handle<Buffer> buffer) {
-    return impl->getDevicePointer(buffer);
+    return impl->get_device_pointer(buffer);
 }
 
-Handle<Texture> Device::createTexture(const GpuTextureDesc& desc) {
+Handle<Texture> Device::create_texture(const GpuTextureDesc& desc) {
     return {};
 }
-Handle<TextureHeap> Device::createTextureHeap(size_t size) {
+Handle<TextureHeap> Device::create_texture_heap(size_t size) {
     return {};
 }
 
-Handle<TextureView> Device::createTextureView(Handle<Texture> texture, TextureViewDesc desc) {
-    return impl->createTextureView(texture, desc);
+Handle<TextureView> Device::create_texture_view(Handle<Texture> texture, TextureViewDesc desc) {
+    return impl->create_texture_view(texture, desc);
 }
 
 void Device::free(Handle<Texture>) {}
@@ -1667,22 +1667,22 @@ void Device::free(Handle<TextureView> view) {
 }
 
 
-Handle<Pipeline> Device::createGraphicsPipeline(ShaderSource      vertex,
-                                                ShaderSource      fragment,
-                                                const RasterDesc& desc) {
-    return impl->createGraphicsPipeline(vertex, fragment, desc);
+Handle<Pipeline> Device::create_graphics_pipeline(ShaderSource      vertex,
+                                                  ShaderSource      fragment,
+                                                  const RasterDesc& desc) {
+    return impl->create_graphics_pipeline(vertex, fragment, desc);
 }
 
-void Device::freePipeline(Handle<Pipeline> pipeline) {
-    return impl->freePipeline(pipeline);
+void Device::free(Handle<Pipeline> pipeline) {
+    return impl->free(pipeline);
 }
 
-Handle<Queue> Device::getQueue(QUEUE_TYPE type) {
-    return impl->getQueue(type);
+Handle<Queue> Device::get_queue(QUEUE_TYPE type) {
+    return impl->get_queue(type);
 }
 
-CommandBuffer Device::startCommandRecording(Handle<Queue> queue) {
-    return impl->startCommandRecording(queue);
+CommandBuffer Device::start_command_recording(Handle<Queue> queue) {
+    return impl->start_command_recording(queue);
 }
 
 void Device::submit(Handle<Queue>             queue,
@@ -1701,22 +1701,22 @@ void Device::process_events(Handle<Queue> queue) {
     impl->process_events(queue);
 }
 
-Handle<Semaphore> Device::createSemaphore(uint64_t initValue) {
-    return impl->createSemaphore(initValue);
+Handle<Semaphore> Device::create_semaphore(uint64_t initValue) {
+    return impl->create_semaphore(initValue);
 }
 
-void Device::waitSemaphore(Handle<Semaphore> sema, uint64_t value) {
-    impl->waitSemaphore(sema, value);
+void Device::wait_semaphore(Handle<Semaphore> sema, uint64_t value) {
+    impl->wait_semaphore(sema, value);
 }
 
-void Device::destroySemaphore(Handle<Semaphore> sema) {
-    impl->destroySemaphore(sema);
+void Device::free(Handle<Semaphore> sema) {
+    impl->free(sema);
 }
 
 
 // MARK: Commmand Buffer
 
-void CommandBuffer::setPipeline(Handle<Pipeline> pipeline) {
+void CommandBuffer::set_pipeline(Handle<Pipeline> pipeline) {
     auto impl = reinterpret_cast<Device::Impl*>(device);
     impl->m_api.vkCmdBindPipeline(
         reinterpret_cast<VkCommandBuffer>(buffer),
@@ -1724,7 +1724,7 @@ void CommandBuffer::setPipeline(Handle<Pipeline> pipeline) {
         reinterpret_cast<VkPipeline>(pipeline.h));
 }
 
-void CommandBuffer::beginRenderPass(RenderPassDesc desc) {
+void CommandBuffer::begin_render_pass(RenderPassDesc desc) {
     auto impl = reinterpret_cast<Device::Impl*>(device);
     auto cmd  = reinterpret_cast<VkCommandBuffer>(buffer);
 
@@ -1792,7 +1792,7 @@ void CommandBuffer::beginRenderPass(RenderPassDesc desc) {
                                          &render_rect);
 }
 
-void CommandBuffer::endRenderPass() {
+void CommandBuffer::end_render_pass() {
     auto impl = reinterpret_cast<Device::Impl*>(device);
     impl->m_api.vkCmdEndRendering(reinterpret_cast<VkCommandBuffer>(buffer));
 }
@@ -1813,20 +1813,17 @@ void CommandBuffer::set_graphics_ptrs(GpuPtr vertexDataGpu, GpuPtr fragmentDataG
 void CommandBuffer::draw(GpuPtr   vertexDataGpu,
                          GpuPtr   fragmentDataGpu,
                          uint32_t vertexCount,
-                         uint32_t instanceCount,
-                         uint32_t firstVertex,
-                         uint32_t firstInstance) {
+                         uint32_t instanceCount) {
     auto impl = reinterpret_cast<Device::Impl*>(device);
     set_graphics_ptrs(vertexDataGpu, fragmentDataGpu);
 
     impl->m_api.vkCmdDraw(reinterpret_cast<VkCommandBuffer>(buffer),
                           vertexCount,
                           instanceCount,
-                          firstVertex,
-                          firstInstance);
+                          0,0);
 }
 
-void CommandBuffer::drawIndexedInstanced(GpuPtr   vertexDataGpu,
+void CommandBuffer::draw_indexed_instanced(GpuPtr   vertexDataGpu,
                                          GpuPtr   fragmentDataGpu,
                                          GpuPtr   indicesGpu,
                                          uint32_t indexCount,

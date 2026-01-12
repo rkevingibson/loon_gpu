@@ -67,7 +67,7 @@ set(EXAMPLE_SOURCES
     common/example.cpp
     common/shaders.cpp
     hello_triangle/hello_triangle.cpp
-    #hello_cube/hello_cube.cpp
+    hello_cube/hello_cube.cpp
 )
 
 if (WIN32)

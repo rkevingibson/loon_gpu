@@ -2,6 +2,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <utility>
+#include <initializer_list>
 
 #ifdef __cpp_concepts
 #    define REQUIRES(x) requires x
@@ -91,71 +93,6 @@ class Span {
     template <typename U>
     Span<U> cast() const {
         return Span<U>((U*)m_ptr, m_len * sizeof(T) / sizeof(U));
-    }
-
-    // Modifiers:
-
-    // Remove the first `n` elements from the Span
-    constexpr Span<T> remove_prefix(size_t n) const noexcept { return Span(m_ptr + n, m_len - n); }
-
-    // Remove the last `n` elements from the Span
-    constexpr Span<T> remove_suffix(size_t n) const noexcept { return Span(m_ptr, m_len - n); }
-
-    constexpr bool contains(const T* needle) const noexcept {
-        return begin() <= needle && needle < end();
-    }
-
-    constexpr bool contains(const Span<T>& other) const noexcept {
-        return begin() <= other.begin() && other.end() <= end();
-    }
-
-    constexpr bool starts_with(const Span<T>& other) const noexcept
-    // requires is_byte_type<T>
-    {
-        if (other.size() > m_len) return false;
-        for (size_t i = 0; i < other.size(); ++i) {
-            if (m_ptr[i] != other[i]) { return false; }
-        }
-        return true;
-    }
-
-    constexpr bool ends_with(const Span<T>& other) const noexcept
-    // requires is_byte_type<T>
-    {
-        if (other.size() > m_len) return false;
-
-        for (size_t i = 0, offset = m_len - other.size(); i < other.size(); ++i) {
-            if (m_ptr[offset + i] != other[i]) { return false; }
-        }
-        return true;
-    }
-
-    constexpr Span<T> trim_whitespace() const noexcept
-    // requires is_byte_type<T>
-    {
-        auto           ptr = m_ptr;
-        auto           len = m_len;
-        constexpr auto is_whitespace
-            = [](T c) { return c == '\0' || c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
-        // Trim front
-        while (len != 0 && is_whitespace(*ptr)) {
-            len--;
-            ptr++;
-        }
-
-        // Trim back
-        T* tail = end() - 1;
-        while (len != 0 && is_whitespace(*tail)) {
-            tail--;
-            len--;
-        }
-        return Span<T>(ptr, len);
-    }
-
-    friend inline bool operator==(Span<T> lhs, Span<T> rhs)
-    // requires is_byte_type<T>
-    {
-        return lhs.size() == rhs.size() && memcmp(lhs.data(), rhs.data(), lhs.size()) == 0;
     }
 
    protected:
@@ -610,7 +547,7 @@ struct TextureViewDesc {
     uint16_t layerCount = 0;
 };
 
-struct GpuTextureSizeAlign {
+struct TextureSizeAlign {
     size_t size;
     size_t align;
 };
@@ -685,37 +622,37 @@ class Device {
     GpuPtr         getDevicePointer(Handle<Buffer> buffer);
 
     // Textures:
-    Handle<Texture>     createTexture(const GpuTextureDesc& desc);
-    Handle<TextureHeap> createTextureHeap(size_t size);
+    Handle<Texture>     create_texture(const GpuTextureDesc& desc);
+    Handle<TextureHeap> create_texture_heap(size_t size);
 
-    Handle<TextureView> createTextureView(Handle<Texture> texture, TextureViewDesc desc);
+    Handle<TextureView> create_texture_view(Handle<Texture> texture, TextureViewDesc desc);
 
-    uint32_t addTextureViewToHeap(Handle<TextureHeap>, Handle<TextureView>);
-    void     removeTextureViewFromHeap(Handle<TextureHeap>, uint32_t);
+    uint32_t add_texture_view_to_heap(Handle<TextureHeap>, Handle<TextureView>);
+    void     remove_texture_view_from_heap(Handle<TextureHeap>, uint32_t);
 
     void free(Handle<Texture>);
     void free(Handle<TextureHeap>);
     void free(Handle<TextureView>);
 
     // Pipelines
-    Handle<Pipeline> createComputePipeline(ByteSpan computeIR);
-    Handle<Pipeline> createGraphicsPipeline(ShaderSource      vertex,
-                                            ShaderSource      fragment,
-                                            const RasterDesc& desc);
-    Handle<Pipeline> createGraphicsMeshletPipeline(ByteSpan   meshletIR,
-                                                   ByteSpan   pixelIR,
-                                                   RasterDesc desc);
-    void             freePipeline(Handle<Pipeline> pipeline);
+    Handle<Pipeline> create_compute_pipeline(ByteSpan computeIR);
+    Handle<Pipeline> create_graphics_pipeline(ShaderSource      vertex,
+                                              ShaderSource      fragment,
+                                              const RasterDesc& desc);
+    Handle<Pipeline> create_graphics_meshlet_pipeline(ByteSpan   meshletIR,
+                                                      ByteSpan   pixelIR,
+                                                      RasterDesc desc);
+    void             free(Handle<Pipeline> pipeline);
 
     // State objects
-    Handle<DepthStencilState> createDepthStencilState(GpuDepthStencilDesc desc);
-    Handle<BlendState>        createBlendState(BlendDesc desc);
-    void                      freeDepthStencilState(Handle<DepthStencilState> state);
-    void                      freeBlendState(Handle<BlendState> state);
+    Handle<DepthStencilState> create_depth_stencil_state(GpuDepthStencilDesc desc);
+    Handle<BlendState>        create_blend_state(BlendDesc desc);
+    void                      free_depth_stencil_state(Handle<DepthStencilState> state);
+    void                      free_blend_state(Handle<BlendState> state);
 
     // Queue
-    Handle<Queue> getQueue(QUEUE_TYPE type = QUEUE_DEFAULT);
-    CommandBuffer startCommandRecording(Handle<Queue> queue);
+    Handle<Queue> get_queue(QUEUE_TYPE type = QUEUE_DEFAULT);
+    CommandBuffer start_command_recording(Handle<Queue> queue);
 
     // TODO: May want to wrap these args in a struct.
     void submit(Handle<Queue>             queue,
@@ -730,9 +667,9 @@ class Device {
 
 
     // Semaphores
-    Handle<Semaphore> createSemaphore(uint64_t initValue);
-    void              waitSemaphore(Handle<Semaphore> sema, uint64_t value);
-    void              destroySemaphore(Handle<Semaphore> sema);
+    Handle<Semaphore> create_semaphore(uint64_t initValue);
+    void              wait_semaphore(Handle<Semaphore> sema, uint64_t value);
+    void              free(Handle<Semaphore> sema);
 
    private:
     struct Impl;
@@ -746,59 +683,47 @@ class CommandBuffer {
    public:
     // Commands
     void memcpy(GpuPtr destGpu, GpuPtr srcGpu, size_t size);
-    void copyToTexture(GpuPtr destGpu, GpuPtr srcGpu, Handle<Texture> texture);
-    void copyFromTexture(GpuPtr destGpu, GpuPtr srcGpu, Handle<Texture> texture);
+    void copy_to_texture(GpuPtr destGpu, GpuPtr srcGpu, Handle<Texture> texture);
+    void copy_from_texture(GpuPtr destGpu, GpuPtr srcGpu, Handle<Texture> texture);
 
-    void setActiveTextureHeapPtr(GpuPtr ptrGpu);
+    void set_active_texture_heap_ptr(GpuPtr ptrGpu);
 
     void barrier(STAGE before, STAGE after, HAZARD_FLAGS hazards = HAZARD_FLAGS(0));
 
-#if 0
-// NOTE: Not sure this is implementable on top of vulkan right now. 
-// Vulkan Events aren't sophisticated enough to do this API, but we could probably come up with a simpler one
-void gpuSignalAfter(Handle<CommandBuffer> cb, STAGE before, GpuPtr ptrGpu,
-                    uint64_t value, SIGNAL signal);
-void gpuWaitBefore(Handle<CommandBuffer> cb, STAGE after, GpuPtr ptrGpu,
-                   uint64_t value, OP op,
-                   HAZARD_FLAGS hazards = HAZARD_FLAGS(0), uint64_t mask = ~0);
-#endif
+    void set_pipeline(Handle<Pipeline> pipeline);
+    void set_depth_stencil_State(Handle<DepthStencilState> state);
+    void set_blend_state(Handle<BlendState> state);
 
-    void setPipeline(Handle<Pipeline> pipeline);
-    void setDepthStencilState(Handle<DepthStencilState> state);
-    void setBlendState(Handle<BlendState> state);
-
-    void setTextureHeap(Handle<TextureHeap> heap);
+    void set_texture_heap(Handle<TextureHeap> heap);
 
     void dispatch(GpuPtr dataGpu, const Dimension3D& gridDimensions);
-    void dispatchIndirect(GpuPtr dataGpu, GpuPtr gridDimensionsGpu);
+    void dispatch_indirect(GpuPtr dataGpu, GpuPtr gridDimensionsGpu);
 
-    void beginRenderPass(RenderPassDesc desc);
-    void endRenderPass();
+    void begin_render_pass(RenderPassDesc desc);
+    void end_render_pass();
 
     void draw(GpuPtr   vertexDataGpu,
               GpuPtr   fragmentDataGpu,
               uint32_t vertexCount,
-              uint32_t instanceCount,
-              uint32_t firstVertex   = 0,
-              uint32_t firstInstance = 0);
-    void drawIndexedInstanced(GpuPtr   vertexDataGpu,
+              uint32_t instanceCount);
+    void draw_indexed_instanced(GpuPtr   vertexDataGpu,
                               GpuPtr   pixelDataGpu,
                               GpuPtr   indicesGpu,
                               uint32_t indexCount,
                               uint32_t instanceCount);
-    void drawIndexedInstancedIndirect(GpuPtr vertexDataGpu,
+    void draw_indexed_instanced_indirect(GpuPtr vertexDataGpu,
                                       GpuPtr pixelDataGpu,
                                       GpuPtr indicesGpu,
                                       GpuPtr argsGpu);
-    void drawIndexedInstancedIndirectMulti(GpuPtr   dataVxGpu,
+    void draw_indexed_instanced_indirect_multi(GpuPtr   dataVxGpu,
                                            uint32_t vxStride,
                                            GpuPtr   dataPxGpu,
                                            uint32_t pxStride,
                                            GpuPtr   argsGpu,
                                            GpuPtr   drawCountGpu);
 
-    void drawMeshlets(GpuPtr meshletDataGpu, GpuPtr pixelDataGpu, const Dimension3D& dim);
-    void drawMeshletsIndirect(GpuPtr meshletDataGpu, GpuPtr pixelDataGpu, GpuPtr dimGpu);
+    void draw_meshlets(GpuPtr meshletDataGpu, GpuPtr pixelDataGpu, const Dimension3D& dim);
+    void draw_meshlets_indirect(GpuPtr meshletDataGpu, GpuPtr pixelDataGpu, GpuPtr dimGpu);
 
 
     // Surface special functions - these introduce barriers to

@@ -3,7 +3,7 @@
 #include <gpu/loon_gpu.h>
 
 #include "common/example.h"
-
+using namespace loon::gpu;
 
 class HelloCube : public Example {
    public:
@@ -12,19 +12,12 @@ class HelloCube : public Example {
     void Update(const WindowState& window) override;
 
    private:
-    WGPUInstance       m_instance;
-    WGPUAdapter        m_adapter;
-    WGPUSurface        m_surface;
-    WGPUDevice         m_device;
-    WGPUQueue          m_queue;
-    WGPUTextureFormat  m_swapchain_format;
-    WGPURenderPipeline m_render_pipeline;
-
-    WGPUBuffer m_vertex_buffer;
-    WGPUBuffer m_index_buffer;
-
-    WGPUBuffer    m_camera_data_buffer;
-    WGPUBindGroup m_bind_group;
-
-    WGPUBuffer m_constant_buffer;
+    Device            m_device;
+    Handle<Queue>     m_queue;
+    FORMAT            m_swapchain_format;
+    Handle<Pipeline>  m_render_pipeline;
+    Handle<Semaphore> m_semaphore;
+    uint64_t          m_frame_idx        = 0;
+    uint32_t          m_swapchain_width  = 0;
+    uint32_t          m_swapchain_height = 0;
 };

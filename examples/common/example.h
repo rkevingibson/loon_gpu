@@ -1,7 +1,8 @@
 #pragma once
 
+#include <gpu/loon_gpu.h>
+
 #include <memory>
-#include <string>
 
 class ShaderLoader;
 
@@ -25,5 +26,7 @@ enum class ExampleName {
 
     Count,
 };
+
+void log_callback(loon::gpu::LogLevel lvl, loon::gpu::Span<const char> message, void* userdata);
 
 std::unique_ptr<Example> create_example(ExampleName name, const WindowState& state);
