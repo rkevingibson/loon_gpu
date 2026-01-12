@@ -152,7 +152,7 @@ class Span {
         return Span<T>(ptr, len);
     }
 
-    friend inline bool operator==(Span<const T> lhs, Span<const T> rhs)
+    friend inline bool operator==(Span<T> lhs, Span<T> rhs)
     // requires is_byte_type<T>
     {
         return lhs.size() == rhs.size() && memcmp(lhs.data(), rhs.data(), lhs.size()) == 0;
@@ -169,9 +169,80 @@ inline constexpr Span<const char> operator""_sv(const char* val, size_t len) {
     return Span<const char>(val, len);
 }
 
-#define WGPU_STRCAT_IMPL(a, b) a##b
-#define WGPU_STRCAT(a, b)      WGPU_STRCAT_IMPL(a, b)
-#define WGPU_FN_TYPEDEF(name)  WGPU_STRCAT(WGPUProc, name)
+// A lightweight replacement for std::function.
+// Tries to avoid heap allocations by being "fat", it can store reasonably sized lambdas without
+// allocating, and will fail statically if the lambda is too big.
+// Adapted from https://github.com/jlaumon/Bedrock/blob/main/Bedrock/Function.h
+template <class Res, class... Args>
+class Function {
+   public:
+    Function() = default;
+    ~Function() {
+        if (m_vtable) { m_vtable->destruct(m_storage); }
+    }
+    Function(const Function&)            = delete;
+    Function& operator=(const Function&) = delete;
+
+    Function(Function&& other) {
+        if (other.m_vtable) {
+            m_vtable = std::exchange(other.m_vtable, nullptr);
+            m_vtable->move(m_storage, other.m_storage);
+        }
+    }
+
+    Function& operator=(Function&& other) {
+        if (m_vtable) { m_vtable->destruct(m_storage); }
+        if (other.m_vtable) {
+            m_vtable = std::exchange(other.m_vtable, nullptr);
+            m_vtable->move(m_storage, other.m_storage);
+        }
+        return *this;
+    }
+
+    template <class F>
+    Function(F&& fn)
+        REQUIRES((!std::is_same_v<std::remove_reference_t<std::remove_cv_t<F>>, Function>)) {
+        using T = std::decay_t<F>;
+        static VTable table{
+            .invoke =
+                [](void* data, Args&&... args) {
+                    reinterpret_cast<T*>(data)->operator()(std::forward<Args>(args)...);
+                },
+            .destruct = [](void* data) { reinterpret_cast<T*>(data)->~T(); },
+            .move =
+                [](void* dst, void* src) {
+                    ::new (reinterpret_cast<T*>(dst)) T(std::move(*reinterpret_cast<T*>(src)));
+                },
+        };
+
+        m_vtable = &table;
+        static_assert(sizeof(F) < kStorageSize, "Lambda must be smaller than kStorageSize bytes");
+        static_assert(std::is_move_constructible_v<F>, "Lambda must be move constructible");
+        ::new (reinterpret_cast<F*>(m_storage)) F(std::forward<F>(fn));
+    }
+
+    Res operator()(Args&&... args) {
+        if (m_vtable) { m_vtable->invoke(m_storage, std::forward<Args>(args)...); }
+    }
+
+    operator bool() const { return m_vtable != nullptr; }
+
+   private:
+    struct VTable {
+        using InvokeFunc      = Res (*)(void*, Args&&...);
+        using DestructFunc    = void (*)(void*);
+        using MoveFunc        = void (*)(void* dst, void* src);
+        InvokeFunc   invoke   = nullptr;
+        DestructFunc destruct = nullptr;
+        MoveFunc     move     = nullptr;
+    };
+
+    static constexpr size_t kStorageSize = 64 - sizeof(VTable*);
+    VTable*                 m_vtable     = nullptr;
+    uint8_t                 m_storage[kStorageSize];
+};
+
+extern template class Function<void>;
 
 typedef struct MemoryBlock {
     void*    ptr;
@@ -650,6 +721,11 @@ class Device {
                 Span<const SemaphoreInfo> wait_semaphores,
                 Span<const SemaphoreInfo> signal_semaphores = {});
     void cancel(Handle<Queue> queue, Span<const Handle<CommandBuffer>> commandBuffers);
+
+
+    void on_submitted_work_completed(Handle<Queue> queue, Function<void>&& fn);
+    void process_events(Handle<Queue> queue);
+
 
     // Semaphores
     Handle<Semaphore> createSemaphore(uint64_t initValue);

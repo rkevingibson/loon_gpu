@@ -14,7 +14,6 @@
 #include <cassert>
 
 #include "common/shaders.h"
-#include "vulkan/vulkan_core.h"
 
 using namespace loon::gpu;
 
@@ -47,7 +46,6 @@ HelloTriangle::HelloTriangle(const WindowState& window_state) {
         .alloc_userdata         = nullptr,
     });
 
-    // TODO: Surface creation/configuration:
     auto surface_capabilities = m_device.get_surface_capabilities();
     m_swapchain_format        = select_surface_format(surface_capabilities);
 
@@ -142,5 +140,8 @@ void HelloTriangle::Update(const WindowState& window) {
                     });
 
     m_device.present(m_queue);
-    m_device.free(swapchain_view);
+
+    m_device.on_submitted_work_completed(m_queue,
+                                         [&, swapchain_view]() { m_device.free(swapchain_view); });
+    m_device.process_events(m_queue);
 }

@@ -11,6 +11,8 @@
 
 namespace loon::gpu {
 
+template class Function<void>;
+
 static constexpr const char* kRequiredDeviceExtensions[] = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME,
     VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME,
@@ -87,9 +89,17 @@ struct Surface {
 };
 
 struct Queue {
-    VkQueue       queue        = VK_NULL_HANDLE;
-    VkCommandPool command_pool = VK_NULL_HANDLE;
-    uint32_t      queue_family = 0;
+    struct Event {
+        uint64_t       completed_time;
+        Function<void> callback;
+    };
+
+    VkQueue       queue          = VK_NULL_HANDLE;
+    VkCommandPool command_pool   = VK_NULL_HANDLE;
+    VkSemaphore   timeline       = VK_NULL_HANDLE;
+    uint32_t      queue_family   = 0;
+    uint64_t      timeline_value = 0;
+    Vector<Event> pending_events;
 };
 
 struct ThreadLocalState {
@@ -139,7 +149,7 @@ struct Device::Impl {
 
     void free(Handle<Texture>);
     void free(Handle<TextureHeap>);
-    void freeTextureView(Handle<TextureHeap> heap, uint32_t view);
+    void free(Handle<TextureView> view);
 
     // Pipelines
     Handle<Pipeline> createComputePipeline(ShaderSource computeIR);
@@ -165,6 +175,9 @@ struct Device::Impl {
                          Span<const SemaphoreInfo> wait_semaphores,
                          Span<const SemaphoreInfo> signal_semaphores);
     void          cancel(Handle<Queue> queue, Span<Handle<CommandBuffer>> commandBuffers);
+
+    void on_submitted_work_completed(Handle<Queue> queue, Function<void>&& fn);
+    void process_events(Handle<Queue> queue);
 
     // Semaphores
     Handle<Semaphore> createSemaphore(uint64_t initValue);
@@ -990,6 +1003,11 @@ Handle<TextureView> Device::Impl::createTextureView(Handle<Texture> tex, Texture
     return {.h = handle};
 }
 
+void Device::Impl::free(Handle<TextureView> view) {
+    m_api.vkDestroyImageView(m_device, m_texture_view_pool[view.h].vk_image_view, nullptr);
+    m_texture_view_pool.release(static_cast<uint32_t>(view.h));
+}
+
 // MARK: Pipelines
 Handle<Pipeline> Device::Impl::createGraphicsPipeline(ShaderSource vertex,
                                                       ShaderSource fragment,
@@ -1230,10 +1248,15 @@ Handle<Queue> Device::Impl::getQueue(QUEUE_TYPE type) {
         VkCommandPool command_pool;
         chk(m_api.vkCreateCommandPool(m_device, &pool_info, nullptr, &command_pool));
 
+        VkSemaphore timeline = reinterpret_cast<VkSemaphore>(createSemaphore(0).h);
+
         m_queues[type] = {
-            .queue        = queue,
-            .command_pool = command_pool,
-            .queue_family = queue_family,
+            .queue          = queue,
+            .command_pool   = command_pool,
+            .timeline       = timeline,
+            .queue_family   = queue_family,
+            .timeline_value = 0,
+            .pending_events = Vector<Queue::Event>(m_allocator),
         };
     }
 
@@ -1268,7 +1291,7 @@ void Device::Impl::submit(Handle<Queue>             queue,
                           Span<const SemaphoreInfo> signal_semaphores)
 
 {
-    auto q = m_queues[queue.h];
+    auto& q = m_queues[queue.h];
 
     auto arena = *get_thread_local_arena();
 
@@ -1333,6 +1356,18 @@ void Device::Impl::submit(Handle<Queue>             queue,
             });
     }
 
+    // We add one extra signal to advance the queue timeline
+    signal_info = concat(&arena,
+                         signal_info,
+                         VkSemaphoreSubmitInfo{
+                             .sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+                             .pNext       = nullptr,
+                             .semaphore   = q.timeline,
+                             .value       = ++q.timeline_value,
+                             .stageMask   = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+                             .deviceIndex = 0,
+                         });
+
     VkSubmitInfo2 submit_info{
         .sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
         .pNext                    = nullptr,
@@ -1347,8 +1382,39 @@ void Device::Impl::submit(Handle<Queue>             queue,
 
     m_api.vkQueueSubmit2(q.queue, 1, &submit_info, VK_NULL_HANDLE);
 
-    // TODO: Need to free/reset the command buffers once this submission is done - consider a
-    // deletion queue?
+    // Need to free/reset the command buffers once this submission is done - might be worth copying
+    // the whole span of command buffers to a temporary allocation instead of pushing a bunch of
+    // completions here instead.
+    for (CommandBuffer cmd : command_buffers) {
+        q.pending_events.emplace_back(
+            Queue::Event{.completed_time = q.timeline_value,
+                         .callback       = [command_pool = q.command_pool, cmd]() {
+                             auto impl = reinterpret_cast<Impl*>(cmd.device);
+                             impl->m_api.vkFreeCommandBuffers(
+                                 impl->m_device,
+                                 command_pool,
+                                 1,
+                                 reinterpret_cast<const VkCommandBuffer*>(&cmd.buffer));
+                         }});
+    }
+}
+
+void Device::Impl::on_submitted_work_completed(Handle<Queue> queue, Function<void>&& fn) {
+    auto& q = m_queues[queue.h];
+    q.pending_events.emplace_back(
+        Queue::Event{.completed_time = q.timeline_value, .callback = std::move(fn)});
+}
+
+void Device::Impl::process_events(Handle<Queue> queue) {
+    auto&    q            = m_queues[queue.h];
+    uint64_t current_time = 0;
+    chk(m_api.vkGetSemaphoreCounterValue(m_device, q.timeline, &current_time));
+    uint32_t i = 0;
+    while (i < q.pending_events.size() && q.pending_events[i].completed_time <= current_time) {
+        q.pending_events[i].callback();
+        i++;
+    }
+    if (i != 0) { q.pending_events.erase(q.pending_events.begin(), q.pending_events.begin() + i); }
 }
 
 // MARK: Sempahores
@@ -1585,7 +1651,9 @@ Handle<TextureView> Device::createTextureView(Handle<Texture> texture, TextureVi
 
 void Device::free(Handle<Texture>) {}
 void Device::free(Handle<TextureHeap>) {}
-void Device::free(Handle<TextureView>) {}
+void Device::free(Handle<TextureView> view) {
+    return impl->free(view);
+}
 
 
 Handle<Pipeline> Device::createGraphicsPipeline(ShaderSource      vertex,
@@ -1614,6 +1682,13 @@ void Device::submit(Handle<Queue>             queue,
 }
 
 void Device::cancel(Handle<Queue> queue, Span<const Handle<CommandBuffer>> commandBuffers) {}
+
+void Device::on_submitted_work_completed(Handle<Queue> queue, Function<void>&& fn) {
+    impl->on_submitted_work_completed(queue, std::move(fn));
+}
+void Device::process_events(Handle<Queue> queue) {
+    impl->process_events(queue);
+}
 
 Handle<Semaphore> Device::createSemaphore(uint64_t initValue) {
     return impl->createSemaphore(initValue);

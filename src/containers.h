@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <mutex>
 #include <utility>
 
@@ -86,6 +87,14 @@ class Vector {
     void pop_back() {
         m_count--;
         std::destroy_at(m_data + m_count);
+    }
+
+    void erase(T* first, T* last) {
+        const auto old_end = end();
+        m_count -= std::distance(first, last);
+        // Move from [last, old_end) to [first, new_end)
+        for (; last != old_end; ++first, ++last) *first = std::move(*last);
+        std::destroy(end(), old_end);
     }
 
     const T&           operator[](uint32_t idx) const { return m_data[idx]; }
@@ -363,8 +372,6 @@ class HashTable {
 };
 
 // MARK: Implementations:
-
-
 
 // MARK: Vector
 

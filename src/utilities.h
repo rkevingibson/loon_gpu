@@ -59,7 +59,7 @@ class Arena {
 
    private:
     template <class T>
-    friend Span<T> concat(Arena* a, Span<T> head, Span<T> tail);
+    friend Span<T> concat(Arena* a, Span<T> head, Span<const T> tail);
 
     uintptr_t m_ptr{0};
     uintptr_t m_begin{0};
@@ -67,7 +67,7 @@ class Arena {
 };
 
 template <class T>
-[[nodiscard]] Span<T> clone(Arena* a, Span<T> x) {
+[[nodiscard]] Span<T> clone(Arena* a, Span<const T> x) {
     T* output = reinterpret_cast<T*>(a->alloc(x.as_bytes().size()));
     if (output == nullptr) { return {}; }
     std::uninitialized_copy(x.begin(), x.end(), output);
@@ -75,14 +75,14 @@ template <class T>
 }
 
 template <class T>
-[[nodiscard]] Span<T> concat(Arena* a, Span<T> head, Span<T> tail) {
-    if ((uintptr_t)head.end() != a->m_ptr) { head = clone(a, head); }
+[[nodiscard]] Span<T> concat(Arena* a, Span<T> head, Span<const T> tail) {
+    if ((uintptr_t)head.end() != a->m_ptr) { head = clone<T>(a, head); }
     return {head.data(), head.size() + clone<T>(a, tail).size()};
 }
 
 template <class T>
-[[nodiscard]] Span<T> concat(Arena* a, Span<T> head, T tail) {
-    return concat(a, head, Span<T>(&tail, 1));
+[[nodiscard]] Span<T> concat(Arena* a, Span<T> head, const T& tail) {
+    return concat(a, head, Span<const T>(&tail, 1));
 }
 
 };  // namespace loon::gpu
