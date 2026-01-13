@@ -39,9 +39,9 @@ constexpr uint16_t kCubeIndices[] = {0, 2, 1, 1, 2, 3, 0, 6, 2, 0, 4, 6, 4, 5, 6
                                      5, 1, 7, 7, 1, 3, 1, 0, 4, 1, 4, 5, 2, 6, 3, 6, 7, 3};
 
 struct CameraInfo {
-    float3   position                = {0, 0, 5.f};
-    quatf    rotationCameraFromWorld = {};
     float4x4 projection              = {};
+    quatf    rotationCameraFromWorld = {};
+    float3   position                = {0, 0, 5.f};
 };
 
 struct ShaderArgs {
@@ -133,7 +133,14 @@ HelloCube::HelloCube(const WindowState& window_state) {
 
 
     // TODO: Set up a ring buffer on the constant buffer for writing to each frame
-    auto args       = reinterpret_cast<ShaderArgs*>(m_device.get_host_pointer(m_constant_buffer));
+    auto args    = reinterpret_cast<ShaderArgs*>(m_device.get_host_pointer(m_constant_buffer));
+    args->camera = {
+        .projection = projection({
+            .view_width  = (float)window_state.width,
+            .view_height = (float)window_state.height,
+            .y_fov       = radians_from_degrees(45.f),
+        }),
+    };
     args->positions = m_vertex_ptr;
     args->colors    = m_vertex_ptr + offsetof(Mesh, color);
 }

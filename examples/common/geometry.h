@@ -92,3 +92,19 @@ quatf fromAxisAngle(const float3& axis, float angle);
 
 
 // MARK: float4x4 operations
+
+struct ProjectionInfo {
+    float view_width;
+    float view_height;
+    float y_fov;
+    float depth_near = INFINITY;
+    float depth_far;
+};
+
+float4x4 projection(const ProjectionInfo& info);
+
+inline constexpr float radians_from_degrees(float degrees) {
+    constexpr float kPi                 = 3.14159265358979323846f;
+    constexpr float kRadiansFromDegrees = kPi / 180.f;
+    return degrees * kRadiansFromDegrees;
+}

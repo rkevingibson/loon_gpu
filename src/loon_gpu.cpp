@@ -1781,14 +1781,16 @@ void CommandBuffer::memcpy(GpuPtr destGpu, GpuPtr srcGpu, size_t size) {
 }
 
 void CommandBuffer::barrier(STAGE before, STAGE after, HAZARD_FLAGS hazards) {
-    auto                   impl = reinterpret_cast<Device::Impl*>(device);
+    auto impl = reinterpret_cast<Device::Impl*>(device);
+    // TODO: Use HAZARD_FLAGS to reduce the stage/access_masks unless necessary.
     const VkMemoryBarrier2 barrier_info{
         .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
         .pNext         = nullptr,
         .srcStageMask  = bridge_pipeline_stage(before),
-        .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+        .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT,
         .dstStageMask  = bridge_pipeline_stage(after),
-        .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_INDEX_READ_BIT,
+        .dstAccessMask
+        = VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_INDEX_READ_BIT,
     };
 
     const VkDependencyInfo info{

@@ -66,6 +66,7 @@ endif()
 set(EXAMPLE_SOURCES
     common/example.cpp
     common/shaders.cpp
+    common/geometry.cpp
     hello_triangle/hello_triangle.cpp
     hello_cube/hello_cube.cpp
 )

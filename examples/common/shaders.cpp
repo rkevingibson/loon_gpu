@@ -123,6 +123,8 @@ class ShaderLoader::Impl {
         session_desc.targets     = &target_description;
         session_desc.targetCount = 1;
 
+        session_desc.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR;
+
         // TODO: Search paths for imports should be hooked up.
         session_desc.searchPaths     = nullptr;
         session_desc.searchPathCount = 0;
