@@ -131,8 +131,6 @@ HelloCube::HelloCube(const WindowState& window_state) {
     m_device.wait_semaphore(copy_semaphore, 1);
     m_device.free(copy_semaphore);
 
-
-    // TODO: Set up a ring buffer on the constant buffer for writing to each frame
     auto args    = reinterpret_cast<ShaderArgs*>(m_device.get_host_pointer(m_constant_buffer));
     args->camera = {
         .projection = projection({
@@ -152,25 +150,41 @@ HelloCube::~HelloCube() {
     m_device.unconfigure_surface();
 }
 
+void HelloCube::recreate_swapchain(uint32_t width, uint32_t height) {
+    m_device.wait_for_device_idle();
+    m_device.unconfigure_surface();
+    m_device.configure_surface({
+        .format       = m_swapchain_format,
+        .usages       = loon::gpu::USAGE_COLOR_ATTACHMENT,
+        .width        = width,
+        .height       = height,
+        .present_mode = PRESENT_MODE_FIFO,
+    });
+    m_swapchain_width  = width;
+    m_swapchain_height = height;
+}
+
 void HelloCube::Update(const WindowState& window) {
-    constexpr uint64_t kMaxFramesInFlight = 3;
     m_device.wait_semaphore(m_semaphore,
                             std::max(m_frame_idx, kMaxFramesInFlight) - kMaxFramesInFlight);
+
+    // Update constant data
+    auto args = reinterpret_cast<ShaderArgs*>(m_device.get_host_pointer(m_constant_buffer));
+    args[m_frame_idx % 3].camera = {
+        .projection = projection({.view_width  = (float)window.width,
+                                  .view_height = (float)window.height,
+                                  .y_fov       = radians_from_degrees(45.f),
+                                  .depth_far   = 0.5f}),
+    };
+    args[m_frame_idx % 3].positions = m_vertex_ptr;
+    args[m_frame_idx % 3].colors    = m_vertex_ptr + offsetof(Mesh, color);
+
     auto surface_texture = m_device.get_current_texture();
-    if (surface_texture.status == loon::gpu::SurfaceTextureInfo::STATUS_OUT_OF_DATE
-        || surface_texture.status == loon::gpu::SurfaceTextureInfo::STATUS_SUBOPTIMAL) {
-        m_device.unconfigure_surface();
-        m_device.configure_surface({
-            .format       = m_swapchain_format,
-            .usages       = loon::gpu::USAGE_COLOR_ATTACHMENT,
-            .width        = window.width,
-            .height       = window.height,
-            .present_mode = PRESENT_MODE_FIFO,
-        });
-        m_swapchain_width  = window.width;
-        m_swapchain_height = window.height;
+    if (surface_texture.status == SURFACE_STATUS_OUT_OF_DATE
+        || surface_texture.status == SURFACE_STATUS_SUBOPTIMAL) {
+        recreate_swapchain(window.width, window.height);
         return;
-    } else if (surface_texture.status == loon::gpu::SurfaceTextureInfo::STATUS_ERROR) {
+    } else if (surface_texture.status == SURFACE_STATUS_ERROR) {
         return;
     }
 
@@ -195,11 +209,12 @@ void HelloCube::Update(const WindowState& window) {
                                    }, .render_area = {.width = m_swapchain_width, .height = m_swapchain_height},});
 
     commandBuffer.set_pipeline(m_render_pipeline);
-    commandBuffer.draw_indexed_instanced(m_device.get_device_pointer(m_constant_buffer),
-                                         0,
-                                         m_vertex_ptr + sizeof(Mesh),
-                                         36,
-                                         1);
+    commandBuffer.draw_indexed_instanced(
+        m_device.get_device_pointer(m_constant_buffer) + sizeof(ShaderArgs) * (m_frame_idx % 3),
+        0,
+        m_vertex_ptr + sizeof(Mesh),
+        36,
+        1);
 
     commandBuffer.end_render_pass();
     commandBuffer.make_surface_presentable();
@@ -214,7 +229,10 @@ void HelloCube::Update(const WindowState& window) {
                         .value     = ++m_frame_idx,
                     });
 
-    m_device.present(m_queue);
+    const auto status = m_device.present(m_queue);
+    if (status == SURFACE_STATUS_OUT_OF_DATE || status == SURFACE_STATUS_SUBOPTIMAL) {
+        recreate_swapchain(window.width, window.height);
+    }
 
     m_device.on_submitted_work_completed(m_queue,
                                          [&, swapchain_view]() { m_device.free(swapchain_view); });

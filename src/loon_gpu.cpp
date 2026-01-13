@@ -133,7 +133,7 @@ struct Device::Impl {
     bool                configure_surface(const SurfaceConfiguration& config);
     void                unconfigure_surface();
     SurfaceTextureInfo  get_current_texture();
-    void                present(Handle<Queue> queue);
+    SURFACE_STATUS      present(Handle<Queue> queue);
 
     // Buffers:
     Handle<Buffer>  malloc(size_t bytes, MEMORY memory = MEMORY_DEFAULT);
@@ -870,25 +870,28 @@ SurfaceTextureInfo Device::Impl::get_current_texture() {
     uint32_t           image_idx = 0;
     VkResult           result = m_api.vkAcquireNextImage2KHR(m_device, &acquire_info, &image_idx);
     SurfaceTextureInfo info{
-        .status            = SurfaceTextureInfo::STATUS_SUCCESS,
+        .status            = SURFACE_STATUS_SUCCESS,
         .texture           = m_surface.swapchain_images[image_idx],
         .acquire_semaphore = {.h = reinterpret_cast<uintptr_t>(semaphore)},
     };
     m_surface.current_image_idx = image_idx;
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-        info.status = SurfaceTextureInfo::STATUS_OUT_OF_DATE;
+        info.status = SURFACE_STATUS_OUT_OF_DATE;
     } else if (result == VK_SUBOPTIMAL_KHR) {
-        info.status = SurfaceTextureInfo::STATUS_SUBOPTIMAL;
+        info.status = SURFACE_STATUS_SUBOPTIMAL;
     } else if (result < 0) {
         log(LogLevel_Error, "Error in swapchain acquireNextImage"_sv);
-        info.status = SurfaceTextureInfo::STATUS_ERROR;
+        info.status = SURFACE_STATUS_ERROR;
+    } else if (result != VK_SUCCESS) {
+        log(LogLevel_Error, "Unknown swapchain status"_sv);
+        info.status = SURFACE_STATUS_OUT_OF_DATE;
     }
 
     return info;
 }
 
-void Device::Impl::present(Handle<Queue> queue) {
+SURFACE_STATUS Device::Impl::present(Handle<Queue> queue) {
     auto presenting_texture_handle = m_surface.swapchain_images[m_surface.current_image_idx];
 
     VkPresentInfoKHR present_info{
@@ -902,7 +905,14 @@ void Device::Impl::present(Handle<Queue> queue) {
         .pResults           = nullptr,
     };
 
-    m_api.vkQueuePresentKHR(m_queues[queue.h].queue, &present_info);
+    VkResult res = m_api.vkQueuePresentKHR(m_queues[queue.h].queue, &present_info);
+
+    switch (res) {
+        case VK_SUCCESS: return SURFACE_STATUS_SUCCESS;
+        case VK_SUBOPTIMAL_KHR: return SURFACE_STATUS_SUBOPTIMAL;
+        case VK_ERROR_OUT_OF_DATE_KHR: return SURFACE_STATUS_OUT_OF_DATE;
+        default: chk(res); return SURFACE_STATUS_ERROR;
+    }
 }
 
 // MARK: Buffers
@@ -1671,8 +1681,8 @@ SurfaceTextureInfo Device::get_current_texture() {
     return impl->get_current_texture();
 }
 
-void Device::present(Handle<Queue> queue) {
-    impl->present(queue);
+SURFACE_STATUS Device::present(Handle<Queue> queue) {
+    return impl->present(queue);
 }
 
 Handle<Buffer> Device::malloc(size_t bytes, MEMORY memory) {
@@ -1861,7 +1871,7 @@ void CommandBuffer::begin_render_pass(RenderPassDesc desc) {
     impl->m_api.vkCmdSetDepthWriteEnable(cmd, false);
     impl->m_api.vkCmdSetDepthTestEnable(cmd, false);
     impl->m_api.vkCmdSetDepthCompareOp(cmd, VK_COMPARE_OP_ALWAYS);
-    impl->m_api.vkCmdSetDepthBoundsTestEnable(cmd, true);
+    impl->m_api.vkCmdSetDepthBoundsTestEnable(cmd, false);
     impl->m_api.vkCmdSetStencilTestEnable(cmd, false);
     impl->m_api.vkCmdSetStencilOp(cmd,
                                   VK_STENCIL_FACE_FRONT_AND_BACK,

@@ -426,6 +426,13 @@ enum PRESENT_MODE {
     PRESENT_MODE_VALID_COUNT,
 };
 
+enum SURFACE_STATUS {
+    SURFACE_STATUS_SUCCESS,
+    SURFACE_STATUS_SUBOPTIMAL,
+    SURFACE_STATUS_OUT_OF_DATE,
+    SURFACE_STATUS_ERROR,
+};
+
 // Custom allocation callback - essentially a realloc function but not exactly
 // the same as the C version.
 // - ptr is null iff old_size is 0
@@ -573,13 +580,7 @@ struct SurfaceConfiguration {
 };
 
 struct SurfaceTextureInfo {
-    enum {
-        STATUS_SUCCESS,
-        STATUS_SUBOPTIMAL,
-        STATUS_OUT_OF_DATE,
-        STATUS_ERROR,
-    } status;
-
+    SURFACE_STATUS  status;
     Handle<Texture> texture;
 
     // Semaphore needs to be waited on before the texture can safely be used.
@@ -614,7 +615,7 @@ class Device {
     bool                configure_surface(const SurfaceConfiguration& config);
     void                unconfigure_surface();
     SurfaceTextureInfo  get_current_texture();
-    void                present(Handle<Queue> queue);
+    SURFACE_STATUS      present(Handle<Queue> queue);
 
     // Buffers:
     Handle<Buffer> malloc(size_t bytes, MEMORY memory = MEMORY_DEFAULT);

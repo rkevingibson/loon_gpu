@@ -35,7 +35,7 @@
   self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
   _device = MTLCreateSystemDefaultDevice();
   if (self) {
-    std::string shader_search_path = "/Users/kevin/Code/loon_webgpu/examples/";
+    std::string shader_search_path = "/Users/kevin/Code/loon_gpu/examples/";
 
     self->window_state = {
         .native_window_handle = 0,
@@ -46,7 +46,7 @@
             std::make_unique<ShaderLoader>(shader_search_path.c_str()),
     };
 
-    self->selected_example = ExampleName::HelloTriangle;
+    self->selected_example = ExampleName::HelloCube;
   }
 
   return self;

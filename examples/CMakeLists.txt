@@ -101,6 +101,7 @@ if (APPLE)
     "-framework AppKit"
     "-framework Metal"
     "-framework MetalKit"
+    "-framework QuartzCore"
     )
 endif()
 

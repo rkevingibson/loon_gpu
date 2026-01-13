@@ -12,6 +12,7 @@ class HelloTriangle : public Example {
     void Update(const WindowState& window) override;
 
    private:
+    void              recreate_swapchain(uint32_t width, uint32_t height);
     Device            m_device;
     Handle<Queue>     m_queue;
     FORMAT            m_swapchain_format;

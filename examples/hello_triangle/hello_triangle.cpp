@@ -82,25 +82,29 @@ HelloTriangle::~HelloTriangle() {
     m_device.unconfigure_surface();
 }
 
+void HelloTriangle::recreate_swapchain(uint32_t width, uint32_t height) {
+    m_device.unconfigure_surface();
+    m_device.configure_surface({
+        .format       = m_swapchain_format,
+        .usages       = loon::gpu::USAGE_COLOR_ATTACHMENT,
+        .width        = width,
+        .height       = height,
+        .present_mode = PRESENT_MODE_FIFO,
+    });
+    m_swapchain_width  = width;
+    m_swapchain_height = height;
+}
+
 void HelloTriangle::Update(const WindowState& window) {
     constexpr uint64_t kMaxFramesInFlight = 3;
     m_device.wait_semaphore(m_semaphore,
                             std::max(m_frame_idx, kMaxFramesInFlight) - kMaxFramesInFlight);
     auto surface_texture = m_device.get_current_texture();
-    if (surface_texture.status == loon::gpu::SurfaceTextureInfo::STATUS_OUT_OF_DATE
-        || surface_texture.status == loon::gpu::SurfaceTextureInfo::STATUS_SUBOPTIMAL) {
-        m_device.unconfigure_surface();
-        m_device.configure_surface({
-            .format       = m_swapchain_format,
-            .usages       = loon::gpu::USAGE_COLOR_ATTACHMENT,
-            .width        = window.width,
-            .height       = window.height,
-            .present_mode = PRESENT_MODE_FIFO,
-        });
-        m_swapchain_width  = window.width;
-        m_swapchain_height = window.height;
+    if (surface_texture.status == SURFACE_STATUS_OUT_OF_DATE
+        || surface_texture.status == SURFACE_STATUS_SUBOPTIMAL) {
+        recreate_swapchain(window.width, window.height);
         return;
-    } else if (surface_texture.status == loon::gpu::SurfaceTextureInfo::STATUS_ERROR) {
+    } else if (surface_texture.status == SURFACE_STATUS_ERROR) {
         return;
     }
 
@@ -140,8 +144,10 @@ void HelloTriangle::Update(const WindowState& window) {
                         .value     = ++m_frame_idx,
                     });
 
-    m_device.present(m_queue);
-
+    const auto status = m_device.present(m_queue);
+    if (status == SURFACE_STATUS_OUT_OF_DATE || status == SURFACE_STATUS_SUBOPTIMAL) {
+        recreate_swapchain(window.width, window.height);
+    }
     m_device.on_submitted_work_completed(m_queue,
                                          [&, swapchain_view]() { m_device.free(swapchain_view); });
     m_device.process_events(m_queue);
