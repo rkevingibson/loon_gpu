@@ -526,7 +526,7 @@ struct RasterDesc {
 };
 
 struct RenderAttachment {
-    Handle<TextureView> texture_view;
+    Handle<TextureView> texture_view = {0};
     LOAD_OP             load_op;
     STORE_OP            store_op;
     Color               clear_color;
@@ -534,10 +534,11 @@ struct RenderAttachment {
 
 struct RenderPassDesc {
     Span<const RenderAttachment> color_attachments;
+    RenderAttachment             depth_attachment;
     Rect2D                       render_area;
 };
 
-struct GpuTextureDesc {
+struct TextureDesc {
     TEXTURE     type = TEXTURE_2D;
     Dimension3D dimensions;
     uint32_t    mipCount    = 1;
@@ -625,7 +626,7 @@ class Device {
     void*          get_host_pointer(Handle<Buffer> buffer);
 
     // Textures:
-    Handle<Texture>     create_texture(const GpuTextureDesc& desc);
+    Handle<Texture>     create_texture(const TextureDesc& desc);
     Handle<TextureHeap> create_texture_heap(size_t size);
 
     Handle<TextureView> create_texture_view(Handle<Texture> texture, TextureViewDesc desc);

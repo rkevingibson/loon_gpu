@@ -1,14 +1,14 @@
 
 struct CameraData {
     float4x4 projection;
-    float4 rotationWorldToCamera;
-    float3 translationWorldToCamera;
+    float4x4 cameraFromWorld;
 };
 
 struct Mesh
 {
     float3* position;
     float3* color;
+    float4x4 worldFromMesh;
 };
 
 struct InputData {
@@ -27,7 +27,10 @@ VertexStageOutput vertexMain(uniform InputData* args, uint32_t vertexIdx : SV_Ve
 {
     VertexStageOutput output; 
     const Mesh mesh = args->mesh;
-    output.position = mul(args->camera.projection, float4(mesh.position[vertexIdx] + float3(0,0,-3), 1.0));
+
+    float4x4 mvp = mul(args->camera.projection, mul(args->camera.cameraFromWorld, mesh.worldFromMesh));
+
+    output.position = mul(mvp,float4(mesh.position[vertexIdx], 1.0));
     output.color = mesh.color[vertexIdx];
     return output;
 }

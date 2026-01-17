@@ -277,6 +277,29 @@ VkImageUsageFlags bridge_usage_flags(USAGE_FLAGS usage) {
     return flags;
 }
 
+VkImageType bridge(TEXTURE tex) {
+    switch (tex) {
+        case TEXTURE_1D: return VK_IMAGE_TYPE_1D;
+        case TEXTURE_2D: return VK_IMAGE_TYPE_2D;
+        case TEXTURE_3D: return VK_IMAGE_TYPE_3D;
+        case TEXTURE_CUBE:
+        case TEXTURE_2D_ARRAY:
+        case TEXTURE_CUBE_ARRAY: return VK_IMAGE_TYPE_2D;
+    }
+    return VK_IMAGE_TYPE_MAX_ENUM;
+}
+VkImageViewType bridge_view_type(TEXTURE tex) {
+    switch (tex) {
+        case TEXTURE_1D: return VK_IMAGE_VIEW_TYPE_1D;
+        case TEXTURE_2D: return VK_IMAGE_VIEW_TYPE_2D;
+        case TEXTURE_3D: return VK_IMAGE_VIEW_TYPE_3D;
+        case TEXTURE_CUBE: return VK_IMAGE_VIEW_TYPE_CUBE;
+        case TEXTURE_2D_ARRAY: return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+        case TEXTURE_CUBE_ARRAY: return VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
+    }
+    return VK_IMAGE_VIEW_TYPE_MAX_ENUM;
+}
+
 VkBlendFactor bridge(FACTOR factor) {
     switch (factor) {
         case FACTOR_ZERO: return VK_BLEND_FACTOR_ZERO;

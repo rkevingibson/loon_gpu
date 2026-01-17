@@ -145,7 +145,7 @@ struct Device::Impl {
 
 
     // Textures:
-    Handle<Texture>     create_texture(const GpuTextureDesc& desc);
+    Handle<Texture>     create_texture(const TextureDesc& desc);
     Handle<TextureHeap> create_texture_heap(size_t size);
     Handle<TextureView> create_texture_view(Handle<Texture> texture, TextureViewDesc desc);
 
@@ -1029,8 +1029,50 @@ BufferAndOffset Device::Impl::buffer_and_offset_from_ptr(GpuPtr ptr) {
 
 // MARK: Textures
 
-Handle<Texture> Device::Impl::create_texture(const GpuTextureDesc& desc) {
-    return {};
+Handle<Texture> Device::Impl::create_texture(const TextureDesc& desc) {
+    VkImageCreateInfo info{
+        .sType     = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .pNext     = nullptr,
+        .flags     = 0,
+        .imageType = bridge(desc.type),
+        .format    = bridge(desc.format),
+        .extent
+        = {.width = desc.dimensions.x, .height = desc.dimensions.y, .depth = desc.dimensions.z},
+        .mipLevels             = desc.mipCount,
+        .arrayLayers           = desc.layerCount,
+        .samples               = VK_SAMPLE_COUNT_1_BIT,  // TODO: Support multisampling
+        .tiling                = VK_IMAGE_TILING_OPTIMAL,
+        .usage                 = bridge_usage_flags(desc.usage),
+        .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = 0,
+        .initialLayout         = VK_IMAGE_LAYOUT_GENERAL,
+    };
+
+    VmaAllocationCreateInfo alloc_info{
+        .flags          = 0,
+        .usage          = VMA_MEMORY_USAGE_AUTO,
+        .requiredFlags  = 0,
+        .preferredFlags = 0,
+        .memoryTypeBits = 0,
+        .pool           = VK_NULL_HANDLE,
+        .pUserData      = 0,
+        .priority       = 0.,
+    };
+    VkImage       image;
+    VmaAllocation allocation = nullptr;
+
+    if (!chk(vmaCreateImage(m_vma, &info, &alloc_info, &image, &allocation, nullptr))) {
+        return {};
+    }
+
+    const auto handle      = m_texture_pool.get();
+    m_texture_pool[handle] = Texture{
+        .vk_image      = image,
+        .vk_allocation = allocation,
+        .vk_type       = bridge_view_type(desc.type),
+    };
+
+    return {handle};
 }
 
 Handle<TextureView> Device::Impl::create_texture_view(Handle<Texture> tex, TextureViewDesc desc) {
@@ -1705,8 +1747,8 @@ void* Device::get_host_pointer(Handle<Buffer> buffer) {
     return impl->get_host_pointer(buffer);
 }
 
-Handle<Texture> Device::create_texture(const GpuTextureDesc& desc) {
-    return {};
+Handle<Texture> Device::create_texture(const TextureDesc& desc) {
+    return impl->create_texture(desc);
 }
 Handle<TextureHeap> Device::create_texture_heap(size_t size) {
     return {};
@@ -1848,7 +1890,25 @@ void CommandBuffer::begin_render_pass(RenderPassDesc desc) {
         });
     }
 
-    // TODO: Depth/stencil values
+    // TODO: stencil attachment
+
+    const bool                has_depth_attachment = desc.depth_attachment.texture_view.h != 0;
+    VkRenderingAttachmentInfo depth_attachment{};
+    if (has_depth_attachment) {
+        depth_attachment = VkRenderingAttachmentInfo{
+            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+            .pNext = nullptr,
+            .imageView = impl->m_texture_view_pool[desc.depth_attachment.texture_view.h].vk_image_view, 
+            .imageLayout = VK_IMAGE_LAYOUT_GENERAL, 
+            .resolveMode = VK_RESOLVE_MODE_NONE,
+            .resolveImageView = VK_NULL_HANDLE,
+            .resolveImageLayout = VK_IMAGE_LAYOUT_GENERAL,
+            .loadOp             = bridge(desc.depth_attachment.load_op),
+            .storeOp            = bridge(desc.depth_attachment.store_op),
+            .clearValue         = {.color = {.uint32 = {desc.depth_attachment.clear_color.r,desc.depth_attachment.clear_color.g,desc.depth_attachment.clear_color.b,desc.depth_attachment.clear_color.a},},},
+        };
+    }
+
     const VkRect2D render_rect = {
             .offset = {.x = (int32_t)desc.render_area.offset_x, .y = (int32_t)desc.render_area.offset_y,},
             .extent = {.width = desc.render_area.width, .height = desc.render_area.height,},
@@ -1862,7 +1922,7 @@ void CommandBuffer::begin_render_pass(RenderPassDesc desc) {
         .viewMask             = 0,
         .colorAttachmentCount = static_cast<uint32_t>(color_attachments.size()),
         .pColorAttachments    = color_attachments.data(),
-        .pDepthAttachment     = nullptr,
+        .pDepthAttachment     = has_depth_attachment ? &depth_attachment : nullptr,
         .pStencilAttachment   = nullptr,
     };
     impl->m_api.vkCmdBeginRendering(cmd, &rendering_info);

@@ -12,12 +12,16 @@
 // towards camera, out of the screen.)
 ///
 
+namespace geometry {
+
 struct float3 {
     float x, y, z;
 };
 
 struct alignas(16) float4 {
     float x, y, z, w;
+
+    static float4 make(const float3& xyz, float w) noexcept { return {xyz.x, xyz.y, xyz.z, w}; }
 };
 
 struct alignas(16) quatf {
@@ -27,6 +31,27 @@ struct alignas(16) quatf {
 struct float4x4 {
     float4 columns[4];
 };
+
+struct transform3d {
+    float3 basis[3];
+    float3 origin;
+
+    [[nodiscard]] static transform3d identity();
+    [[nodiscard]] static transform3d from_basis_and_origin(float3 basis[3], const float3& origin);
+
+    [[nodiscard]] transform3d rotated(const float3& axis, float angle) const;
+    [[nodiscard]] transform3d rotated_local(const float3& axis, float angle) const;
+    [[nodiscard]] transform3d translated(const float3& offset) const;
+    [[nodiscard]] transform3d translated_local(const float3& offset) const;
+
+    [[nodiscard]] float4x4 to_matrix() const;
+};
+
+inline constexpr float radians_from_degrees(float degrees) {
+    constexpr float kPi                 = 3.14159265358979323846f;
+    constexpr float kRadiansFromDegrees = kPi / 180.f;
+    return degrees * kRadiansFromDegrees;
+}
 
 // Computes a*b - c*d, avoiding catastrophic cancellations via Karan's algorithm
 inline constexpr float differenceOfProducts(float a, float b, float c, float d) {
@@ -70,6 +95,10 @@ inline constexpr float3 operator*(float a, const float3& b) {
     return {a * b.x, a * b.y, a * b.z};
 }
 
+inline constexpr float3 operator+(const float3& a, const float3& b) {
+    return {a.x + b.x, a.y + b.y, a.z + b.z};
+}
+
 inline constexpr float squaredLength(const float3& a) {
     return a.x * a.x + a.y * a.y + a.z * a.z;
 }
@@ -103,8 +132,8 @@ struct ProjectionInfo {
 
 float4x4 projection(const ProjectionInfo& info);
 
-inline constexpr float radians_from_degrees(float degrees) {
-    constexpr float kPi                 = 3.14159265358979323846f;
-    constexpr float kRadiansFromDegrees = kPi / 180.f;
-    return degrees * kRadiansFromDegrees;
-}
+// MARK: transform3d operations
+
+
+
+}  // namespace geometry

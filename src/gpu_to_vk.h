@@ -13,6 +13,8 @@ VkPresentModeKHR                    bridge(PRESENT_MODE mode);
 VkPipelineStageFlags2               bridge_pipeline_stage(STAGE stage);
 USAGE_FLAGS                         bridge_usage_flags(VkImageUsageFlags flags);
 VkImageUsageFlags                   bridge_usage_flags(USAGE_FLAGS usage);
+VkImageType                         bridge(TEXTURE tex);
+VkImageViewType                     bridge_view_type(TEXTURE tex);
 VkPipelineColorBlendAttachmentState bridge(const BlendDesc& state);
 VkAttachmentLoadOp                  bridge(LOAD_OP op);
 VkAttachmentStoreOp                 bridge(STORE_OP op);

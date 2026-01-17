@@ -15,39 +15,57 @@
 
 #include "common/geometry.h"
 #include "common/shaders.h"
+using namespace geometry;
 
+struct Cube {
+    static constexpr float3 kPositions[] = {
+        {1, 1, 1},
+        {1, 1, -1},
+        {1, -1, 1},
+        {1, -1, -1},
+        {-1, 1, 1},
+        {-1, 1, -1},
+        {-1, -1, 1},
+        {-1, -1, -1},
+    };
+    static constexpr float3 kColors[] = {
+        {1, 0, 0},
+        {0, 1, 0},
+        {0, 0, 1},
+        {1, 0, 1},
+        {0, 1, 1},
+        {1, 1, 0},
+        {0, 1, 0},
+        {0, 0, 1},
+    };
+    static constexpr uint16_t kIndices[] = {0, 2, 1, 1, 2, 3, 0, 6, 2, 0, 4, 6, 4, 5, 6, 6, 5, 7,
+                                            5, 1, 7, 7, 1, 3, 1, 0, 4, 1, 4, 5, 2, 6, 3, 6, 7, 3};
+    static constexpr size_t   kSize      = sizeof(kPositions) + sizeof(kColors) + sizeof(kIndices);
 
-struct Mesh {
-    float3 position[8];
-    float3 color[8];
+    static void write(void* ptr) {
+        char* dst = (char*)ptr;
+        memcpy(ptr, kPositions, sizeof(kPositions));
+        dst += sizeof(kPositions);
+        memcpy(dst, kColors, sizeof(kColors));
+        dst += sizeof(kColors);
+        memcpy(dst, kIndices, sizeof(kIndices));
+    }
 };
 
-constexpr Mesh kCubeVerts = {
-    .position = {{1, 1, 1},
-                 {1, 1, -1},
-                 {1, -1, 1},
-                 {1, -1, -1},
-                 {-1, 1, 1},
-                 {-1, 1, -1},
-                 {-1, -1, 1},
-                 {-1, -1, -1},},
-    .color
-    = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}, {1, 0, 1}, {0, 1, 1}, {1, 1, 0}, {0, 1, 0}, {0, 0, 1},},
+struct MeshGpu {
+    GpuPtr   position;
+    GpuPtr   color;
+    float4x4 world_from_mesh;
 };
-
-constexpr uint16_t kCubeIndices[] = {0, 2, 1, 1, 2, 3, 0, 6, 2, 0, 4, 6, 4, 5, 6, 6, 5, 7,
-                                     5, 1, 7, 7, 1, 3, 1, 0, 4, 1, 4, 5, 2, 6, 3, 6, 7, 3};
 
 struct CameraInfo {
-    float4x4 projection              = {};
-    quatf    rotationCameraFromWorld = {};
-    float3   position                = {0, 0, 5.f};
+    float4x4 projection        = {};
+    float4x4 camera_from_world = {};
 };
 
 struct ShaderArgs {
     CameraInfo camera;
-    GpuPtr     positions;
-    GpuPtr     colors;
+    MeshGpu    mesh;
 };
 
 static FORMAT select_surface_format(const loon::gpu::SurfaceCapabilities& surface_capabilities) {
@@ -106,19 +124,16 @@ HelloCube::HelloCube(const WindowState& window_state) {
     m_queue     = m_device.get_queue();
     m_semaphore = m_device.create_semaphore(0);
 
-    m_geometry_buffer = m_device.malloc(sizeof(kCubeVerts) + sizeof(kCubeIndices), MEMORY_GPU);
+    m_geometry_buffer = m_device.malloc(Cube::kSize, MEMORY_GPU);
     m_vertex_ptr      = m_device.get_device_pointer(m_geometry_buffer);
 
     m_constant_buffer = m_device.malloc(1024ull * 1024);
     // Copy over the geometry to the geometry buffer
     void* dst = m_device.get_host_pointer(m_constant_buffer);
-    memcpy(dst, &kCubeVerts, sizeof(kCubeVerts));
-    memcpy((char*)dst + sizeof(kCubeVerts), kCubeIndices, sizeof(kCubeIndices));
+    Cube::write(dst);
 
     auto cmd = m_device.start_command_recording(m_queue);
-    cmd.memcpy(m_vertex_ptr,
-               m_device.get_device_pointer(m_constant_buffer),
-               sizeof(kCubeVerts) + sizeof(kCubeIndices));
+    cmd.memcpy(m_vertex_ptr, m_device.get_device_pointer(m_constant_buffer), Cube::kSize);
 
     // A little excessive, but wait for the copy to be done before returning.
     cmd.barrier(loon::gpu::STAGE_TRANSFER, loon::gpu::STAGE_VERTEX_SHADER);
@@ -131,16 +146,19 @@ HelloCube::HelloCube(const WindowState& window_state) {
     m_device.wait_semaphore(copy_semaphore, 1);
     m_device.free(copy_semaphore);
 
-    auto args    = reinterpret_cast<ShaderArgs*>(m_device.get_host_pointer(m_constant_buffer));
-    args->camera = {
-        .projection = projection({
-            .view_width  = (float)window_state.width,
-            .view_height = (float)window_state.height,
-            .y_fov       = radians_from_degrees(45.f),
-        }),
-    };
-    args->positions = m_vertex_ptr;
-    args->colors    = m_vertex_ptr + offsetof(Mesh, color);
+
+    // Create a depth texture
+    m_depth_texture = m_device.create_texture({
+        .type       = TEXTURE_2D,
+        .dimensions = {.x = window_state.width, .y = window_state.height, .z = 1},
+        .format     = loon::gpu::FORMAT_Depth32Float,
+        .usage      = loon::gpu::USAGE_DEPTH_STENCIL_ATTACHMENT,
+    });
+
+    m_depth_view = m_device.create_texture_view(m_depth_texture,
+                                                TextureViewDesc{
+                                                    .format = loon::gpu::FORMAT_Depth32Float,
+                                                });
 }
 
 HelloCube::~HelloCube() {
@@ -170,14 +188,21 @@ void HelloCube::Update(const WindowState& window) {
 
     // Update constant data
     auto args = reinterpret_cast<ShaderArgs*>(m_device.get_host_pointer(m_constant_buffer));
-    args[m_frame_idx % 3].camera = {
-        .projection = projection({.view_width  = (float)window.width,
-                                  .view_height = (float)window.height,
-                                  .y_fov       = radians_from_degrees(45.f),
-                                  .depth_far   = 0.5f}),
+    args[m_frame_idx % 3].camera = CameraInfo{
+        .projection        = projection({.view_width  = (float)window.width,
+                                         .view_height = (float)window.height,
+                                         .y_fov       = radians_from_degrees(45.f),
+                                         .depth_far   = 0.5f}),
+        .camera_from_world = transform3d::identity().translated({0, 0, -10}).to_matrix(),
     };
-    args[m_frame_idx % 3].positions = m_vertex_ptr;
-    args[m_frame_idx % 3].colors    = m_vertex_ptr + offsetof(Mesh, color);
+    args[m_frame_idx % 3].mesh = {
+        .position        = m_vertex_ptr,
+        .color           = m_vertex_ptr + sizeof(Cube::kPositions),
+        .world_from_mesh = transform3d::identity()
+                               .rotated_local(normalized({0, 1, 0}),
+                                              radians_from_degrees((float)(m_frame_idx % 360)))
+                               .to_matrix(),
+    };
 
     auto surface_texture = m_device.get_current_texture();
     if (surface_texture.status == SURFACE_STATUS_OUT_OF_DATE
@@ -206,13 +231,21 @@ void HelloCube::Update(const WindowState& window) {
                                        .load_op      = loon::gpu::LOAD_OP_CLEAR,
                                        .store_op     = loon::gpu::STORE_OP_STORE,
                                        .clear_color  = Color(0, 0, 0, 0),
-                                   }, .render_area = {.width = m_swapchain_width, .height = m_swapchain_height},});
+                                   }, 
+                                   .depth_attachment = RenderAttachment{
+                                    .texture_view = m_depth_view,
+                                    .load_op = loon::gpu::LOAD_OP_CLEAR,
+                                    .store_op = loon::gpu::STORE_OP_DISCARD,
+                                    .clear_color = Color(0,0,0,0),
+                                   }, 
+                                   .render_area = {.width = m_swapchain_width, .height = m_swapchain_height},
+                                });
 
     commandBuffer.set_pipeline(m_render_pipeline);
     commandBuffer.draw_indexed_instanced(
         m_device.get_device_pointer(m_constant_buffer) + sizeof(ShaderArgs) * (m_frame_idx % 3),
         0,
-        m_vertex_ptr + sizeof(Mesh),
+        m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kColors),
         36,
         1);
 
