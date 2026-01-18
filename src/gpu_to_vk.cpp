@@ -349,4 +349,18 @@ VkAttachmentStoreOp bridge(STORE_OP op) {
     }
 }
 
+VkCompareOp bridge(OP op) {
+    switch (op) {
+        case OP_NEVER: return VK_COMPARE_OP_NEVER;
+        case OP_LESS: return VK_COMPARE_OP_LESS;
+        case OP_EQUAL: return VK_COMPARE_OP_EQUAL;
+        case OP_LESS_EQUAL: return VK_COMPARE_OP_LESS_OR_EQUAL;
+        case OP_GREATER: return VK_COMPARE_OP_GREATER;
+        case OP_NOT_EQUAL: return VK_COMPARE_OP_NOT_EQUAL;
+        case OP_GREATER_EQUAL: return VK_COMPARE_OP_GREATER_OR_EQUAL;
+        case OP_ALWAYS: return VK_COMPARE_OP_ALWAYS;
+        default: return VK_COMPARE_OP_MAX_ENUM;
+    }
+}
+
 }  // namespace loon::gpu

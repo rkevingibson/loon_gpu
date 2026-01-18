@@ -167,7 +167,7 @@ struct Device::Impl {
     void             free(Handle<Pipeline> pipeline);
 
     // State objects
-    Handle<DepthStencilState> create_depth_stencil_state(GpuDepthStencilDesc desc);
+    Handle<DepthStencilState> create_depth_stencil_state(const DepthStencilDesc& desc);
     Handle<BlendState>        create_blend_state(BlendDesc desc);
     void                      free(Handle<DepthStencilState> state);
     void                      free(Handle<BlendState> state);
@@ -214,9 +214,10 @@ struct Device::Impl {
     VkDescriptorSetLayout m_default_descriptor_layout;
     VkPipelineLayout      m_default_graphics_layout;
 
-    ObjectPool<Buffer, kMaxNumBuffers>           m_buffer_pool;
-    ObjectPool<Texture, kMaxNumTextures>         m_texture_pool;
-    ObjectPool<TextureView, kMaxNumTextureViews> m_texture_view_pool;
+    ObjectPool<Buffer, kMaxNumBuffers>                      m_buffer_pool;
+    ObjectPool<Texture, kMaxNumTextures>                    m_texture_pool;
+    ObjectPool<TextureView, kMaxNumTextureViews>            m_texture_view_pool;
+    ObjectPool<DepthStencilDesc, kMaxNumDepthStencilStates> m_depth_stencil_desc;
 
     struct GpuPtrMap {
         GpuPtr   ptr;
@@ -1045,7 +1046,7 @@ Handle<Texture> Device::Impl::create_texture(const TextureDesc& desc) {
         .usage                 = bridge_usage_flags(desc.usage),
         .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
         .queueFamilyIndexCount = 0,
-        .initialLayout         = VK_IMAGE_LAYOUT_GENERAL,
+        .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
     };
 
     VmaAllocationCreateInfo alloc_info{
@@ -1322,6 +1323,12 @@ Handle<Pipeline> Device::Impl::create_graphics_pipeline(ShaderSource vertex,
 
 void Device::Impl::free(Handle<Pipeline> pipeline) {
     m_api.vkDestroyPipeline(m_device, reinterpret_cast<VkPipeline>(pipeline.h), nullptr);
+}
+
+Handle<DepthStencilState> Device::Impl::create_depth_stencil_state(const DepthStencilDesc& desc) {
+    auto h                  = m_depth_stencil_desc.get();
+    m_depth_stencil_desc[h] = desc;
+    return {h};
 }
 
 // MARK: Queue
@@ -1775,6 +1782,10 @@ void Device::free(Handle<Pipeline> pipeline) {
     return impl->free(pipeline);
 }
 
+Handle<DepthStencilState> Device::create_depth_stencil_state(DepthStencilDesc desc) {
+    return impl->create_depth_stencil_state(desc);
+}
+
 Handle<Queue> Device::get_queue(QUEUE_TYPE type) {
     return impl->get_queue(type);
 }
@@ -1866,6 +1877,25 @@ void CommandBuffer::set_pipeline(Handle<Pipeline> pipeline) {
         VK_PIPELINE_BIND_POINT_GRAPHICS,  // TODO: Fix this, can't be hardcoded - need something in
                                           // the pipeline.
         reinterpret_cast<VkPipeline>(pipeline.h));
+}
+
+void CommandBuffer::set_depth_stencil_State(Handle<DepthStencilState> state) {
+    auto impl = reinterpret_cast<Device::Impl*>(device);
+    auto cmd  = reinterpret_cast<VkCommandBuffer>(buffer);
+
+    auto& desc = impl->m_depth_stencil_desc[state.h];
+
+    impl->m_api.vkCmdSetDepthWriteEnable(cmd, (desc.depthMode & DEPTH_WRITE) != 0);
+    impl->m_api.vkCmdSetDepthTestEnable(cmd, (desc.depthMode & DEPTH_READ) != 0);
+    impl->m_api.vkCmdSetDepthCompareOp(cmd, bridge(desc.depthTest));
+    // TODO: More stuff here.
+    impl->m_api.vkCmdSetStencilTestEnable(cmd, false);
+    impl->m_api.vkCmdSetStencilOp(cmd,
+                                  VK_STENCIL_FACE_FRONT_AND_BACK,
+                                  VK_STENCIL_OP_KEEP,
+                                  VK_STENCIL_OP_KEEP,
+                                  VK_STENCIL_OP_KEEP,
+                                  VK_COMPARE_OP_ALWAYS);
 }
 
 void CommandBuffer::begin_render_pass(RenderPassDesc desc) {

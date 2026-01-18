@@ -18,4 +18,5 @@ VkImageViewType                     bridge_view_type(TEXTURE tex);
 VkPipelineColorBlendAttachmentState bridge(const BlendDesc& state);
 VkAttachmentLoadOp                  bridge(LOAD_OP op);
 VkAttachmentStoreOp                 bridge(STORE_OP op);
+VkCompareOp                         bridge(OP op);
 };  // namespace loon::gpu

@@ -159,6 +159,11 @@ HelloCube::HelloCube(const WindowState& window_state) {
                                                 TextureViewDesc{
                                                     .format = loon::gpu::FORMAT_Depth32Float,
                                                 });
+
+    m_depth_stencil_state = m_device.create_depth_stencil_state(DepthStencilDesc{
+        .depthMode = DEPTH_FLAGS(loon::gpu::DEPTH_WRITE | loon::gpu::DEPTH_READ),
+        .depthTest = loon::gpu::OP_GREATER,
+    });
 }
 
 HelloCube::~HelloCube() {
@@ -240,7 +245,7 @@ void HelloCube::Update(const WindowState& window) {
                                    }, 
                                    .render_area = {.width = m_swapchain_width, .height = m_swapchain_height},
                                 });
-
+    commandBuffer.set_depth_stencil_State(m_depth_stencil_state);
     commandBuffer.set_pipeline(m_render_pipeline);
     commandBuffer.draw_indexed_instanced(
         m_device.get_device_pointer(m_constant_buffer) + sizeof(ShaderArgs) * (m_frame_idx % 3),

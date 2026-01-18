@@ -15,11 +15,12 @@
 
 namespace loon::gpu {
 
-constexpr size_t kMaxColorAttachments = 16;
-constexpr size_t kMaxNumBuffers       = 32ull * 1024;
-constexpr size_t kMaxNumTextures      = 64ull * 1024;
-constexpr size_t kMaxNumTextureViews  = 128ull * 1024;
-constexpr size_t kMaxTextureHeapSize  = 32ull * 1024;
+constexpr size_t kMaxColorAttachments      = 16;
+constexpr size_t kMaxNumBuffers            = 32ull * 1024;
+constexpr size_t kMaxNumTextures           = 64ull * 1024;
+constexpr size_t kMaxNumTextureViews       = 128ull * 1024;
+constexpr size_t kMaxTextureHeapSize       = 32ull * 1024;
+constexpr size_t kMaxNumDepthStencilStates = 32ull * 1024;
 
 template <class T>
 class Span {
@@ -486,7 +487,7 @@ struct DeviceDesc {
     void*                 alloc_userdata = nullptr;
 };
 
-struct GpuDepthStencilDesc {
+struct DepthStencilDesc {
     DEPTH_FLAGS depthMode            = DEPTH_NONE;
     OP          depthTest            = OP_ALWAYS;
     float       depthBias            = 0.0f;
@@ -551,9 +552,9 @@ struct TextureDesc {
 struct TextureViewDesc {
     FORMAT   format     = FORMAT_NONE;
     uint8_t  baseMip    = 0;
-    uint8_t  mipCount   = 0;
+    uint8_t  mipCount   = 1;
     uint16_t baseLayer  = 0;
-    uint16_t layerCount = 0;
+    uint16_t layerCount = 1;
 };
 
 struct TextureSizeAlign {
@@ -649,7 +650,7 @@ class Device {
     void             free(Handle<Pipeline> pipeline);
 
     // State objects
-    Handle<DepthStencilState> create_depth_stencil_state(GpuDepthStencilDesc desc);
+    Handle<DepthStencilState> create_depth_stencil_state(DepthStencilDesc desc);
     Handle<BlendState>        create_blend_state(BlendDesc desc);
     void                      free_depth_stencil_state(Handle<DepthStencilState> state);
     void                      free_blend_state(Handle<BlendState> state);
