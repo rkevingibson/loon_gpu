@@ -117,7 +117,10 @@ HelloCube::HelloCube(const WindowState& window_state) {
             .spirv       = Span(fragment_spirv.data(), fragment_spirv.size()).as_bytes(),
             .entry_point = "fragmentMain"_sv,
         },
-        RasterDesc{.colorTargets = {{.format = m_swapchain_format}}});
+        RasterDesc{
+            .depthFormat  = loon::gpu::FORMAT_Depth32Float,
+            .colorTargets = {{.format = m_swapchain_format}},
+        });
 
     assert(m_render_pipeline.h != 0);
 
@@ -198,13 +201,13 @@ void HelloCube::Update(const WindowState& window) {
                                          .view_height = (float)window.height,
                                          .y_fov       = radians_from_degrees(45.f),
                                          .depth_far   = 0.5f}),
-        .camera_from_world = transform3d::identity().translated({0, 0, -10}).to_matrix(),
+        .camera_from_world = transform3d::identity().translated({0, 0, -5}).to_matrix(),
     };
     args[m_frame_idx % 3].mesh = {
         .position        = m_vertex_ptr,
         .color           = m_vertex_ptr + sizeof(Cube::kPositions),
         .world_from_mesh = transform3d::identity()
-                               .rotated_local(normalized({0, 1, 0}),
+                               .rotated_local(normalized({1, 1, 0}),
                                               radians_from_degrees((float)(m_frame_idx % 360)))
                                .to_matrix(),
     };
@@ -229,7 +232,18 @@ void HelloCube::Update(const WindowState& window) {
 
     auto commandBuffer = m_device.start_command_recording(m_queue);
 
-    commandBuffer.make_surface_writable();
+    commandBuffer.barrier(loon::gpu::STAGE_RASTER_COLOR_OUT,
+                          STAGE_FLAGS(STAGE_PIXEL_SHADER | STAGE_RASTER_COLOR_OUT),
+                          {TextureTransition{
+                               .texture    = surface_texture.texture,
+                               .old_layout = loon::gpu::LAYOUT_DONT_CARE,
+                               .new_layout = LAYOUT_ATTACHMENT,
+                           },
+                           TextureTransition{
+                               .texture    = m_depth_texture,
+                               .old_layout = loon::gpu::LAYOUT_DONT_CARE,
+                               .new_layout = LAYOUT_ATTACHMENT,
+                           }});
     commandBuffer.begin_render_pass({
                                    .color_attachments = RenderAttachment{
                                        .texture_view = swapchain_view,
@@ -255,7 +269,13 @@ void HelloCube::Update(const WindowState& window) {
         1);
 
     commandBuffer.end_render_pass();
-    commandBuffer.make_surface_presentable();
+    commandBuffer.barrier(STAGE_RASTER_COLOR_OUT,
+                          STAGE_RASTER_COLOR_OUT,
+                          TextureTransition{
+                              .texture    = surface_texture.texture,
+                              .old_layout = LAYOUT_ATTACHMENT,
+                              .new_layout = LAYOUT_PRESENT,
+                          });
     m_device.submit(m_queue,
                     commandBuffer,
                     SemaphoreInfo{

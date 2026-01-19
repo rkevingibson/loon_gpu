@@ -119,7 +119,13 @@ void HelloTriangle::Update(const WindowState& window) {
 
     auto commandBuffer = m_device.start_command_recording(m_queue);
 
-    commandBuffer.make_surface_writable();
+    commandBuffer.barrier(loon::gpu::STAGE_RASTER_COLOR_OUT,
+                          loon::gpu::STAGE_RASTER_COLOR_OUT,
+                          TextureTransition{
+                              .texture    = surface_texture.texture,
+                              .old_layout = loon::gpu::LAYOUT_DONT_CARE,
+                              .new_layout = LAYOUT_ATTACHMENT,
+                          });
     commandBuffer.begin_render_pass({
                                    .color_attachments = RenderAttachment{
                                        .texture_view = swapchain_view,
@@ -132,7 +138,14 @@ void HelloTriangle::Update(const WindowState& window) {
     commandBuffer.draw(0, 0, 3, 1);
 
     commandBuffer.end_render_pass();
-    commandBuffer.make_surface_presentable();
+    commandBuffer.barrier(STAGE_RASTER_COLOR_OUT,
+                          STAGE_RASTER_COLOR_OUT,
+                          TextureTransition{
+                              .texture    = surface_texture.texture,
+                              .old_layout = LAYOUT_ATTACHMENT,
+                              .new_layout = LAYOUT_PRESENT,
+                          });
+
     m_device.submit(m_queue,
                     commandBuffer,
                     SemaphoreInfo{

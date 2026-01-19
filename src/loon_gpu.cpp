@@ -1,5 +1,6 @@
 #include "gpu/loon_gpu.h"
 
+#include <cassert>
 #include <cstddef>
 
 #include "containers.h"
@@ -31,6 +32,7 @@ struct Texture {
     VkImage         vk_image;
     VmaAllocation   vk_allocation;
     VkImageViewType vk_type = VK_IMAGE_VIEW_TYPE_2D;
+    FORMAT          format;
 };
 
 struct TextureView {
@@ -1071,6 +1073,7 @@ Handle<Texture> Device::Impl::create_texture(const TextureDesc& desc) {
         .vk_image      = image,
         .vk_allocation = allocation,
         .vk_type       = bridge_view_type(desc.type),
+        .format        = desc.format,
     };
 
     return {handle};
@@ -1090,7 +1093,7 @@ Handle<TextureView> Device::Impl::create_texture_view(Handle<Texture> tex, Textu
                         VK_COMPONENT_SWIZZLE_IDENTITY,
                         VK_COMPONENT_SWIZZLE_IDENTITY,},
         .subresourceRange = {
-        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .aspectMask = aspects_for_format(desc.format),
         .baseMipLevel = desc.baseMip,
         .levelCount = desc.mipCount,
         .baseArrayLayer = desc.baseLayer,
@@ -1178,9 +1181,8 @@ Handle<Pipeline> Device::Impl::create_graphics_pipeline(ShaderSource vertex,
 
 
     // Depth-stencil state:
-    VkFormat depth_attachment_format   = VK_FORMAT_UNDEFINED;
-    VkFormat stencil_attachment_format = VK_FORMAT_UNDEFINED;
-    // TODO: Depth stencil formats
+    VkFormat depth_attachment_format   = bridge(desc.depthFormat);
+    VkFormat stencil_attachment_format = bridge(desc.stencilFormat);
 
     // Color blend state
     Arena                                     arena = *get_thread_local_arena();
@@ -1843,18 +1845,59 @@ void CommandBuffer::memcpy(GpuPtr destGpu, GpuPtr srcGpu, size_t size) {
                                 &region);
 }
 
-void CommandBuffer::barrier(STAGE before, STAGE after, HAZARD_FLAGS hazards) {
+void CommandBuffer::barrier(STAGE_FLAGS                   before,
+                            STAGE_FLAGS                   after,
+                            Span<const TextureTransition> image_transitions,
+                            HAZARD_FLAGS                  hazards) {
     auto impl = reinterpret_cast<Device::Impl*>(device);
     // TODO: Use HAZARD_FLAGS to reduce the stage/access_masks unless necessary.
+    const auto     src_stage = bridge_pipeline_stage(before);
+    const auto     dst_stage = bridge_pipeline_stage(after);
+    constexpr auto access    = VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT;
+
     const VkMemoryBarrier2 barrier_info{
         .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
         .pNext         = nullptr,
-        .srcStageMask  = bridge_pipeline_stage(before),
-        .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT,
-        .dstStageMask  = bridge_pipeline_stage(after),
-        .dstAccessMask
-        = VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_INDEX_READ_BIT,
+        .srcStageMask  = src_stage,
+        .srcAccessMask = access,
+        .dstStageMask  = dst_stage,
+        .dstAccessMask = access,
     };
+
+    Arena arena = *impl->get_thread_local_arena();
+
+    Span<VkImageMemoryBarrier2> image_barriers;
+    for (const auto& t : image_transitions) {
+        const auto& tex = impl->m_texture_pool[t.texture.h];
+        image_barriers = concat(&arena,
+                                image_barriers,
+                                VkImageMemoryBarrier2{
+                                    .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+                                    .pNext            = nullptr,
+                                    .srcStageMask     = src_stage,
+                                    .srcAccessMask    = access,
+                                    .dstStageMask     = dst_stage,
+                                    .dstAccessMask    =  access,
+                                    .oldLayout        = bridge(t.old_layout),
+                                    .newLayout        = bridge(t.new_layout),
+                                    .image            = impl->m_texture_pool[t.texture.h].vk_image,
+                                    .subresourceRange = VkImageSubresourceRange{
+                                        .aspectMask = aspects_for_format(tex.format),
+                                        .baseMipLevel = 0,
+                                        .levelCount = VK_REMAINING_MIP_LEVELS,
+                                        .baseArrayLayer =0 ,
+                                        .layerCount = VK_REMAINING_ARRAY_LAYERS,
+                                    },
+                                });
+
+
+        if (t.new_layout == LAYOUT_PRESENT) {
+            assert(t.texture.h
+                   == impl->m_surface.swapchain_images[impl->m_surface.current_image_idx].h);
+            impl->m_surface.transitioning_command[impl->m_surface.current_semaphore_idx]
+                = reinterpret_cast<VkCommandBuffer>(buffer);
+        }
+    }
 
     const VkDependencyInfo info{
         .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
@@ -1864,8 +1907,8 @@ void CommandBuffer::barrier(STAGE before, STAGE after, HAZARD_FLAGS hazards) {
         .pMemoryBarriers          = &barrier_info,
         .bufferMemoryBarrierCount = 0,
         .pBufferMemoryBarriers    = nullptr,
-        .imageMemoryBarrierCount  = 0,
-        .pImageMemoryBarriers     = nullptr,
+        .imageMemoryBarrierCount  = static_cast<uint32_t>(image_barriers.size()),
+        .pImageMemoryBarriers     = image_barriers.data(),
     };
     impl->m_api.vkCmdPipelineBarrier2(reinterpret_cast<VkCommandBuffer>(buffer), &info);
 }
@@ -1910,7 +1953,7 @@ void CommandBuffer::begin_render_pass(RenderPassDesc desc) {
             .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
             .pNext              = nullptr,
             .imageView          = impl->m_texture_view_pool[attachment.texture_view.h].vk_image_view,
-            .imageLayout        = VK_IMAGE_LAYOUT_GENERAL,
+            .imageLayout        = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
             .resolveMode        = VK_RESOLVE_MODE_NONE,  // TODO: Multisampling support
             .resolveImageView   = VK_NULL_HANDLE,
             .resolveImageLayout = VK_IMAGE_LAYOUT_GENERAL,
@@ -1929,7 +1972,7 @@ void CommandBuffer::begin_render_pass(RenderPassDesc desc) {
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
             .pNext = nullptr,
             .imageView = impl->m_texture_view_pool[desc.depth_attachment.texture_view.h].vk_image_view, 
-            .imageLayout = VK_IMAGE_LAYOUT_GENERAL, 
+            .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, 
             .resolveMode = VK_RESOLVE_MODE_NONE,
             .resolveImageView = VK_NULL_HANDLE,
             .resolveImageLayout = VK_IMAGE_LAYOUT_GENERAL,
@@ -2043,90 +2086,6 @@ void CommandBuffer::draw_indexed_instanced(GpuPtr   vertexDataGpu,
                                  0,
                                  0,
                                  0);
-}
-
-void CommandBuffer::make_surface_writable() {
-    auto impl = reinterpret_cast<Device::Impl*>(device);
-
-    auto image           = impl->m_surface.swapchain_images[impl->m_surface.current_image_idx];
-    auto swapchain_image = impl->m_texture_pool[image.h].vk_image;
-
-    const VkImageMemoryBarrier2 barrier {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .pNext = nullptr,
-        .srcStageMask  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-        .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
-        .dstStageMask  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .dstAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .srcQueueFamilyIndex = 0,
-        .dstQueueFamilyIndex = 0,
-        .image = swapchain_image,
-        .subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        },
-    };
-
-    const VkDependencyInfo info{
-        .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .pNext                    = nullptr,
-        .dependencyFlags          = 0,
-        .memoryBarrierCount       = 0,
-        .pMemoryBarriers          = nullptr,
-        .bufferMemoryBarrierCount = 0,
-        .pBufferMemoryBarriers    = nullptr,
-        .imageMemoryBarrierCount  = 1,
-        .pImageMemoryBarriers     = &barrier,
-    };
-    impl->m_api.vkCmdPipelineBarrier2(reinterpret_cast<VkCommandBuffer>(buffer), &info);
-}
-
-void CommandBuffer::make_surface_presentable() {
-    auto impl = reinterpret_cast<Device::Impl*>(device);
-
-    auto image           = impl->m_surface.swapchain_images[impl->m_surface.current_image_idx];
-    auto swapchain_image = impl->m_texture_pool[image.h].vk_image;
-
-    const VkImageMemoryBarrier2 barrier {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .pNext = nullptr,
-        .srcStageMask  = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-        .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
-        .dstStageMask  = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .srcQueueFamilyIndex = 0,
-        .dstQueueFamilyIndex = 0,
-        .image = swapchain_image,
-        .subresourceRange = {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        },
-    };
-
-    const VkDependencyInfo info{
-        .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .pNext                    = nullptr,
-        .dependencyFlags          = 0,
-        .memoryBarrierCount       = 0,
-        .pMemoryBarriers          = nullptr,
-        .bufferMemoryBarrierCount = 0,
-        .pBufferMemoryBarriers    = nullptr,
-        .imageMemoryBarrierCount  = 1,
-        .pImageMemoryBarriers     = &barrier,
-    };
-    impl->m_api.vkCmdPipelineBarrier2(reinterpret_cast<VkCommandBuffer>(buffer), &info);
-    impl->m_surface.transitioning_command[impl->m_surface.current_semaphore_idx]
-        = reinterpret_cast<VkCommandBuffer>(buffer);
 }
 
 }  // namespace loon::gpu

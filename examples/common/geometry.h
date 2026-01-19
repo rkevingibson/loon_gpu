@@ -47,8 +47,8 @@ struct transform3d {
     [[nodiscard]] float4x4 to_matrix() const;
 };
 
+inline constexpr float kPi = 3.14159265358979323846f;
 inline constexpr float radians_from_degrees(float degrees) {
-    constexpr float kPi                 = 3.14159265358979323846f;
     constexpr float kRadiansFromDegrees = kPi / 180.f;
     return degrees * kRadiansFromDegrees;
 }
@@ -70,6 +70,10 @@ inline constexpr float sumOfProducts(float a, float b, float c, float d) {
 }
 
 // MARK: float3 operations
+
+inline constexpr bool operator==(const float3& a, const float3& b) {
+    return a.x == b.x && a.y == b.y && a.z == b.y;
+}
 
 inline constexpr float dot(const float3& a, const float3& b) {
     return a.x * b.x + a.y * b.y + a.z * b.z;
@@ -114,11 +118,13 @@ inline constexpr float3 normalized(const float3& a) {
 
 // MARK: float4 operations
 
+[[nodiscard]] constexpr inline bool operator==(const float4& a, const float4& b) {
+    return a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w;
+}
 
 // MARK: quatf operations
 
 quatf fromAxisAngle(const float3& axis, float angle);
-
 
 // MARK: float4x4 operations
 
@@ -132,8 +138,17 @@ struct ProjectionInfo {
 
 float4x4 projection(const ProjectionInfo& info);
 
+constexpr inline bool operator==(const float4x4& a, const float4x4& b) {
+    return a.columns[0] == b.columns[0] && a.columns[1] == b.columns[1]
+           && a.columns[2] == b.columns[2] && a.columns[3] == b.columns[3];
+}
+
 // MARK: transform3d operations
 
+[[nodiscard]] constexpr inline bool operator==(const transform3d& a, const transform3d& b) {
+    return a.basis[0] == b.basis[0] && a.basis[1] == b.basis[1] && a.basis[2] == b.basis[2]
+           && a.origin == b.origin;
+}
 
 
 }  // namespace geometry

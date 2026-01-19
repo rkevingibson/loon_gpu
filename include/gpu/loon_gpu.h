@@ -377,13 +377,26 @@ enum USAGE_FLAGS {
     USAGE_TRANSFER_DST             = 0x20,
 };
 
-enum STAGE {
-    STAGE_NONE = 0,
-    STAGE_TRANSFER,
-    STAGE_COMPUTE,
-    STAGE_RASTER_COLOR_OUT,
-    STAGE_PIXEL_SHADER,
-    STAGE_VERTEX_SHADER,
+enum STAGE_FLAGS {
+    STAGE_NONE             = 0,
+    STAGE_TRANSFER         = 0x01,
+    STAGE_COMPUTE          = 0x02,
+    STAGE_RASTER_COLOR_OUT = 0x04,
+    STAGE_PIXEL_SHADER     = 0x08,
+    STAGE_VERTEX_SHADER    = 0x10,
+};
+
+enum LAYOUT {
+    LAYOUT_DONT_CARE = 0,
+    LAYOUT_GENERAL,
+    LAYOUT_ATTACHMENT,
+    LAYOUT_PRESENT,
+};
+
+enum ACCESS_FLAGS {
+    ACCESS_READ       = 0x1,
+    ACCESS_WRITE      = 0x2,
+    ACCESS_READ_WRITE = ACCESS_READ | ACCESS_WRITE,
 };
 
 enum HAZARD_FLAGS {
@@ -592,8 +605,14 @@ struct SurfaceTextureInfo {
 struct SemaphoreInfo {
     Handle<Semaphore> semaphore;
     uint64_t          value;
-    STAGE stage = STAGE_NONE;  // Ignored on signal operations, what stage must be blocked on the
-                               // wait operation
+    STAGE_FLAGS stage = STAGE_NONE;  // Ignored on signal operations, what stage must be blocked on
+                                     // the wait operation
+};
+
+struct TextureTransition {
+    Handle<Texture> texture;
+    LAYOUT          old_layout = LAYOUT_DONT_CARE;
+    LAYOUT          new_layout = LAYOUT_GENERAL;
 };
 
 // Initialization
@@ -693,7 +712,10 @@ class CommandBuffer {
 
     void set_active_texture_heap_ptr(GpuPtr ptrGpu);
 
-    void barrier(STAGE before, STAGE after, HAZARD_FLAGS hazards = HAZARD_FLAGS(0));
+    void barrier(STAGE_FLAGS                   before,
+                 STAGE_FLAGS                   after,
+                 Span<const TextureTransition> image_transitions = {},
+                 HAZARD_FLAGS                  hazards           = HAZARD_FLAGS(0));
 
     void set_pipeline(Handle<Pipeline> pipeline);
     void set_depth_stencil_State(Handle<DepthStencilState> state);
@@ -729,11 +751,6 @@ class CommandBuffer {
 
     void draw_meshlets(GpuPtr meshletDataGpu, GpuPtr pixelDataGpu, const Dimension3D& dim);
     void draw_meshlets_indirect(GpuPtr meshletDataGpu, GpuPtr pixelDataGpu, GpuPtr dimGpu);
-
-
-    // Surface special functions - these introduce barriers to
-    void make_surface_writable();
-    void make_surface_presentable();
 
    private:
     void set_graphics_ptrs(GpuPtr vertexDataGpu, GpuPtr fragmentDataGpu);

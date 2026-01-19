@@ -62,11 +62,16 @@ else()
     )
 endif()
 
+# Split some of these into a separate library so we can write some unit tests for them
+add_library(example_utilities OBJECT
+    common/geometry.cpp
+)
+
+target_include_directories(example_utilities PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/common)
 
 set(EXAMPLE_SOURCES
     common/example.cpp
     common/shaders.cpp
-    common/geometry.cpp
     hello_triangle/hello_triangle.cpp
     hello_cube/hello_cube.cpp
 )
@@ -92,6 +97,7 @@ target_link_libraries(
     PRIVATE
     loon_gpu
     slang
+    example_utilities
 )
 
 if (APPLE)

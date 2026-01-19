@@ -1,5 +1,6 @@
 #include "gpu_to_vk.h"
 
+#include "gpu/loon_gpu.h"
 #include "vulkan/vulkan_core.h"
 
 namespace loon::gpu {
@@ -104,6 +105,20 @@ VkFormat bridge(FORMAT format) {
         case FORMAT_ASTC12x12Unorm: return VK_FORMAT_ASTC_12x12_UNORM_BLOCK;
         case FORMAT_ASTC12x12UnormSrgb: return VK_FORMAT_ASTC_12x12_SRGB_BLOCK;
         default: return VK_FORMAT_MAX_ENUM;
+    }
+}
+
+VkImageAspectFlags aspects_for_format(FORMAT format) {
+    switch (format) {
+        case FORMAT_Stencil8: return VK_IMAGE_ASPECT_STENCIL_BIT;
+        case FORMAT_Depth16Unorm: return VK_IMAGE_ASPECT_DEPTH_BIT;
+        case FORMAT_Depth24Plus: return VK_IMAGE_ASPECT_DEPTH_BIT;
+        case FORMAT_Depth24PlusStencil8:
+            return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+        case FORMAT_Depth32Float: return VK_IMAGE_ASPECT_DEPTH_BIT;
+        case FORMAT_Depth32FloatStencil8:
+            return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+        default: return VK_IMAGE_ASPECT_COLOR_BIT;
     }
 }
 
@@ -238,17 +253,19 @@ VkPresentModeKHR bridge(PRESENT_MODE mode) {
     }
 }
 
-VkPipelineStageFlags2 bridge_pipeline_stage(STAGE stage) {
+VkPipelineStageFlags2 bridge_pipeline_stage(STAGE_FLAGS stage) {
     VkPipelineStageFlags2 out = 0;
-    switch (stage) {
-        case STAGE_NONE: return 0;
-        case STAGE_TRANSFER: return VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
-        case STAGE_COMPUTE: return VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-        case STAGE_RASTER_COLOR_OUT: return VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-        case STAGE_PIXEL_SHADER: return VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-        case STAGE_VERTEX_SHADER:
-            return VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
-    }
+    out |= (stage & STAGE_TRANSFER) ? VK_PIPELINE_STAGE_2_TRANSFER_BIT : 0;
+    out |= (stage & STAGE_COMPUTE) ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT : 0;
+    out |= (stage & STAGE_RASTER_COLOR_OUT) ? VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT : 0;
+    out |= (stage & STAGE_PIXEL_SHADER) ? VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
+                                              | VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT
+                                              | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT
+                                        : 0;
+    out |= (stage & STAGE_VERTEX_SHADER)
+               ? VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT
+               : 0;
+    return out;
 }
 
 USAGE_FLAGS bridge_usage_flags(VkImageUsageFlags flags) {
@@ -360,6 +377,15 @@ VkCompareOp bridge(OP op) {
         case OP_GREATER_EQUAL: return VK_COMPARE_OP_GREATER_OR_EQUAL;
         case OP_ALWAYS: return VK_COMPARE_OP_ALWAYS;
         default: return VK_COMPARE_OP_MAX_ENUM;
+    }
+}
+
+VkImageLayout bridge(LAYOUT layout) {
+    switch (layout) {
+        case LAYOUT_DONT_CARE: return VK_IMAGE_LAYOUT_UNDEFINED;
+        case LAYOUT_GENERAL: return VK_IMAGE_LAYOUT_GENERAL;
+        case LAYOUT_ATTACHMENT: return VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+        case LAYOUT_PRESENT: return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     }
 }
 

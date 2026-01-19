@@ -11,7 +11,17 @@ transform3d transform3d::from_basis_and_origin(float3 basis[3], const float3& or
 }
 
 [[nodiscard]] transform3d transform3d::rotated(const float3& axis, float angle) const {
-    return *this;
+    // Using Rodrigues's rotation formula, we can rotate the basis and the offset.
+    const float ca  = cosf(angle);
+    const float sa  = sinf(angle);
+    const auto  rot = [=](const float3& v) {
+        return v * ca + sa * cross(axis, v) + (1.0f - ca) * dot(axis, v) * axis;
+    };
+
+    return {
+        .basis  = {rot(basis[0]), rot(basis[1]), rot(basis[2])},
+        .origin = rot(origin),
+    };
 }
 
 [[nodiscard]] transform3d transform3d::rotated_local(const float3& axis, float angle) const {
@@ -24,14 +34,16 @@ transform3d transform3d::from_basis_and_origin(float3 basis[3], const float3& or
     const float ca = cosf(angle);
     const float sa = -sinf(angle);
 
-    const float3 bx = {basis[0].x, basis[1].x, basis[2].x};
-    const float3 by = {basis[0].y, basis[1].y, basis[2].y};
-    const float3 bz = {basis[0].z, basis[1].z, basis[2].z};
+    const float3 bx  = {basis[0].x, basis[1].x, basis[2].x};
+    const float3 by  = {basis[0].y, basis[1].y, basis[2].y};
+    const float3 bz  = {basis[0].z, basis[1].z, basis[2].z};
+    const auto   rot = [=](const float3& v) {
+        return v * ca + sa * cross(axis, v) + (1.0f - ca) * dot(axis, v) * axis;
+    };
 
-    const float3 new_x = ca * bx + sa * cross(axis, bx) + (1.f - ca) * dot(axis, bx) * axis;
-    const float3 new_y = ca * by + sa * cross(axis, by) + (1.f - ca) * dot(axis, by) * axis;
-    const float3 new_z = ca * bz + sa * cross(axis, bz) + (1.f - ca) * dot(axis, bz) * axis;
-
+    const float3 new_x = rot(bx);
+    const float3 new_y = rot(by);
+    const float3 new_z = rot(bz);
 
     return {
         .basis
