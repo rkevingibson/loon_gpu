@@ -26,19 +26,16 @@ transform3d transform3d::from_basis_and_origin(float3 basis[3], const float3& or
 
 [[nodiscard]] transform3d transform3d::rotated_local(const float3& axis, float angle) const {
     // Want to compute B * R, where B is our basis, and R is the rotation matrix defined by
-    // axis/angle. Rodrigues' rotation formula can give us R * B, which we can manipulate to get
-    // what we want: Negate the angle to get the inverse rotation. Then, instead of applying it to
-    // B, apply to B^T, then transpose the output.
-    // https://en.wikipedia.org/wiki/Rodrigues%27_rotation_formula
-    // Is this faster than just constructing the rotation matrix and multiplying? Unsure.
-    const float ca = cosf(angle);
-    const float sa = -sinf(angle);
-
+    // axis/angle. Rodrigues' rotation formula can give us R * B, which we modify to give us B * R,
+    // via some transposing and reversing the order of a cross product (equivalently negating the
+    // angle passed to cosf/sinf).
+    const float  ca  = cosf(angle);
+    const float  sa  = sinf(angle);
     const float3 bx  = {basis[0].x, basis[1].x, basis[2].x};
     const float3 by  = {basis[0].y, basis[1].y, basis[2].y};
     const float3 bz  = {basis[0].z, basis[1].z, basis[2].z};
     const auto   rot = [=](const float3& v) {
-        return v * ca + sa * cross(axis, v) + (1.0f - ca) * dot(axis, v) * axis;
+        return v * ca + sa * cross(v, axis) + (1.0f - ca) * dot(axis, v) * axis;
     };
 
     const float3 new_x = rot(bx);

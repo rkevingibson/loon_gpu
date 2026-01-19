@@ -81,9 +81,9 @@ inline constexpr float dot(const float3& a, const float3& b) {
 
 inline constexpr float3 cross(const float3& a, const float3& b) {
     return {
-        .x = differenceOfProducts(a.x, b.z, a.z, b.y),
+        .x = differenceOfProducts(a.y, b.z, a.z, b.y),
         .y = differenceOfProducts(a.z, b.x, a.x, b.z),
-        .z = differenceOfProducts(a.x, b.y, a.y, b.z),
+        .z = differenceOfProducts(a.x, b.y, a.y, b.x),
     };
 }
 
