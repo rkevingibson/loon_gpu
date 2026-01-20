@@ -406,6 +406,7 @@ VkDescriptorSetLayout create_default_descriptor_layout(VkDevice               de
         .pBindingFlags = &descVariableFlag};
 
     VkDescriptorSetLayoutBinding binding{
+        .binding         = 1,
         .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         .descriptorCount = kMaxTextureHeapSize,
         .stageFlags      = VK_SHADER_STAGE_ALL,
@@ -648,6 +649,7 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
     vulkan_12_features.timelineSemaphore   = true;
     vulkan_12_features.bufferDeviceAddress = true;
     vulkan_12_features.descriptorIndexing  = true;
+    vulkan_12_features.runtimeDescriptorArray                       = true;
     vulkan_12_features.descriptorBindingSampledImageUpdateAfterBind = true;
     vulkan_12_features.descriptorBindingPartiallyBound              = true;
     vulkan_12_features.descriptorBindingUpdateUnusedWhilePending    = true;
@@ -882,10 +884,12 @@ bool Device::Impl::configure_surface(const SurfaceConfiguration& config) {
 }
 
 void Device::Impl::unconfigure_surface() {
-    m_api.vkDestroySwapchainKHR(m_device, m_surface.swapchain, nullptr);
-    m_surface.swapchain         = VK_NULL_HANDLE;
-    m_surface.image_count       = 0;
-    m_surface.current_image_idx = 0;
+    if (m_surface.swapchain) {
+        m_api.vkDestroySwapchainKHR(m_device, m_surface.swapchain, nullptr);
+        m_surface.swapchain         = VK_NULL_HANDLE;
+        m_surface.image_count       = 0;
+        m_surface.current_image_idx = 0;
+    }
 }
 
 SurfaceTextureInfo Device::Impl::get_current_texture() {
@@ -2038,7 +2042,7 @@ void CommandBuffer::set_compute_ptr(GpuPtr dataGpu) {
     if (dataGpu != 0) {
         VkDeviceAddress addresses = dataGpu;
         impl->m_api.vkCmdPushConstants(buf,
-                                       impl->m_default_graphics_layout,
+                                       impl->m_default_compute_layout,
                                        VK_SHADER_STAGE_COMPUTE_BIT,
                                        0,
                                        sizeof(VkDeviceAddress),
@@ -2167,7 +2171,7 @@ void CommandBuffer::set_graphics_ptrs(GpuPtr vertexDataGpu, GpuPtr fragmentDataG
         VkDeviceAddress addresses = fragmentDataGpu;
         impl->m_api.vkCmdPushConstants(reinterpret_cast<VkCommandBuffer>(buffer),
                                        impl->m_default_graphics_layout,
-                                       VK_SHADER_STAGE_VERTEX_BIT,
+                                       VK_SHADER_STAGE_FRAGMENT_BIT,
                                        sizeof(VkDeviceAddress),
                                        sizeof(VkDeviceAddress),
                                        &addresses);

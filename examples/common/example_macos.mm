@@ -46,7 +46,7 @@
             std::make_unique<ShaderLoader>(shader_search_path.c_str()),
     };
 
-    self->selected_example = ExampleName::HelloCube;
+    self->selected_example = ExampleName::TexturedCube;
   }
 
   return self;

@@ -23,6 +23,7 @@ class Example {
 enum class ExampleName {
     HelloTriangle,
     HelloCube,
+    TexturedCube,
 
     Count,
 };

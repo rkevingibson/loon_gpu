@@ -1,8 +1,10 @@
 #include "example.h"
+
 #include <memory>
 
 #include "hello_cube/hello_cube.h"
 #include "hello_triangle/hello_triangle.h"
+#include "textured_cube/textured_cube.h"
 
 void log_callback(loon::gpu::LogLevel lvl, loon::gpu::Span<const char> message, void* userdata) {
     fprintf(stderr, "%.*s\n", static_cast<int>(message.size()), message.data());
@@ -12,6 +14,7 @@ std::unique_ptr<Example> create_example(ExampleName name, const WindowState& sta
     switch (name) {
         case ExampleName::HelloTriangle: return std::make_unique<HelloTriangle>(state);
         case ExampleName::HelloCube: return std::make_unique<HelloCube>(state);
+        case ExampleName::TexturedCube: return std::make_unique<TexturedCube>(state);
         default: return nullptr;
     }
 }
