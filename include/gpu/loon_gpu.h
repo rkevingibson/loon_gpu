@@ -658,7 +658,7 @@ class Device {
     void free(Handle<TextureView>);
 
     // Pipelines
-    Handle<Pipeline> create_compute_pipeline(ByteSpan computeIR);
+    Handle<Pipeline> create_compute_pipeline(ShaderSource computeIR);
     Handle<Pipeline> create_graphics_pipeline(ShaderSource      vertex,
                                               ShaderSource      fragment,
                                               const RasterDesc& desc);
@@ -749,6 +749,7 @@ class CommandBuffer {
     void draw_meshlets_indirect(GpuPtr meshletDataGpu, GpuPtr pixelDataGpu, GpuPtr dimGpu);
 
    private:
+    void set_compute_ptr(GpuPtr dataGpu);
     void set_graphics_ptrs(GpuPtr vertexDataGpu, GpuPtr fragmentDataGpu);
 
     // Internally, we don't bother keeping these as an indirect handle, and instead store the small

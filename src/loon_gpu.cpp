@@ -58,6 +58,9 @@ static VkDescriptorSetLayout create_default_descriptor_layout(VkDevice          
 static VkPipelineLayout      create_default_graphics_layout(VkDevice               device,
                                                             const VolkDeviceTable& api,
                                                             VkDescriptorSetLayout  set_layout);
+static VkPipelineLayout      create_default_compute_layout(VkDevice               device,
+                                                           const VolkDeviceTable& api,
+                                                           VkDescriptorSetLayout  set_layout);
 
 struct Surface {
     static constexpr uint32_t kMaxSwapchainImages = 8;
@@ -213,6 +216,7 @@ struct Device::Impl {
 
     VkDescriptorSetLayout m_default_descriptor_layout;
     VkPipelineLayout      m_default_graphics_layout;
+    VkPipelineLayout      m_default_compute_layout;
 
     ObjectPool<Buffer, kMaxNumBuffers>                      m_buffer_pool;
     ObjectPool<Texture, kMaxNumTextures>                    m_texture_pool;
@@ -404,7 +408,7 @@ VkDescriptorSetLayout create_default_descriptor_layout(VkDevice               de
     VkDescriptorSetLayoutBinding binding{
         .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         .descriptorCount = kMaxTextureHeapSize,
-        .stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT,
+        .stageFlags      = VK_SHADER_STAGE_ALL,
     };
 
     VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info{
@@ -447,6 +451,33 @@ VkPipelineLayout create_default_graphics_layout(VkDevice               device,
         .pSetLayouts            = &set_layout,
         .pushConstantRangeCount = 2,
         .pPushConstantRanges    = push_constant_ranges,
+    };
+
+    VkPipelineLayout pipeline_layout;
+    VkResult result = api.vkCreatePipelineLayout(device, &create_info, nullptr, &pipeline_layout);
+    return result == VK_SUCCESS ? pipeline_layout : VK_NULL_HANDLE;
+}
+
+VkPipelineLayout create_default_compute_layout(VkDevice               device,
+                                               const VolkDeviceTable& api,
+                                               VkDescriptorSetLayout  set_layout) {
+    // We create 1 push constant for compute data
+    VkPushConstantRange push_constant_range = {
+        VkPushConstantRange{
+            .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+            .offset     = 0,
+            .size       = sizeof(VkDeviceAddress),
+        },
+    };
+
+    VkPipelineLayoutCreateInfo create_info{
+        .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .pNext                  = nullptr,
+        .flags                  = 0,
+        .setLayoutCount         = 1,
+        .pSetLayouts            = &set_layout,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges    = &push_constant_range,
     };
 
     VkPipelineLayout pipeline_layout;
@@ -692,6 +723,8 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
     m_default_descriptor_layout = create_default_descriptor_layout(m_device, m_api);
     m_default_graphics_layout
         = create_default_graphics_layout(m_device, m_api, m_default_descriptor_layout);
+    m_default_compute_layout
+        = create_default_compute_layout(m_device, m_api, m_default_descriptor_layout);
 
     return true;
 }
@@ -1112,6 +1145,51 @@ void Device::Impl::free(Handle<TextureView> view) {
 }
 
 // MARK: Pipelines
+
+Handle<Pipeline> Device::Impl::create_compute_pipeline(ShaderSource source) {
+    VkShaderModuleCreateInfo module_info{
+        .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .pNext    = nullptr,
+        .flags    = 0,
+        .codeSize = source.spirv.size(),
+        .pCode    = reinterpret_cast<const uint32_t*>(source.spirv.data()),
+    };
+
+    VkShaderModule module;
+    chk(m_api.vkCreateShaderModule(m_device, &module_info, nullptr, &module));
+
+    VkComputePipelineCreateInfo info{
+        .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .stage = VkPipelineShaderStageCreateInfo{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+            .module = module,
+            .pName = source.entry_point.data(), // TODO: Need to ensure null-terminated, copy to local arena.
+            .pSpecializationInfo = nullptr,
+        }, 
+        .layout = m_default_compute_layout, 
+        .basePipelineHandle = VK_NULL_HANDLE,
+        .basePipelineIndex = 0,
+    };
+
+    VkPipeline pipeline;
+    if (!chk(m_api.vkCreateComputePipelines(m_device,
+                                            VK_NULL_HANDLE,
+                                            1,
+                                            &info,
+                                            nullptr,
+                                            &pipeline))) {
+        return {};
+    }
+
+    m_api.vkDestroyShaderModule(m_device, module, nullptr);
+    return {.h = reinterpret_cast<uintptr_t>(pipeline)};
+}
+
 Handle<Pipeline> Device::Impl::create_graphics_pipeline(ShaderSource vertex,
                                                         ShaderSource fragment,
                                                         RasterDesc   desc) {
@@ -1771,6 +1849,9 @@ void Device::free(Handle<TextureView> view) {
     return impl->free(view);
 }
 
+Handle<Pipeline> Device::create_compute_pipeline(ShaderSource source) {
+    return impl->create_compute_pipeline(source);
+}
 
 Handle<Pipeline> Device::create_graphics_pipeline(ShaderSource      vertex,
                                                   ShaderSource      fragment,
@@ -1951,9 +2032,24 @@ void CommandBuffer::set_depth_stencil_State(Handle<DepthStencilState> state) {
                                   VK_COMPARE_OP_ALWAYS);
 }
 
+void CommandBuffer::set_compute_ptr(GpuPtr dataGpu) {
+    auto impl = reinterpret_cast<Device::Impl*>(device);
+    auto buf  = reinterpret_cast<VkCommandBuffer>(buffer);
+    if (dataGpu != 0) {
+        VkDeviceAddress addresses = dataGpu;
+        impl->m_api.vkCmdPushConstants(buf,
+                                       impl->m_default_graphics_layout,
+                                       VK_SHADER_STAGE_COMPUTE_BIT,
+                                       0,
+                                       sizeof(VkDeviceAddress),
+                                       &addresses);
+    }
+}
+
 void CommandBuffer::dispatch(GpuPtr dataGpu, const Dimension3D& gridDimensions) {
     auto impl = reinterpret_cast<Device::Impl*>(device);
     auto cmd  = reinterpret_cast<VkCommandBuffer>(buffer);
+    set_compute_ptr(dataGpu);
     impl->m_api.vkCmdDispatch(cmd, gridDimensions.x, gridDimensions.y, gridDimensions.z);
 }
 
@@ -1961,6 +2057,7 @@ void CommandBuffer::dispatch_indirect(GpuPtr dataGpu, GpuPtr gridDimensionsGpu) 
     auto impl = reinterpret_cast<Device::Impl*>(device);
     auto cmd  = reinterpret_cast<VkCommandBuffer>(buffer);
     auto dim  = impl->buffer_and_offset_from_ptr(gridDimensionsGpu);
+    set_compute_ptr(dataGpu);
     impl->m_api.vkCmdDispatchIndirect(cmd, dim.buffer, dim.offset);
 }
 
