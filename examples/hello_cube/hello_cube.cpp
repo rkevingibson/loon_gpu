@@ -188,6 +188,22 @@ void HelloCube::recreate_swapchain(uint32_t width, uint32_t height) {
     });
     m_swapchain_width  = width;
     m_swapchain_height = height;
+
+    // Recreate depth buffer as well
+
+    m_device.free(m_depth_view);
+    m_device.free(m_depth_texture);
+    m_depth_texture = m_device.create_texture({
+        .type       = TEXTURE_2D,
+        .dimensions = {.x = width, .y = height, .z = 1},
+        .format     = loon::gpu::FORMAT_Depth32Float,
+        .usage      = loon::gpu::USAGE_DEPTH_STENCIL_ATTACHMENT,
+    });
+
+    m_depth_view = m_device.create_texture_view(m_depth_texture,
+                                                TextureViewDesc{
+                                                    .format = loon::gpu::FORMAT_Depth32Float,
+                                                });
 }
 
 void HelloCube::Update(const WindowState& window) {
@@ -199,7 +215,7 @@ void HelloCube::Update(const WindowState& window) {
     args[m_frame_idx % 3].camera = CameraInfo{
         .projection        = projection({.view_width  = (float)window.width,
                                          .view_height = (float)window.height,
-                                         .y_fov       = radians_from_degrees(45.f),
+                                         .y_fov       = radians_from_degrees(30.f),
                                          .depth_far   = 0.5f}),
         .camera_from_world = transform3d::identity().translated({0, 0, -5}).to_matrix(),
     };
@@ -207,7 +223,7 @@ void HelloCube::Update(const WindowState& window) {
         .position        = m_vertex_ptr,
         .color           = m_vertex_ptr + sizeof(Cube::kPositions),
         .world_from_mesh = transform3d::identity()
-                               .rotated_local(normalized({1, 1, 0}),
+                               .rotated_local(normalized({1, 0.5, 0}),
                                               radians_from_degrees((float)(m_frame_idx % 360)))
                                .to_matrix(),
     };
