@@ -202,7 +202,6 @@ struct Texture;
 struct TextureHeap;
 struct TextureView;
 struct DepthStencilState;
-struct BlendState;
 struct Queue;
 struct CommandBuffer;
 struct Semaphore;
@@ -670,9 +669,7 @@ class Device {
 
     // State objects
     Handle<DepthStencilState> create_depth_stencil_state(DepthStencilDesc desc);
-    Handle<BlendState>        create_blend_state(BlendDesc desc);
     void                      free_depth_stencil_state(Handle<DepthStencilState> state);
-    void                      free_blend_state(Handle<BlendState> state);
 
     // Queue
     Handle<Queue> get_queue(QUEUE_TYPE type = QUEUE_DEFAULT);
@@ -719,7 +716,6 @@ class CommandBuffer {
 
     void set_pipeline(Handle<Pipeline> pipeline);
     void set_depth_stencil_State(Handle<DepthStencilState> state);
-    void set_blend_state(Handle<BlendState> state);
 
     void set_texture_heap(Handle<TextureHeap> heap);
 
@@ -742,12 +738,12 @@ class CommandBuffer {
                                          GpuPtr pixelDataGpu,
                                          GpuPtr indicesGpu,
                                          GpuPtr argsGpu);
-    void draw_indexed_instanced_indirect_multi(GpuPtr   dataVxGpu,
-                                               uint32_t vxStride,
-                                               GpuPtr   dataPxGpu,
-                                               uint32_t pxStride,
+    void draw_indexed_instanced_indirect_multi(GpuPtr   vertexDataGpu,
+                                               GpuPtr   pixelDataGpu,
+                                               GpuPtr   indicesGpu,
                                                GpuPtr   argsGpu,
-                                               GpuPtr   drawCountGpu);
+                                               GpuPtr   drawCountGpu,
+                                               uint32_t maxDraws);
 
     void draw_meshlets(GpuPtr meshletDataGpu, GpuPtr pixelDataGpu, const Dimension3D& dim);
     void draw_meshlets_indirect(GpuPtr meshletDataGpu, GpuPtr pixelDataGpu, GpuPtr dimGpu);

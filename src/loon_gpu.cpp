@@ -170,9 +170,7 @@ struct Device::Impl {
 
     // State objects
     Handle<DepthStencilState> create_depth_stencil_state(const DepthStencilDesc& desc);
-    Handle<BlendState>        create_blend_state(BlendDesc desc);
     void                      free(Handle<DepthStencilState> state);
-    void                      free(Handle<BlendState> state);
 
     // Queue
     Handle<Queue> get_queue(QUEUE_TYPE type);
@@ -1845,6 +1843,18 @@ void CommandBuffer::memcpy(GpuPtr destGpu, GpuPtr srcGpu, size_t size) {
                                 &region);
 }
 
+void CommandBuffer::copy_to_texture(GpuPtr destGpu, GpuPtr srcGpu, Handle<Texture> texture) {
+    assert(false);
+}
+
+void CommandBuffer::copy_from_texture(GpuPtr destGpu, GpuPtr srcGpu, Handle<Texture> texture) {
+    assert(false);
+}
+
+void CommandBuffer::set_active_texture_heap_ptr(GpuPtr ptrGpu) {
+    assert(false);
+}
+
 void CommandBuffer::barrier(STAGE_FLAGS                   before,
                             STAGE_FLAGS                   after,
                             Span<const TextureTransition> image_transitions,
@@ -1939,6 +1949,19 @@ void CommandBuffer::set_depth_stencil_State(Handle<DepthStencilState> state) {
                                   VK_STENCIL_OP_KEEP,
                                   VK_STENCIL_OP_KEEP,
                                   VK_COMPARE_OP_ALWAYS);
+}
+
+void CommandBuffer::dispatch(GpuPtr dataGpu, const Dimension3D& gridDimensions) {
+    auto impl = reinterpret_cast<Device::Impl*>(device);
+    auto cmd  = reinterpret_cast<VkCommandBuffer>(buffer);
+    impl->m_api.vkCmdDispatch(cmd, gridDimensions.x, gridDimensions.y, gridDimensions.z);
+}
+
+void CommandBuffer::dispatch_indirect(GpuPtr dataGpu, GpuPtr gridDimensionsGpu) {
+    auto impl = reinterpret_cast<Device::Impl*>(device);
+    auto cmd  = reinterpret_cast<VkCommandBuffer>(buffer);
+    auto dim  = impl->buffer_and_offset_from_ptr(gridDimensionsGpu);
+    impl->m_api.vkCmdDispatchIndirect(cmd, dim.buffer, dim.offset);
 }
 
 void CommandBuffer::begin_render_pass(RenderPassDesc desc) {
@@ -2086,6 +2109,51 @@ void CommandBuffer::draw_indexed_instanced(GpuPtr   vertexDataGpu,
                                  0,
                                  0,
                                  0);
+}
+
+void CommandBuffer::draw_indexed_instanced_indirect(GpuPtr vertexDataGpu,
+                                                    GpuPtr pixelDataGpu,
+                                                    GpuPtr indicesGpu,
+                                                    GpuPtr argsGpu) {
+    auto impl = reinterpret_cast<Device::Impl*>(device);
+    set_graphics_ptrs(vertexDataGpu, pixelDataGpu);
+    const auto indices = impl->buffer_and_offset_from_ptr(indicesGpu);
+    impl->m_api.vkCmdBindIndexBuffer(reinterpret_cast<VkCommandBuffer>(buffer),
+                                     indices.buffer,
+                                     indices.offset,
+                                     VK_INDEX_TYPE_UINT16);
+
+    const auto args = impl->buffer_and_offset_from_ptr(argsGpu);
+    impl->m_api.vkCmdDrawIndexedIndirect(reinterpret_cast<VkCommandBuffer>(buffer),
+                                         args.buffer,
+                                         args.offset,
+                                         1,
+                                         sizeof(VkDrawIndexedIndirectCommand));
+}
+
+void CommandBuffer::draw_indexed_instanced_indirect_multi(GpuPtr   vertexDataGpu,
+                                                          GpuPtr   pixelDataGpu,
+                                                          GpuPtr   indicesGpu,
+                                                          GpuPtr   argsGpu,
+                                                          GpuPtr   drawCountGpu,
+                                                          uint32_t maxDraws) {
+    auto impl = reinterpret_cast<Device::Impl*>(device);
+    set_graphics_ptrs(vertexDataGpu, pixelDataGpu);
+    const auto indices = impl->buffer_and_offset_from_ptr(indicesGpu);
+    impl->m_api.vkCmdBindIndexBuffer(reinterpret_cast<VkCommandBuffer>(buffer),
+                                     indices.buffer,
+                                     indices.offset,
+                                     VK_INDEX_TYPE_UINT16);
+
+    const auto args  = impl->buffer_and_offset_from_ptr(argsGpu);
+    const auto count = impl->buffer_and_offset_from_ptr(drawCountGpu);
+    impl->m_api.vkCmdDrawIndexedIndirectCount(reinterpret_cast<VkCommandBuffer>(buffer),
+                                              args.buffer,
+                                              args.offset,
+                                              count.buffer,
+                                              count.offset,
+                                              maxDraws,
+                                              sizeof(VkDrawIndexedIndirectCommand));
 }
 
 }  // namespace loon::gpu
