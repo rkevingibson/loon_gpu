@@ -60,7 +60,8 @@ static PhysicalDeviceInfo    select_physical_device(VkInstance    instance,
                                                     Arena         arena);
 static VkDescriptorSetLayout create_descriptor_layout(VkDevice               device,
                                                       const VolkDeviceTable& api,
-                                                      uint32_t               size);
+                                                      uint32_t               size,
+                                                      Span<const VkSampler>  samplers);
 static VkPipelineLayout      create_default_graphics_layout(VkDevice               device,
                                                             const VolkDeviceTable& api,
                                                             VkDescriptorSetLayout  set_layout);
@@ -231,6 +232,7 @@ struct Device::Impl {
     ObjectPool<TextureHeap, kMaxNumTextureHeaps>            m_texture_heap_pool;
     ObjectPool<DepthStencilDesc, kMaxNumDepthStencilStates> m_depth_stencil_desc;
 
+    Vector<VkSampler> m_immutable_samplers;
 
     struct GpuPtrMap {
         GpuPtr   ptr;
@@ -404,30 +406,43 @@ PhysicalDeviceInfo select_physical_device(VkInstance    instance,
 
 VkDescriptorSetLayout create_descriptor_layout(VkDevice               device,
                                                const VolkDeviceTable& api,
-                                               uint32_t               size) {
-    VkDescriptorBindingFlags descVariableFlag
-        = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
-          | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
-          | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
+                                               uint32_t               size,
+                                               Span<const VkSampler>  samplers) {
+    VkDescriptorBindingFlags descVariableFlag[] = {
+        0,
+        VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
+            | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
+            | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT,
+    };
 
     VkDescriptorSetLayoutBindingFlagsCreateInfo binding_flags{
         .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
-        .bindingCount  = 1,
-        .pBindingFlags = &descVariableFlag};
+        .bindingCount  = 2,
+        .pBindingFlags = descVariableFlag};
 
-    VkDescriptorSetLayoutBinding binding{
-        .binding         = 1,
-        .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .descriptorCount = size,
-        .stageFlags      = VK_SHADER_STAGE_ALL,
+    VkDescriptorSetLayoutBinding bindings[] = {
+        {
+            .binding            = 0,
+            .descriptorType     = VK_DESCRIPTOR_TYPE_SAMPLER,
+            .descriptorCount    = static_cast<uint32_t>(samplers.size()),
+            .stageFlags         = VK_SHADER_STAGE_ALL,
+            .pImmutableSamplers = samplers.data(),
+        },
+        {
+            .binding         = 2,
+            .descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+            .descriptorCount = size,
+            .stageFlags      = VK_SHADER_STAGE_ALL,
+        },
     };
 
     VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info{
         .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         .pNext        = &binding_flags,
         .flags        = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
-        .bindingCount = 1,
-        .pBindings    = &binding};
+        .bindingCount = 2,
+        .pBindings    = bindings,
+    };
 
     VkDescriptorSetLayout descriptor_set_layout = VK_NULL_HANDLE;
     VkResult              result                = api.vkCreateDescriptorSetLayout(device,
@@ -725,12 +740,63 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
         m_surface.present_semaphores[i] = s;
     }
 
-    m_default_descriptor_layout = create_descriptor_layout(m_device, m_api, kMaxTextureHeapSize);
+
+    m_immutable_samplers = Vector<VkSampler>(m_allocator);
+
+    constexpr auto bridge_filter = [](SamplerDesc::FILTER f) {
+        switch (f) {
+            case SamplerDesc::NEAREST: return VK_FILTER_NEAREST;
+            case SamplerDesc::LINEAR: return VK_FILTER_LINEAR;
+        }
+    };
+
+    constexpr auto bridge_mip_mode = [](SamplerDesc::FILTER f) {
+        switch (f) {
+            case SamplerDesc::NEAREST: return VK_SAMPLER_MIPMAP_MODE_NEAREST;
+            case SamplerDesc::LINEAR: return VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        }
+    };
+
+    constexpr auto bridge_address = [](SamplerDesc::ADDRESS a) {
+        switch (a) {
+            case SamplerDesc::CLAMP_TO_EDGE: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+            case SamplerDesc::REPEAT: return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+            case SamplerDesc::MIRRORED: return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+        }
+    };
+
+    for (const auto& sampler_desc : desc.samplers) {
+        const VkSamplerCreateInfo sampler_info{
+            .sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+            .pNext                   = nullptr,
+            .flags                   = 0,
+            .magFilter               = bridge_filter(sampler_desc.filter),
+            .minFilter               = bridge_filter(sampler_desc.filter),
+            .mipmapMode              = bridge_mip_mode(sampler_desc.filter),
+            .addressModeU            = bridge_address(sampler_desc.address),
+            .addressModeV            = bridge_address(sampler_desc.address),
+            .addressModeW            = bridge_address(sampler_desc.address),
+            .anisotropyEnable        = VK_FALSE,  // TODO: Probably want this on :P
+            .maxAnisotropy           = 8.0,
+            .compareEnable           = VK_FALSE,
+            .minLod                  = 0.0f,
+            .maxLod                  = VK_LOD_CLAMP_NONE,
+            .borderColor             = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
+            .unnormalizedCoordinates = sampler_desc.coord == SamplerDesc::PIXEL,
+        };
+
+        VkSampler sampler;
+        chk(m_api.vkCreateSampler(m_device, &sampler_info, nullptr, &sampler));
+
+        m_immutable_samplers.push_back(sampler);
+    }
+
+    m_default_descriptor_layout
+        = create_descriptor_layout(m_device, m_api, kMaxTextureHeapSize, m_immutable_samplers);
     m_default_graphics_layout
         = create_default_graphics_layout(m_device, m_api, m_default_descriptor_layout);
     m_default_compute_layout
         = create_default_compute_layout(m_device, m_api, m_default_descriptor_layout);
-
 
     VkDescriptorPoolSize pool_size{
         .type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -747,6 +813,10 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
         .pPoolSizes    = &pool_size,
     };
     chk(m_api.vkCreateDescriptorPool(m_device, &pool_info, nullptr, &m_descriptor_pool));
+
+
+    m_ptr_map = Vector<GpuPtrMap>(m_allocator);
+
 
     return true;
 }
@@ -1135,19 +1205,24 @@ Handle<Texture> Device::Impl::create_texture(const TextureDesc& desc) {
 }
 
 Handle<TextureHeap> Device::Impl::create_texture_heap(size_t size) {
-    auto layout = create_descriptor_layout(m_device, m_api, size);
+    const uint32_t                                           descriptor_count = size;
+    const VkDescriptorSetVariableDescriptorCountAllocateInfo allocate_info    = {
+           .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO,
+           .pNext = nullptr,
+           .descriptorSetCount = 1,
+           .pDescriptorCounts  = &descriptor_count,
+    };
 
     VkDescriptorSetAllocateInfo info{
         .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        .pNext              = nullptr,
+        .pNext              = &allocate_info,
         .descriptorPool     = m_descriptor_pool,
         .descriptorSetCount = 1,
-        .pSetLayouts        = &layout,
+        .pSetLayouts        = &m_default_descriptor_layout,
     };
 
     VkDescriptorSet set;
     chk(m_api.vkAllocateDescriptorSets(m_device, &info, &set));
-    m_api.vkDestroyDescriptorSetLayout(m_device, layout, nullptr);
 
     const auto handle           = m_texture_heap_pool.get();
     m_texture_heap_pool[handle] = TextureHeap{
@@ -1194,7 +1269,7 @@ uint32_t Device::Impl::add_texture_view_to_heap(Handle<TextureHeap> heap,
     uint32_t free_slot = 0;
 
     const VkDescriptorImageInfo image_info{
-        .sampler     =,
+        .sampler     = VK_NULL_HANDLE,
         .imageView   = texture_view.vk_image_view,
         .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
     };
@@ -1203,15 +1278,17 @@ uint32_t Device::Impl::add_texture_view_to_heap(Handle<TextureHeap> heap,
         .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
         .pNext            = nullptr,
         .dstSet           = texture_heap.vk_descriptor_set,
-        .dstBinding       = 1,
+        .dstBinding       = 2,
         .dstArrayElement  = free_slot,
         .descriptorCount  = 1,
-        .descriptorType   = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorType   = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
         .pImageInfo       = &image_info,
         .pBufferInfo      = nullptr,
         .pTexelBufferView = nullptr,
     };
     m_api.vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+
+    return free_slot;
 }
 
 void Device::Impl::remove_texture_view_from_heap(Handle<TextureHeap>, uint32_t) {}
@@ -1925,6 +2002,10 @@ Handle<TextureView> Device::create_texture_view(Handle<Texture> texture, Texture
     return impl->create_texture_view(texture, desc);
 }
 
+uint32_t Device::add_texture_view_to_heap(Handle<TextureHeap> heap, Handle<TextureView> view) {
+    return impl->add_texture_view_to_heap(heap, view);
+}
+
 void Device::free(Handle<Texture>) {}
 void Device::free(Handle<TextureHeap>) {}
 void Device::free(Handle<TextureView> view) {
@@ -2006,16 +2087,57 @@ void CommandBuffer::memcpy(GpuPtr destGpu, GpuPtr srcGpu, size_t size) {
                                 &region);
 }
 
-void CommandBuffer::copy_to_texture(GpuPtr destGpu, GpuPtr srcGpu, Handle<Texture> texture) {
-    assert(false);
+void CommandBuffer::copy_to_texture(GpuPtr                         srcPtr,
+                                    Handle<Texture>                texture,
+                                    const BufferToTextureCopyInfo& info) {
+    auto impl = reinterpret_cast<Device::Impl*>(device);
+    auto cmd  = reinterpret_cast<VkCommandBuffer>(buffer);
+
+    auto        src = impl->buffer_and_offset_from_ptr(srcPtr);
+    const auto& tex = impl->m_texture_pool[texture.h];
+    const VkBufferImageCopy region{
+        .bufferOffset      = src.offset,
+        .bufferRowLength   = info.buffer_image_size.x,
+        .bufferImageHeight = info.buffer_image_size.y,
+        .imageSubresource = {
+            .aspectMask = aspects_for_format(tex.format),
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+        .imageOffset
+        = {.x = static_cast<int32_t>(info.image_offset.x), .y = static_cast<int32_t>(info.image_offset.y), .z = static_cast<int32_t>(info.image_offset.z),},
+        .imageExtent = {.width = info.image_extent.x, .height = info.image_extent.y, .depth = info.image_extent.z,},
+    };
+
+    impl->m_api
+        .vkCmdCopyBufferToImage(cmd, src.buffer, tex.vk_image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
 }
 
 void CommandBuffer::copy_from_texture(GpuPtr destGpu, GpuPtr srcGpu, Handle<Texture> texture) {
     assert(false);
 }
 
-void CommandBuffer::set_active_texture_heap_ptr(GpuPtr ptrGpu) {
-    assert(false);
+void CommandBuffer::set_active_texture_heap(Handle<TextureHeap> heap) {
+    auto impl = reinterpret_cast<Device::Impl*>(device);
+    auto cmd  = reinterpret_cast<VkCommandBuffer>(buffer);
+
+    impl->m_api.vkCmdBindDescriptorSets(cmd,
+                                        VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                        impl->m_default_graphics_layout,
+                                        0,
+                                        1,
+                                        &impl->m_texture_heap_pool[heap.h].vk_descriptor_set,
+                                        0,
+                                        nullptr);
+    impl->m_api.vkCmdBindDescriptorSets(cmd,
+                                        VK_PIPELINE_BIND_POINT_COMPUTE,
+                                        impl->m_default_compute_layout,
+                                        0,
+                                        1,
+                                        &impl->m_texture_heap_pool[heap.h].vk_descriptor_set,
+                                        0,
+                                        nullptr);
 }
 
 void CommandBuffer::barrier(STAGE_FLAGS                   before,

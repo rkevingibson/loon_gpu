@@ -42,13 +42,14 @@ struct Cube {
                                             5, 1, 7, 7, 1, 3, 1, 0, 4, 1, 4, 5, 2, 6, 3, 6, 7, 3};
     static constexpr size_t   kSize      = sizeof(kPositions) + sizeof(kUVs) + sizeof(kIndices);
 
-    static void write(void* ptr) {
+    static void* write(void* ptr) {
         char* dst = (char*)ptr;
         memcpy(ptr, kPositions, sizeof(kPositions));
         dst += sizeof(kPositions);
         memcpy(dst, kUVs, sizeof(kUVs));
         dst += sizeof(kUVs);
         memcpy(dst, kIndices, sizeof(kIndices));
+        return dst + sizeof(kIndices);
     }
 };
 
@@ -67,6 +68,7 @@ struct ShaderArgs {
     CameraInfo camera;
     MeshGpu    mesh;
     uint64_t   texture;
+    uint64_t   sampler;
 };
 
 static FORMAT select_surface_format(const loon::gpu::SurfaceCapabilities& surface_capabilities) {
@@ -124,14 +126,43 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
     m_vertex_ptr      = m_device.get_device_pointer(m_geometry_buffer);
 
     m_constant_buffer = m_device.malloc(1024ull * 1024);
+
+
+    m_color_texture = m_device.create_texture(TextureDesc{
+        .dimensions = {1024, 1024, 1},
+        .format     = loon::gpu::FORMAT_RGBA8UnormSrgb,
+        .usage      = USAGE_FLAGS(USAGE_SAMPLED | USAGE_TRANSFER_DST),
+    });
+
+    m_color_view = m_device.create_texture_view(m_color_texture, {.format = FORMAT_RGBA8UnormSrgb});
+
+    m_texture_heap = m_device.create_texture_heap(1024);
+    m_texture_id   = m_device.add_texture_view_to_heap(m_texture_heap, m_color_view);
+
+
     // Copy over the geometry to the geometry buffer
     void* dst = m_device.get_host_pointer(m_constant_buffer);
-    Cube::write(dst);
+    dst       = Cube::write(dst);
+
+    memset(dst, 255, 256ull * 256 * 4);
 
     auto cmd = m_device.start_command_recording(m_queue);
+    cmd.barrier(loon::gpu::STAGE_NONE,
+                loon::gpu::STAGE_TRANSFER,
+                TextureTransition{
+                    .texture    = m_color_texture,
+                    .old_layout = loon::gpu::LAYOUT_DONT_CARE,
+                    .new_layout = LAYOUT_GENERAL,
+                });
     cmd.memcpy(m_vertex_ptr, m_device.get_device_pointer(m_constant_buffer), Cube::kSize);
 
-    // A little excessive, but wait for the copy to be done before returning.
+    cmd.copy_to_texture(m_device.get_device_pointer(m_constant_buffer) + Cube::kSize,
+                        m_color_texture,
+                        BufferToTextureCopyInfo{
+                            .buffer_image_size = {256, 256},
+                            .image_extent      = {256, 256, 1},
+                        });
+    //  A little excessive, but wait for the copy to be done before returning.
     cmd.barrier(loon::gpu::STAGE_TRANSFER, loon::gpu::STAGE_VERTEX_SHADER);
     auto copy_semaphore = m_device.create_semaphore(0);
     m_device.submit(
@@ -147,6 +178,7 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
         .depthTest = loon::gpu::OP_GREATER,
     });
 }
+
 
 TexturedCube::~TexturedCube() {
     m_device.wait_for_device_idle();
@@ -208,6 +240,7 @@ void TexturedCube::Update(const WindowState& window) {
                                .to_matrix(),
     };
     args[m_frame_idx % 3].texture = m_texture_id;
+    args[m_frame_idx % 3].sampler = 0;
 
     auto surface_texture = m_device.get_current_texture();
     if (surface_texture.status == SURFACE_STATUS_OUT_OF_DATE
@@ -228,6 +261,8 @@ void TexturedCube::Update(const WindowState& window) {
                                                        });
 
     auto commandBuffer = m_device.start_command_recording(m_queue);
+
+    commandBuffer.set_active_texture_heap(m_texture_heap);
 
     commandBuffer.barrier(loon::gpu::STAGE_RASTER_COLOR_OUT,
                           STAGE_FLAGS(STAGE_PIXEL_SHADER | STAGE_RASTER_COLOR_OUT),

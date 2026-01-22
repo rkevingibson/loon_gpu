@@ -65,6 +65,16 @@ class Span {
     constexpr Span(const Span<U>& src) noexcept REQUIRES((is_const_of<U, T>)) :
         Span(src.data(), src.size()) {}
 
+
+    constexpr Span(const Span<T>& src) noexcept : Span(src.data(), src.size()) {}
+    Span& operator=(const Span<T>& src) {
+        if (&src != this) {
+            m_ptr = src.m_ptr;
+            m_len = src.m_len;
+        }
+        return *this;
+    }
+
     // Accessors
 
     constexpr T* data() const noexcept { return m_ptr; }
@@ -461,6 +471,10 @@ typedef MemoryBlock (*ProcAllocatorCallback)(void*    userdata,
 typedef void (*ProcLogCallback)(LogLevel lvl, Span<const char> message, void* userdata);
 
 // Structs
+struct Dimension2D {
+    uint32_t x, y;
+};
+
 struct Dimension3D {
     uint32_t x, y, z;
 };
@@ -487,6 +501,22 @@ struct Stencil {
     uint8_t reference   = 0;
 };
 
+struct SamplerDesc {
+    enum COORD { NORMALIZED, PIXEL };
+    enum FILTER { NEAREST, LINEAR };
+    enum ADDRESS { CLAMP_TO_EDGE, REPEAT, MIRRORED };
+
+    COORD   coord   = NORMALIZED;
+    FILTER  filter  = NEAREST;
+    ADDRESS address = CLAMP_TO_EDGE;
+};
+
+static constexpr SamplerDesc kDefaultSamplers[] = {SamplerDesc{
+    .coord   = SamplerDesc::NORMALIZED,
+    .filter  = SamplerDesc::LINEAR,
+    .address = SamplerDesc::CLAMP_TO_EDGE,
+}};
+
 struct DeviceDesc {
     GpuPreference gpu_preference = GpuPreference_Discrete;
 
@@ -498,6 +528,8 @@ struct DeviceDesc {
     LogLevel              log_level      = LogLevel_Off;
     ProcAllocatorCallback alloc_callback = nullptr;
     void*                 alloc_userdata = nullptr;
+
+    Span<const SamplerDesc> samplers = kDefaultSamplers;
 };
 
 struct DepthStencilDesc {
@@ -615,6 +647,12 @@ struct TextureTransition {
     LAYOUT          new_layout = LAYOUT_GENERAL;
 };
 
+struct BufferToTextureCopyInfo {
+    Dimension2D buffer_image_size;
+    Dimension3D image_offset{0, 0, 0};
+    Dimension3D image_extent;
+};
+
 // Initialization
 class Device {
    public:
@@ -705,10 +743,10 @@ class CommandBuffer {
    public:
     // Commands
     void memcpy(GpuPtr destGpu, GpuPtr srcGpu, size_t size);
-    void copy_to_texture(GpuPtr destGpu, GpuPtr srcGpu, Handle<Texture> texture);
+    void copy_to_texture(GpuPtr src, Handle<Texture> texture, const BufferToTextureCopyInfo& info);
     void copy_from_texture(GpuPtr destGpu, GpuPtr srcGpu, Handle<Texture> texture);
 
-    void set_active_texture_heap_ptr(GpuPtr ptrGpu);
+    void set_active_texture_heap(Handle<TextureHeap> heap);
 
     void barrier(STAGE_FLAGS                   before,
                  STAGE_FLAGS                   after,

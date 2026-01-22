@@ -1,3 +1,4 @@
+static const DescriptorHandle<SamplerState> kDefaultSampler = {uint2(0,0)};
 
 struct CameraData {
     float4x4 projection;
@@ -17,7 +18,8 @@ struct InputData {
 };
 
 struct FragmentInput {
-    DescriptorHandle<Sampler2D> texture;
+    DescriptorHandle<Texture2D> texture;
+    DescriptorHandle<SamplerState> sampler;
 };
 
 struct VertexStageOutput
@@ -49,6 +51,7 @@ VertexStageOutput vertexMain(uint32_t vertexIdx : SV_VertexID)
 [shader("fragment")]
 float4 fragmentMain(VertexStageOutput vertex ) : SV_Target
 {
-    float4 out_color = args.frag->texture.Sample(vertex.uv);
+    let sampler = args.frag->sampler;
+    float4 out_color = args.frag->texture.Sample(sampler, vertex.uv);
     return out_color;
 }

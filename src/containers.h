@@ -58,6 +58,9 @@ class Vector {
         return *this;
     }
 
+    operator Span<T>() { return Span(m_data, m_count); }
+    operator Span<const T>() const { return Span(m_data, m_count); }
+
     friend void swap(Vector& a, Vector& b) {
         using std::swap;
         swap(a.m_allocator, b.m_allocator);
