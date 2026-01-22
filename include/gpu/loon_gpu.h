@@ -20,6 +20,7 @@ constexpr size_t kMaxNumBuffers            = 32ull * 1024;
 constexpr size_t kMaxNumTextures           = 64ull * 1024;
 constexpr size_t kMaxNumTextureViews       = 128ull * 1024;
 constexpr size_t kMaxTextureHeapSize       = 32ull * 1024;
+constexpr size_t kMaxNumTextureHeaps       = 1024;
 constexpr size_t kMaxNumDepthStencilStates = 32ull * 1024;
 
 template <class T>

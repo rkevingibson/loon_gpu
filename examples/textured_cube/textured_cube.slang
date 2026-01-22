@@ -26,13 +26,20 @@ struct VertexStageOutput
     float2 uv;
 };
 
+struct Args {
+    InputData* vert;
+    FragmentInput* frag;
+};
+
+[[vk::push_constant]] uniform Args args;
+
 [shader("vertex")]
-VertexStageOutput vertexMain(uniform InputData* args, uint32_t vertexIdx : SV_VertexID)
+VertexStageOutput vertexMain(uint32_t vertexIdx : SV_VertexID)
 {
     VertexStageOutput output; 
-    const Mesh mesh = args->mesh;
+    const Mesh mesh = args.vert->mesh;
 
-    float4x4 mvp = mul(args->camera.projection, mul(args->camera.cameraFromWorld, mesh.worldFromMesh));
+    float4x4 mvp = mul(args.vert->camera.projection, mul(args.vert->camera.cameraFromWorld, mesh.worldFromMesh));
 
     output.position = mul(mvp,float4(mesh.position[vertexIdx], 1.0));
     output.uv = mesh.uvs[vertexIdx];
@@ -40,8 +47,8 @@ VertexStageOutput vertexMain(uniform InputData* args, uint32_t vertexIdx : SV_Ve
 }
 
 [shader("fragment")]
-float4 fragmentMain(uniform FragmentInput* args, VertexStageOutput vertex ) : SV_Target
+float4 fragmentMain(VertexStageOutput vertex ) : SV_Target
 {
-    float4 out_color = args->texture.Sample(vertex.uv);
+    float4 out_color = args.frag->texture.Sample(vertex.uv);
     return out_color;
 }

@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <mutex>  // TODO: Replace with platform_utils.cpp
 
 #include "containers.h"
 #include "gpu_to_vk.h"
@@ -39,6 +40,10 @@ struct TextureView {
     VkImageView vk_image_view;
 };
 
+struct TextureHeap {
+    VkDescriptorSet vk_descriptor_set;
+};
+
 struct PhysicalDeviceInfo {
     VkPhysicalDevice device                     = VK_NULL_HANDLE;
     uint32_t         graphics_queue_family      = 0;
@@ -53,8 +58,9 @@ static PhysicalDeviceInfo    select_physical_device(VkInstance    instance,
                                                     VkSurfaceKHR  surface,
                                                     GpuPreference preference,
                                                     Arena         arena);
-static VkDescriptorSetLayout create_default_descriptor_layout(VkDevice               device,
-                                                              const VolkDeviceTable& api);
+static VkDescriptorSetLayout create_descriptor_layout(VkDevice               device,
+                                                      const VolkDeviceTable& api,
+                                                      uint32_t               size);
 static VkPipelineLayout      create_default_graphics_layout(VkDevice               device,
                                                             const VolkDeviceTable& api,
                                                             VkDescriptorSetLayout  set_layout);
@@ -214,6 +220,7 @@ struct Device::Impl {
     VolkDeviceTable m_api;
     VmaAllocator    m_vma = VK_NULL_HANDLE;
 
+    VkDescriptorPool      m_descriptor_pool;
     VkDescriptorSetLayout m_default_descriptor_layout;
     VkPipelineLayout      m_default_graphics_layout;
     VkPipelineLayout      m_default_compute_layout;
@@ -221,7 +228,9 @@ struct Device::Impl {
     ObjectPool<Buffer, kMaxNumBuffers>                      m_buffer_pool;
     ObjectPool<Texture, kMaxNumTextures>                    m_texture_pool;
     ObjectPool<TextureView, kMaxNumTextureViews>            m_texture_view_pool;
+    ObjectPool<TextureHeap, kMaxNumTextureHeaps>            m_texture_heap_pool;
     ObjectPool<DepthStencilDesc, kMaxNumDepthStencilStates> m_depth_stencil_desc;
+
 
     struct GpuPtrMap {
         GpuPtr   ptr;
@@ -393,8 +402,9 @@ PhysicalDeviceInfo select_physical_device(VkInstance    instance,
     return best_device_info;
 }
 
-VkDescriptorSetLayout create_default_descriptor_layout(VkDevice               device,
-                                                       const VolkDeviceTable& api) {
+VkDescriptorSetLayout create_descriptor_layout(VkDevice               device,
+                                               const VolkDeviceTable& api,
+                                               uint32_t               size) {
     VkDescriptorBindingFlags descVariableFlag
         = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
           | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
@@ -408,7 +418,7 @@ VkDescriptorSetLayout create_default_descriptor_layout(VkDevice               de
     VkDescriptorSetLayoutBinding binding{
         .binding         = 1,
         .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .descriptorCount = kMaxTextureHeapSize,
+        .descriptorCount = size,
         .stageFlags      = VK_SHADER_STAGE_ALL,
     };
 
@@ -431,17 +441,10 @@ VkPipelineLayout create_default_graphics_layout(VkDevice               device,
                                                 const VolkDeviceTable& api,
                                                 VkDescriptorSetLayout  set_layout) {
     // We create 2 push constants - for vertex and fragment data.
-    VkPushConstantRange push_constant_ranges[2] = {
-        VkPushConstantRange{
-            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-            .offset     = 0,
-            .size       = sizeof(VkDeviceAddress),
-        },
-        VkPushConstantRange{
-            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-            .offset     = sizeof(VkDeviceAddress),
-            .size       = sizeof(VkDeviceAddress),
-        },
+    VkPushConstantRange push_constant_ranges = VkPushConstantRange{
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        .offset     = 0,
+        .size       = 2 * sizeof(VkDeviceAddress),
     };
 
     VkPipelineLayoutCreateInfo create_info{
@@ -450,8 +453,8 @@ VkPipelineLayout create_default_graphics_layout(VkDevice               device,
         .flags                  = 0,
         .setLayoutCount         = 1,
         .pSetLayouts            = &set_layout,
-        .pushConstantRangeCount = 2,
-        .pPushConstantRanges    = push_constant_ranges,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges    = &push_constant_ranges,
     };
 
     VkPipelineLayout pipeline_layout;
@@ -722,11 +725,28 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
         m_surface.present_semaphores[i] = s;
     }
 
-    m_default_descriptor_layout = create_default_descriptor_layout(m_device, m_api);
+    m_default_descriptor_layout = create_descriptor_layout(m_device, m_api, kMaxTextureHeapSize);
     m_default_graphics_layout
         = create_default_graphics_layout(m_device, m_api, m_default_descriptor_layout);
     m_default_compute_layout
         = create_default_compute_layout(m_device, m_api, m_default_descriptor_layout);
+
+
+    VkDescriptorPoolSize pool_size{
+        .type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .descriptorCount = kMaxTextureHeapSize,
+    };
+
+    VkDescriptorPoolCreateInfo pool_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT
+                 | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+        .maxSets       = kMaxNumTextureHeaps,
+        .poolSizeCount = 1,
+        .pPoolSizes    = &pool_size,
+    };
+    chk(m_api.vkCreateDescriptorPool(m_device, &pool_info, nullptr, &m_descriptor_pool));
 
     return true;
 }
@@ -1114,6 +1134,29 @@ Handle<Texture> Device::Impl::create_texture(const TextureDesc& desc) {
     return {handle};
 }
 
+Handle<TextureHeap> Device::Impl::create_texture_heap(size_t size) {
+    auto layout = create_descriptor_layout(m_device, m_api, size);
+
+    VkDescriptorSetAllocateInfo info{
+        .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .pNext              = nullptr,
+        .descriptorPool     = m_descriptor_pool,
+        .descriptorSetCount = 1,
+        .pSetLayouts        = &layout,
+    };
+
+    VkDescriptorSet set;
+    chk(m_api.vkAllocateDescriptorSets(m_device, &info, &set));
+    m_api.vkDestroyDescriptorSetLayout(m_device, layout, nullptr);
+
+    const auto handle           = m_texture_heap_pool.get();
+    m_texture_heap_pool[handle] = TextureHeap{
+        .vk_descriptor_set = set,
+    };
+
+    return {handle};
+}
+
 Handle<TextureView> Device::Impl::create_texture_view(Handle<Texture> tex, TextureViewDesc desc) {
     auto& texture = m_texture_pool[tex.h];
     const VkImageViewCreateInfo info {
@@ -1141,6 +1184,41 @@ Handle<TextureView> Device::Impl::create_texture_view(Handle<Texture> tex, Textu
 
     m_texture_view_pool[handle].vk_image_view = image_view;
     return {.h = handle};
+}
+
+uint32_t Device::Impl::add_texture_view_to_heap(Handle<TextureHeap> heap,
+                                                Handle<TextureView> view) {
+    const auto& texture_heap = m_texture_heap_pool[heap.h];
+    const auto& texture_view = m_texture_view_pool[view.h];
+    // TODO: Use some data structure to find an empty slot in the heap.
+    uint32_t free_slot = 0;
+
+    const VkDescriptorImageInfo image_info{
+        .sampler     =,
+        .imageView   = texture_view.vk_image_view,
+        .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+    };
+
+    const VkWriteDescriptorSet write{
+        .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .pNext            = nullptr,
+        .dstSet           = texture_heap.vk_descriptor_set,
+        .dstBinding       = 1,
+        .dstArrayElement  = free_slot,
+        .descriptorCount  = 1,
+        .descriptorType   = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .pImageInfo       = &image_info,
+        .pBufferInfo      = nullptr,
+        .pTexelBufferView = nullptr,
+    };
+    m_api.vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+}
+
+void Device::Impl::remove_texture_view_from_heap(Handle<TextureHeap>, uint32_t) {}
+
+void Device::Impl::free(Handle<TextureHeap> heap) {
+    VkDescriptorSet set = m_texture_heap_pool[heap.h].vk_descriptor_set;
+    m_api.vkFreeDescriptorSets(m_device, m_descriptor_pool, 1, &set);
 }
 
 void Device::Impl::free(Handle<TextureView> view) {
@@ -1840,7 +1918,7 @@ Handle<Texture> Device::create_texture(const TextureDesc& desc) {
     return impl->create_texture(desc);
 }
 Handle<TextureHeap> Device::create_texture_heap(size_t size) {
-    return {};
+    return impl->create_texture_heap(size);
 }
 
 Handle<TextureView> Device::create_texture_view(Handle<Texture> texture, TextureViewDesc desc) {
@@ -2158,22 +2236,13 @@ void CommandBuffer::end_render_pass() {
 
 void CommandBuffer::set_graphics_ptrs(GpuPtr vertexDataGpu, GpuPtr fragmentDataGpu) {
     auto impl = reinterpret_cast<Device::Impl*>(device);
-    if (vertexDataGpu != 0) {
-        VkDeviceAddress addresses = vertexDataGpu;
+    if (vertexDataGpu != 0 || fragmentDataGpu != 0) {
+        VkDeviceAddress addresses[] = {vertexDataGpu, fragmentDataGpu};
         impl->m_api.vkCmdPushConstants(reinterpret_cast<VkCommandBuffer>(buffer),
                                        impl->m_default_graphics_layout,
-                                       VK_SHADER_STAGE_VERTEX_BIT,
+                                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                                        0,
-                                       sizeof(VkDeviceAddress),
-                                       &addresses);
-    }
-    if (fragmentDataGpu != 0) {
-        VkDeviceAddress addresses = fragmentDataGpu;
-        impl->m_api.vkCmdPushConstants(reinterpret_cast<VkCommandBuffer>(buffer),
-                                       impl->m_default_graphics_layout,
-                                       VK_SHADER_STAGE_FRAGMENT_BIT,
-                                       sizeof(VkDeviceAddress),
-                                       sizeof(VkDeviceAddress),
+                                       2 * sizeof(VkDeviceAddress),
                                        &addresses);
     }
 }

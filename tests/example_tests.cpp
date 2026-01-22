@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <format>
+
 #include "geometry.h"
+
 using namespace geometry;
 
 void assert_float3_eq(const float3& a, const float3& b) {
