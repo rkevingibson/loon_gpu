@@ -14,15 +14,13 @@ class HelloCube : public Example {
    private:
     void recreate_swapchain(uint32_t width, uint32_t height);
 
-    static constexpr uint64_t kMaxFramesInFlight = 3;
-    Device                    m_device;
-    Handle<Queue>             m_queue;
-    FORMAT                    m_swapchain_format;
-    Handle<Pipeline>          m_render_pipeline;
-    Handle<Semaphore>         m_semaphore;
-    uint64_t                  m_frame_idx        = 0;
-    uint32_t                  m_swapchain_width  = 0;
-    uint32_t                  m_swapchain_height = 0;
+    Device           m_device;
+    Handle<Queue>    m_queue;
+    FORMAT           m_swapchain_format;
+    Handle<Pipeline> m_render_pipeline;
+    uint64_t         m_frame_idx        = 0;
+    uint32_t         m_swapchain_width  = 0;
+    uint32_t         m_swapchain_height = 0;
 
     Handle<Buffer> m_geometry_buffer;
     GpuPtr         m_vertex_ptr;

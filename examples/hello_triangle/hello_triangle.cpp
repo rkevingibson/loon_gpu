@@ -71,14 +71,12 @@ HelloTriangle::HelloTriangle(const WindowState& window_state) {
 
     assert(m_render_pipeline.h != 0);
 
-    m_queue     = m_device.get_queue();
-    m_semaphore = m_device.create_semaphore(0);
+    m_queue = m_device.get_queue();
 }
 
 HelloTriangle::~HelloTriangle() {
     m_device.wait_for_device_idle();
     m_device.free(m_render_pipeline);
-    m_device.free(m_semaphore);
     m_device.unconfigure_surface();
 }
 
@@ -96,9 +94,6 @@ void HelloTriangle::recreate_swapchain(uint32_t width, uint32_t height) {
 }
 
 void HelloTriangle::Update(const WindowState& window) {
-    constexpr uint64_t kMaxFramesInFlight = 3;
-    m_device.wait_semaphore(m_semaphore,
-                            std::max(m_frame_idx, kMaxFramesInFlight) - kMaxFramesInFlight);
     auto surface_texture = m_device.get_current_texture();
     if (surface_texture.status == SURFACE_STATUS_OUT_OF_DATE
         || surface_texture.status == SURFACE_STATUS_SUBOPTIMAL) {
@@ -151,10 +146,6 @@ void HelloTriangle::Update(const WindowState& window) {
                     SemaphoreInfo{
                         .semaphore = surface_texture.acquire_semaphore,
                         .stage     = loon::gpu::STAGE_RASTER_COLOR_OUT,
-                    },
-                    SemaphoreInfo{
-                        .semaphore = m_semaphore,
-                        .value     = ++m_frame_idx,
                     });
 
     const auto status = m_device.present(m_queue);

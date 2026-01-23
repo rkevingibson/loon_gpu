@@ -265,6 +265,7 @@ VkPipelineStageFlags2 bridge_pipeline_stage(STAGE_FLAGS stage) {
     out |= (stage & STAGE_VERTEX_SHADER)
                ? VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT
                : 0;
+    out |= (stage & STAGE_HOST) ? VK_PIPELINE_STAGE_2_HOST_BIT : 0;
     return out;
 }
 

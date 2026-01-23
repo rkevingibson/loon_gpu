@@ -203,7 +203,7 @@ typedef struct MemoryBlock {
 
 template <class T>
 struct Handle {
-    uint64_t h;
+    uint64_t h = 0;
 };
 
 struct Device;
@@ -394,6 +394,7 @@ enum STAGE_FLAGS {
     STAGE_RASTER_COLOR_OUT = 0x04,
     STAGE_PIXEL_SHADER     = 0x08,
     STAGE_VERTEX_SHADER    = 0x10,
+    STAGE_HOST             = 0x20,
 };
 
 enum LAYOUT {

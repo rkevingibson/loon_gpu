@@ -16,7 +16,7 @@
 #include "common/geometry.h"
 #include "common/shaders.h"
 using namespace geometry;
-
+namespace {
 struct Cube {
     static constexpr float3 kPositions[] = {
         {1, 1, 1},
@@ -51,7 +51,7 @@ struct Cube {
         memcpy(dst, kIndices, sizeof(kIndices));
     }
 };
-
+}  // namespace
 struct MeshGpu {
     GpuPtr   position;
     GpuPtr   color;
@@ -124,8 +124,7 @@ HelloCube::HelloCube(const WindowState& window_state) {
 
     assert(m_render_pipeline.h != 0);
 
-    m_queue     = m_device.get_queue();
-    m_semaphore = m_device.create_semaphore(0);
+    m_queue = m_device.get_queue();
 
     m_geometry_buffer = m_device.malloc(Cube::kSize, MEMORY_GPU);
     m_vertex_ptr      = m_device.get_device_pointer(m_geometry_buffer);
@@ -172,7 +171,6 @@ HelloCube::HelloCube(const WindowState& window_state) {
 HelloCube::~HelloCube() {
     m_device.wait_for_device_idle();
     m_device.free(m_render_pipeline);
-    m_device.free(m_semaphore);
     m_device.unconfigure_surface();
 }
 
@@ -207,9 +205,6 @@ void HelloCube::recreate_swapchain(uint32_t width, uint32_t height) {
 }
 
 void HelloCube::Update(const WindowState& window) {
-    m_device.wait_semaphore(m_semaphore,
-                            std::max(m_frame_idx, kMaxFramesInFlight) - kMaxFramesInFlight);
-
     // Update constant data
     auto args = reinterpret_cast<ShaderArgs*>(m_device.get_host_pointer(m_constant_buffer));
     args[m_frame_idx % 3].camera = CameraInfo{
@@ -297,10 +292,6 @@ void HelloCube::Update(const WindowState& window) {
                     SemaphoreInfo{
                         .semaphore = surface_texture.acquire_semaphore,
                         .stage     = loon::gpu::STAGE_RASTER_COLOR_OUT,
-                    },
-                    SemaphoreInfo{
-                        .semaphore = m_semaphore,
-                        .value     = ++m_frame_idx,
                     });
 
     const auto status = m_device.present(m_queue);
@@ -311,4 +302,5 @@ void HelloCube::Update(const WindowState& window) {
     m_device.on_submitted_work_completed(m_queue,
                                          [&, swapchain_view]() { m_device.free(swapchain_view); });
     m_device.process_events(m_queue);
+    ++m_frame_idx;
 }

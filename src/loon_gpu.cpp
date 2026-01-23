@@ -71,6 +71,7 @@ static VkPipelineLayout      create_default_compute_layout(VkDevice             
 
 struct Surface {
     static constexpr uint32_t kMaxSwapchainImages = 8;
+    static constexpr uint32_t kMaxFramesInFlight  = 3;
 
     VkSurfaceKHR   surface   = VK_NULL_HANDLE;
     VkSwapchainKHR swapchain = VK_NULL_HANDLE;
@@ -92,9 +93,10 @@ struct Surface {
 
     // Semaphores are ticked around the ring buffer independently from images, since we need to know
     // which semaphore to use before we know which image index we have.
-    uint32_t    current_semaphore_idx = 0;
-    VkSemaphore acquire_semaphores[kMaxSwapchainImages];
-    VkSemaphore present_semaphores[kMaxSwapchainImages];
+    uint64_t          frame_idx = 0;
+    Handle<Semaphore> frame_semaphore;
+    VkSemaphore       acquire_semaphores[kMaxFramesInFlight];
+    VkSemaphore       present_semaphores[kMaxSwapchainImages];
 
     // We store the command buffer that recording
     // the transition to PRESENT_KHR, so we can
@@ -731,15 +733,13 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
         .pNext = nullptr,
         .flags = 0,
     };
-    for (uint32_t i = 0; i < Surface::kMaxSwapchainImages; ++i) {
+    for (uint32_t i = 0; i < Surface::kMaxFramesInFlight; ++i) {
         VkSemaphore s = VK_NULL_HANDLE;
         chk(m_api.vkCreateSemaphore(m_device, &semaphore_create_info, nullptr, &s));
         m_surface.acquire_semaphores[i] = s;
 
-        chk(m_api.vkCreateSemaphore(m_device, &semaphore_create_info, nullptr, &s));
-        m_surface.present_semaphores[i] = s;
+        fprintf(stderr, "Acquire semaphore %u= %p\n", i, s);
     }
-
 
     m_immutable_samplers = Vector<VkSampler>(m_allocator);
 
@@ -798,9 +798,15 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
     m_default_compute_layout
         = create_default_compute_layout(m_device, m_api, m_default_descriptor_layout);
 
-    VkDescriptorPoolSize pool_size{
-        .type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .descriptorCount = kMaxTextureHeapSize,
+    VkDescriptorPoolSize pool_sizes[] = {
+        {
+            .type            = VK_DESCRIPTOR_TYPE_SAMPLER,
+            .descriptorCount = m_immutable_samplers.size(),
+        },
+        {
+            .type            = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+            .descriptorCount = kMaxTextureHeapSize,
+        },
     };
 
     VkDescriptorPoolCreateInfo pool_info = {
@@ -809,8 +815,8 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
         .flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT
                  | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
         .maxSets       = kMaxNumTextureHeaps,
-        .poolSizeCount = 1,
-        .pPoolSizes    = &pool_size,
+        .poolSizeCount = 2,
+        .pPoolSizes    = pool_sizes,
     };
     chk(m_api.vkCreateDescriptorPool(m_device, &pool_info, nullptr, &m_descriptor_pool));
 
@@ -961,14 +967,26 @@ bool Device::Impl::configure_surface(const SurfaceConfiguration& config) {
         return false;
     }
 
-    // Convert the swapchain images here to handles, by inserting them into the object pool.
+    // Convert the swapchain images here to handles, by inserting them into the object pool. Also
+    // create the present semaphores.
+    const VkSemaphoreCreateInfo semaphore_create_info{
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+    };
     for (int i = 0; i < image_count; ++i) {
         const uint32_t handle_idx  = m_texture_pool.get();
         m_texture_pool[handle_idx] = {
             .vk_image = swapchain_images[i],
         };
         m_surface.swapchain_images[i] = Handle<Texture>{.h = handle_idx};
+
+        VkSemaphore s = VK_NULL_HANDLE;
+        chk(m_api.vkCreateSemaphore(m_device, &semaphore_create_info, nullptr, &s));
+        m_surface.present_semaphores[i] = s;
     }
+
+    m_surface.frame_semaphore = create_semaphore(0);
 
     return true;
 }
@@ -983,9 +1001,14 @@ void Device::Impl::unconfigure_surface() {
 }
 
 SurfaceTextureInfo Device::Impl::get_current_texture() {
-    auto semaphore = m_surface.acquire_semaphores[m_surface.current_semaphore_idx];
-    m_surface.current_semaphore_idx
-        = (m_surface.current_semaphore_idx + 1) % Surface::kMaxSwapchainImages;
+    const uint64_t wait_value = m_surface.frame_idx >= Surface::kMaxFramesInFlight
+                                    ? m_surface.frame_idx - Surface::kMaxFramesInFlight + 1
+                                    : 0;
+    wait_semaphore(m_surface.frame_semaphore, wait_value);
+
+    auto semaphore
+        = m_surface.acquire_semaphores[m_surface.frame_idx % Surface::kMaxFramesInFlight];
+    m_surface.frame_idx++;
     VkAcquireNextImageInfoKHR acquire_info{
         .sType      = VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR,
         .pNext      = nullptr,
@@ -1020,13 +1043,14 @@ SurfaceTextureInfo Device::Impl::get_current_texture() {
 }
 
 SURFACE_STATUS Device::Impl::present(Handle<Queue> queue) {
+    // printf("Presenting idx %u\n", m_surface.current_image_idx);
     auto presenting_texture_handle = m_surface.swapchain_images[m_surface.current_image_idx];
 
     VkPresentInfoKHR present_info{
         .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .pNext              = nullptr,
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores    = &m_surface.present_semaphores[m_surface.current_semaphore_idx],
+        .pWaitSemaphores    = &m_surface.present_semaphores[m_surface.current_image_idx],
         .swapchainCount     = 1,
         .pSwapchains        = &m_surface.swapchain,
         .pImageIndices      = &m_surface.current_image_idx,
@@ -1672,16 +1696,27 @@ void Device::Impl::submit(Handle<Queue>             queue,
                                   .deviceMask    = 1,
                               });
 
-        if (buf == m_surface.transitioning_command[m_surface.current_semaphore_idx]) {
+        if (buf == m_surface.transitioning_command[m_surface.current_image_idx]) {
+            signal_info
+                = concat(&arena,
+                         signal_info,
+                         VkSemaphoreSubmitInfo{
+                             .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+                             .pNext     = nullptr,
+                             .semaphore = m_surface.present_semaphores[m_surface.current_image_idx],
+                             .value     = 0,
+                             .stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                             .deviceIndex = 0,
+                         });
             signal_info = concat(
                 &arena,
                 signal_info,
                 VkSemaphoreSubmitInfo{
                     .sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
                     .pNext       = nullptr,
-                    .semaphore   = m_surface.present_semaphores[m_surface.current_semaphore_idx],
-                    .value       = 0,
-                    .stageMask   = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    .semaphore   = reinterpret_cast<VkSemaphore>(m_surface.frame_semaphore.h),
+                    .value       = m_surface.frame_idx,
+                    .stageMask   = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
                     .deviceIndex = 0,
                 });
         }
@@ -2172,7 +2207,7 @@ void CommandBuffer::barrier(STAGE_FLAGS                   before,
                                     .srcStageMask     = src_stage,
                                     .srcAccessMask    = access,
                                     .dstStageMask     = dst_stage,
-                                    .dstAccessMask    =  access,
+                                    .dstAccessMask    = t.new_layout == LAYOUT_PRESENT ? 0 : access,
                                     .oldLayout        = bridge(t.old_layout),
                                     .newLayout        = bridge(t.new_layout),
                                     .image            = impl->m_texture_pool[t.texture.h].vk_image,
@@ -2189,7 +2224,7 @@ void CommandBuffer::barrier(STAGE_FLAGS                   before,
         if (t.new_layout == LAYOUT_PRESENT) {
             assert(t.texture.h
                    == impl->m_surface.swapchain_images[impl->m_surface.current_image_idx].h);
-            impl->m_surface.transitioning_command[impl->m_surface.current_semaphore_idx]
+            impl->m_surface.transitioning_command[impl->m_surface.current_image_idx]
                 = reinterpret_cast<VkCommandBuffer>(buffer);
         }
     }

@@ -19,7 +19,6 @@ class TexturedCube : public Example {
     Handle<Queue>             m_queue;
     FORMAT                    m_swapchain_format;
     Handle<Pipeline>          m_render_pipeline;
-    Handle<Semaphore>         m_semaphore;
     uint64_t                  m_frame_idx        = 0;
     uint32_t                  m_swapchain_width  = 0;
     uint32_t                  m_swapchain_height = 0;
