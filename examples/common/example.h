@@ -2,9 +2,15 @@
 
 #include <gpu/loon_gpu.h>
 
+#include <filesystem>
 #include <memory>
 
 class ShaderLoader;
+
+struct FilePaths {
+    std::filesystem::path shader_directory;
+    std::filesystem::path asset_directory;
+};
 
 struct WindowState {
     uintptr_t                     native_window_handle;
@@ -12,6 +18,7 @@ struct WindowState {
     uint16_t                      width;
     uint16_t                      height;
     std::unique_ptr<ShaderLoader> shader_loader;
+    FilePaths                     file_paths;
 };
 
 class Example {
@@ -27,6 +34,8 @@ enum class ExampleName {
 
     Count,
 };
+
+FilePaths default_file_paths();
 
 void log_callback(loon::gpu::LogLevel lvl, loon::gpu::Span<const char> message, void* userdata);
 

@@ -67,13 +67,14 @@ LRESULT WINAPI window_proc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 }
 
 int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
-    WindowState window_state = {};
+    WindowState window_state = {
+        .file_paths = default_file_paths(),
+    };
 
     // Parse command line args.
     int     argc;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
 
-    std::string shader_search_path = "";
 
     for (int arg_idx = 0; arg_idx < argc; ++arg_idx) {
         if (std::wstring_view(argv[arg_idx]) == L"--shader_dir" && arg_idx + 1 < argc) {
@@ -89,13 +90,12 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
                                 (int)bytes.size(),
                                 NULL,
                                 NULL);
-            shader_search_path         = std::string(bytes.data());
-            window_state.shader_loader = std::make_unique<ShaderLoader>(shader_search_path.c_str());
+            window_state.file_paths.shader_directory = std::path(bytes.begin(), bytes.end());
         }
     }
 
-    // TODO: If ShaderLoader is uninitialized, create a default one which searches for shaders next
-    // to the binary location.
+    window_state.shader_loader
+        = std::make_unique<ShaderLoader>(window_state.file_paths.shader_directory.string().c_str());
 
     const char  CLASS_NAME[] = "LoonWebGPU Examples";
     WNDCLASSEXA wc           = {.cbSize        = sizeof(WNDCLASSEXA),

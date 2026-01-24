@@ -4,7 +4,6 @@
 #import <Foundation/Foundation.h>
 
 #import <Cocoa/Cocoa.h>
-
 #import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
 
@@ -35,15 +34,15 @@
   self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
   _device = MTLCreateSystemDefaultDevice();
   if (self) {
-    std::string shader_search_path = "/Users/kevin/Code/loon_gpu/examples/";
-
+    auto file_paths = default_file_paths();
     self->window_state = {
         .native_window_handle = 0,
         .native_instance_handle = 0,
         .width = 1200,
         .height = 800,
         .shader_loader =
-            std::make_unique<ShaderLoader>(shader_search_path.c_str()),
+            std::make_unique<ShaderLoader>(file_paths.shader_directory.c_str()),
+        .file_paths = file_paths,
     };
 
     self->selected_example = ExampleName::TexturedCube;
@@ -83,6 +82,42 @@
 - (void)mtkView:(MTKView *)view drawableSizeWillChange:(CGSize)size {
 }
 
+- (bool)acceptsFirstResponder {
+  return YES;
+}
+
+- (void)keyDown:(NSEvent *)event {
+  constexpr uint16_t keyCodeR = 15;
+  constexpr uint16_t keyCodeN = 45;
+  constexpr uint16_t keyCodeM = 46;
+  if (event.isARepeat) {
+    return;
+  }
+
+  if (event.keyCode == keyCodeR) {
+    current_example.reset();
+    // Need to reset the shader loader to avoid caching.
+    window_state.shader_loader->reset_cache();
+    current_example = create_example(selected_example, self->window_state);
+  } else if (event.keyCode == keyCodeN) { // Previous example
+    current_example.reset();
+    window_state.shader_loader->reset_cache();
+    selected_example = ExampleName((static_cast<int>(selected_example) +
+                                    static_cast<int>(ExampleName::Count) - 1) %
+                                   static_cast<int>(ExampleName::Count));
+    current_example = create_example(selected_example, window_state);
+  } else if (event.keyCode == keyCodeM) { // Next example.
+    current_example.reset();
+    window_state.shader_loader->reset_cache();
+    selected_example = ExampleName((static_cast<int>(selected_example) + 1) %
+                                   static_cast<int>(ExampleName::Count));
+    current_example = create_example(selected_example, window_state);
+  }
+}
+
+- (void)keyUp:(NSEvent *)event {
+}
+
 @end
 
 // MARK: AppDelegate
@@ -106,6 +141,7 @@
     self.window = [NSWindow windowWithContentViewController:rootViewController];
     [self.window center];
     [self.window makeKeyAndOrderFront:self];
+    [self.window makeFirstResponder:rootViewController];
   }
   return self;
 }
