@@ -42,6 +42,7 @@ struct TextureView {
 
 struct TextureHeap {
     VkDescriptorSet vk_descriptor_set;
+    TwoLevelBitset  bitset;
 };
 
 struct PhysicalDeviceInfo {
@@ -1246,6 +1247,7 @@ Handle<TextureHeap> Device::Impl::create_texture_heap(size_t size) {
     const auto handle           = m_texture_heap_pool.get();
     m_texture_heap_pool[handle] = TextureHeap{
         .vk_descriptor_set = set,
+        .bitset            = TwoLevelBitset(m_allocator, size),
     };
 
     return {handle};
@@ -1282,10 +1284,10 @@ Handle<TextureView> Device::Impl::create_texture_view(Handle<Texture> tex, Textu
 
 uint32_t Device::Impl::add_texture_view_to_heap(Handle<TextureHeap> heap,
                                                 Handle<TextureView> view) {
-    const auto& texture_heap = m_texture_heap_pool[heap.h];
+    auto&       texture_heap = m_texture_heap_pool[heap.h];
     const auto& texture_view = m_texture_view_pool[view.h];
     // TODO: Use some data structure to find an empty slot in the heap.
-    uint32_t free_slot = 0;
+    uint32_t free_slot = texture_heap.bitset.set_leading_zero();
 
     const VkDescriptorImageInfo image_info{
         .sampler     = VK_NULL_HANDLE,

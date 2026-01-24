@@ -1,9 +1,9 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdint>
 #include <mutex>
 #include <utility>
-#include <cstdint>
 
 #include "gpu/loon_gpu.h"
 #include "platform_utils.h"
@@ -288,17 +288,22 @@ class SegmentArray {
 
 class TwoLevelBitset {
    public:
-    explicit TwoLevelBitset(Allocator alloc, size_t size);
+    TwoLevelBitset() = default;
+    explicit TwoLevelBitset(Allocator alloc, uint32_t size);
 
-    TwoLevelBitset(const TwoLevelBitset&) = delete;
+    TwoLevelBitset(const TwoLevelBitset&)            = delete;
     TwoLevelBitset& operator=(const TwoLevelBitset&) = delete;
     TwoLevelBitset(TwoLevelBitset&&)                 = default;
     TwoLevelBitset& operator=(TwoLevelBitset&&)      = default;
 
-    uint64_t count_leading_zeros() const;
+    // Set the lowest 0 bit and return its index.
+    uint32_t set_leading_zero();
+
+    void clear_bit(uint32_t idx);
 
    private:
     Vector<uint64_t> m_data;
+    uint32_t         m_size = 0;
 };
 
 // MARK: Implementations:

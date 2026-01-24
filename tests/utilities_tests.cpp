@@ -20,3 +20,20 @@ TEST(utilities_tests, vector_basic_usage) {
 
     // TODO: Check other allocators, work on allocation failure case, etc.
 }
+
+
+TEST(utilities_tests, two_level_bitset) {
+    TwoLevelBitset bitset(Allocator(), 1024);
+
+    for (uint32_t i = 0; i < 1024; ++i) {
+        const uint32_t val = bitset.set_leading_zero();
+        ASSERT_EQ(val, i);
+    }
+
+    for (uint32_t i = 0; i < 1024; i += 2) { bitset.clear_bit(i); }
+
+    for (uint32_t i = 0; i < 1024 / 2; ++i) {
+        const uint32_t val = bitset.set_leading_zero();
+        ASSERT_EQ(val, 2 * i);
+    }
+}

@@ -126,7 +126,8 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
 
     // Load the texture
     int            x = 0, y = 0, n = 0;
-    unsigned char* image_data = stbi_load("E:\\loon_gpu\\assets\\uv-texture.png", &x, &y, &n, 4);
+    unsigned char* image_data
+        = stbi_load("/Users/kevin/Code/loon_gpu/assets/uv-texture.png", &x, &y, &n, 4);
 
     m_color_texture = m_device.create_texture(TextureDesc{
         .dimensions = {(uint32_t)x, (uint32_t)y, 1},
