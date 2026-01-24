@@ -1,12 +1,11 @@
 #include "gpu/loon_gpu.h"
 
+#include <algorithm>  // TODO: Work out replacements for this for faster compilation.
 #include <cassert>
 #include <cstddef>
-#include <mutex>  // TODO: Replace with platform_utils.cpp
 
 #include "containers.h"
 #include "gpu_to_vk.h"
-#include "utilities.h"
 #include "vma_usage.h"
 #include "volk.h"
 #include "vulkan/vulkan_core.h"

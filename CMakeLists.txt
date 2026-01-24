@@ -28,7 +28,6 @@ set(SOURCES
     src/loon_gpu.cpp
     src/vma_usage.cpp
     src/containers.cpp
-    src/utilities.cpp
     src/gpu_to_vk.cpp
     src/platform_utils.cpp
 )
@@ -49,10 +48,9 @@ set_target_properties(
     PUBLIC_HEADER "${PUBLIC_HEADERS}"
 )
 
+# target_compile_options(loon_gpu PUBLIC -ftime-trace)
+
 target_link_libraries(loon_gpu PRIVATE volk VulkanMemoryAllocator)
-if (APPLE)
-#    target_link_libraries(loon_gpu PUBLIC moltenvk)
-endif()
 
 target_include_directories(
     loon_gpu

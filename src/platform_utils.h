@@ -4,7 +4,17 @@
 #include <cstddef>
 #include <cstdint>
 
+#if __linux__ || __APPLE__
+#    include <pthread.h>
+#endif
+
 namespace loon::gpu {
+
+#ifdef _MSVC_LANG
+#    define NO_UNIQUE_ADDR [[msvc::no_unique_address]]
+#else
+#    define NO_UNIQUE_ADDR [[no_unique_address]]
+#endif
 
 // Minimal thread-local storage helpers
 using tls_key        = ptrdiff_t;
@@ -19,6 +29,19 @@ int64_t atomic_exchange(int64_t* x, int64_t val);  // Returns the previous store
 int64_t atomic_load(int64_t* x);
 int64_t atomic_fetch_add(int64_t* x, int64_t val);
 bool    atomic_compare_exchange(int64_t* dst, int64_t* expected, int64_t desired);
+
+// Mutex
+
+#if _WIN32
+using mutex = uintptr_t;
+#    define LOON_MUTEX_INIT {0}
+#elif __linux__ || __APPLE__
+using mutex = pthread_mutex_t;
+#    define LOON_MUTEX_INIT PTHREAD_MUTEX_INITIALIZER
+#endif
+
+void mutex_lock(mutex* mtx);
+void mutex_unlock(mutex* mtx);
 
 // Bit manipulation
 

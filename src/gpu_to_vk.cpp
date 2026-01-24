@@ -1,6 +1,8 @@
 #include "gpu_to_vk.h"
 
 #include "gpu/loon_gpu.h"
+
+#define VK_NO_PROTOTYPES
 #include "vulkan/vulkan_core.h"
 
 namespace loon::gpu {

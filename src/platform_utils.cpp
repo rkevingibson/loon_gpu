@@ -1,6 +1,8 @@
 #include "platform_utils.h"
 
 #if _WIN32
+// TODO: Since we have such a small subset of needed instructions, could just manually declare them
+// here instead of including the header.
 #    define WIN32_LEAN_AND_MEAN
 #    include <Windows.h>
 #elif __linux__ || __APPLE__
@@ -45,6 +47,14 @@ bool atomic_compare_exchange(int64_t* dst, int64_t* expected, int64_t desired) {
     return original == *expected;
 }
 
+void mutex_lock(mutex* mtx) {
+    AcquireSRWLockExclusive(mtx);
+}
+
+void mutex_unlock(mutex* mtx) {
+    ReleaseSRWLockExclusive(mtx);
+}
+
 #elif __linux__ || __APPLE__
 tls_key tls_alloc(tls_destructor d) {
     pthread_key_t key;
@@ -84,6 +94,15 @@ bool atomic_compare_exchange(int64_t* dst, int64_t* expected, int64_t desired) {
                                        __ATOMIC_ACQ_REL,
                                        __ATOMIC_RELAXED);
 }
+
+void mutex_lock(mutex* mtx) {
+    pthread_mutex_lock(mtx);
+}
+
+void mutex_unlock(mutex* mtx) {
+    pthread_mutex_unlock(mtx);
+}
+
 #endif
 
 }  // namespace loon::gpu

@@ -2,7 +2,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
-#include <iterator>
 #include <utility>
 
 
@@ -91,13 +90,6 @@ class Span {
     constexpr T*       end() const noexcept { return m_ptr + m_len; }
     constexpr const T* cbegin() const noexcept { return begin(); }
     constexpr const T* cend() const noexcept { return end(); }
-
-    constexpr std::reverse_iterator<T*> rbegin() const noexcept {
-        return std::make_reverse_iterator(end());
-    }
-    constexpr std::reverse_iterator<T*> rend() const noexcept {
-        return std::make_reverse_iterator(begin());
-    }
 
     Span<unsigned char> as_bytes() {
         return Span<unsigned char>((unsigned char*)m_ptr, m_len * sizeof(T));

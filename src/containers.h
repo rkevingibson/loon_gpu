@@ -1,19 +1,11 @@
 #pragma once
 
-#include <algorithm>
 #include <cstdint>
-#include <mutex>
+#include <new>
 #include <utility>
 
 #include "gpu/loon_gpu.h"
 #include "platform_utils.h"
-
-
-#ifdef _MSVC_LANG
-#    define NO_UNIQUE_ADDR [[msvc::no_unique_address]]
-#else
-#    define NO_UNIQUE_ADDR [[no_unique_address]]
-#endif
 
 namespace loon::gpu {
 
@@ -39,6 +31,88 @@ class Allocator {
     ProcAllocatorCallback m_alloc    = nullptr;
     void*                 m_userdata = nullptr;
 };
+
+// MARK: Label
+class Label {
+   public:
+    Label() = default;
+    Label(const Allocator& backup_alloc, Span<const char> label) : Label() {
+        set(backup_alloc, label);
+    }
+    Span<const char> get() const;
+    void             set(const Allocator& backup_alloc, Span<const char> label);
+
+   private:
+    static constexpr uint32_t label_buffer_size = 256;
+    uint32_t                  m_capacity        = label_buffer_size;
+    uint32_t                  m_len             = 0;
+    union {
+        char* m_label = nullptr;
+        char  m_inline_buffer[label_buffer_size];
+    };
+};
+
+// MARK: Arena
+
+class Arena {
+   public:
+    Arena() = default;
+    Arena(void* ptr, size_t size) noexcept :
+        m_ptr(reinterpret_cast<uintptr_t>(ptr)), m_begin(m_ptr), m_size(size) {};
+
+    Arena(const Arena&)            = default;
+    Arena& operator=(const Arena&) = default;
+
+    [[nodiscard]] void* alloc(size_t size) {
+        const uintptr_t ptr    = m_ptr;
+        const uintptr_t newptr = ptr + size;
+        const uintptr_t end    = m_begin + m_size;
+        if (newptr > end) { return nullptr; }
+        m_ptr = newptr;
+        return reinterpret_cast<void*>(ptr);
+    }
+
+    void free(const void* ptr, size_t size) {
+        const uintptr_t p = reinterpret_cast<uintptr_t>(ptr);
+        if (p + size == m_ptr && p >= m_begin) { m_ptr = p; }
+    }
+
+    bool owns(const void* ptr) {
+        const uintptr_t p = reinterpret_cast<uintptr_t>(ptr);
+        return p >= m_begin && p < m_begin + m_size;
+    }
+
+   private:
+    template <class T>
+    friend Span<T> concat(Arena* a, Span<T> head, Span<const T> tail);
+
+    uintptr_t m_ptr{0};
+    uintptr_t m_begin{0};
+    size_t    m_size{0};
+};
+
+template <class T>
+[[nodiscard]] Span<T> clone(Arena* a, Span<const T> x) {
+    T* output = reinterpret_cast<T*>(a->alloc(x.as_bytes().size()));
+    if (output == nullptr) { return {}; }
+
+    Span<T> result(output, x.size());
+    for (auto first = x.begin(), last = x.end(); first != last; ++output, ++first) {
+        ::new (output) T(*first);
+    }
+    return result;
+}
+
+template <class T>
+[[nodiscard]] Span<T> concat(Arena* a, Span<T> head, Span<const T> tail) {
+    if ((uintptr_t)head.end() != a->m_ptr) { head = clone<T>(a, head); }
+    return {head.data(), head.size() + clone<T>(a, tail).size()};
+}
+
+template <class T>
+[[nodiscard]] Span<T> concat(Arena* a, Span<T> head, const T& tail) {
+    return concat(a, head, Span<const T>(&tail, 1));
+}
 
 // MARK: Vector
 template <class T>
@@ -75,7 +149,7 @@ class Vector {
 
     T& push_back(const T& v) {
         if (m_count == m_capacity) { reserve(grow_capacity(m_count + 1)); }
-        T* result = std::construct_at(m_data + m_count, v);
+        T* result = ::new (m_data + m_count) T(v);
         m_count++;
         return *result;
     }
@@ -83,22 +157,22 @@ class Vector {
     template <class... Args>
     T& emplace_back(Args&&... args) {
         if (m_count == m_capacity) { reserve(grow_capacity(m_count + 1)); }
-        T* result = std::construct_at(m_data + m_count, std::forward<Args>(args)...);
+        T* result = ::new (m_data + m_count) T(std::forward<Args>(args)...);
         m_count++;
         return *result;
     }
 
     void pop_back() {
         m_count--;
-        std::destroy_at(m_data + m_count);
+        (m_data + m_count)->~T();
     }
 
     void erase(T* first, T* last) {
         const auto old_end = end();
-        m_count -= std::distance(first, last);
+        m_count -= (last - first);
         // Move from [last, old_end) to [first, new_end)
         for (; last != old_end; ++first, ++last) *first = std::move(*last);
-        std::destroy(end(), old_end);
+        for (auto it = end(); it != old_end; ++it) { it->~T(); }
     }
 
     const T&           operator[](uint32_t idx) const { return m_data[idx]; }
@@ -146,18 +220,18 @@ class ObjectPool {
 
     void release(uint32_t idx) noexcept {
         if (idx >= N) return;
-        std::unique_lock<std::mutex> lock(m_mutex);
+        mutex_lock(&m_mutex);
         m_freelist[idx].next = m_head;
         m_head               = idx;
+        mutex_unlock(&m_mutex);
     }
 
     static constexpr uint32_t INVALID_INDEX = ~0;
     uint32_t                  get() noexcept {
-        std::unique_lock<std::mutex> lock(m_mutex);
-        const uint32_t               idx = m_head;
-        if (idx == INVALID_INDEX) { return idx; }
-
-        m_head = m_freelist[idx].next;
+        mutex_lock(&m_mutex);
+        const uint32_t idx = m_head;
+        if (idx != INVALID_INDEX) { m_head = m_freelist[idx].next; }
+        mutex_unlock(&m_mutex);
         return idx;
     }
 
@@ -167,7 +241,7 @@ class ObjectPool {
     static constexpr size_t size() { return N; }
 
    private:
-    std::mutex m_mutex;
+    mutex m_mutex = LOON_MUTEX_INIT;
     struct Node {
         T        data;
         uint32_t next;
@@ -220,7 +294,7 @@ class SegmentArray {
             m_segments[m_used_segments++] = reinterpret_cast<T*>(blk.ptr);
         }
 
-        T* result = std::construct_at(get(m_count));
+        T* result = ::new (get(m_count)) T();
         m_count++;
         return result;
     }
@@ -233,14 +307,14 @@ class SegmentArray {
             m_segments[m_used_segments++] = reinterpret_cast<T*>(blk.ptr);
         }
 
-        T* result = std::construct_at(get(m_count), T(std::forward<Args>(args)...));
+        T* result = ::new (get(m_count)) T(std::forward<Args>(args)...);
         m_count++;
         return *result;
     }
 
     void pop() {
         if (m_count > 0) {
-            std::destroy_at(get(m_count - 1));
+            get(m_count - 1)->~T();
             m_count--;
         }
     }
@@ -254,8 +328,12 @@ class SegmentArray {
             // Segments may not be full - and may be empty if pops have happened.
             const uint32_t freed_count = capacity_for_segment_count(m_used_segments - 1);
             if (m_count > freed_count) {
-                const uint32_t element_count = std::min(m_count - freed_count, segment_size);
-                std::destroy_n(segment, element_count);
+                const uint32_t element_count
+                    = m_count - freed_count > segment_size ? segment_size : (m_count - freed_count);
+
+                for (auto start = segment, end = segment + element_count; start != end; ++start) {
+                    start->~T();
+                }
             }
 
             m_allocator.free({
@@ -316,21 +394,23 @@ Vector<T>::Vector(Allocator allocator, uint32_t initial_capacity) : m_allocator(
 };
 
 template <class T>
-Vector<T>::Vector(Allocator allocator, const T* buff, uint32_t count) : m_allocator{allocator} {
-    reserve(count);
-    std::uninitialized_copy_n(buff, count, m_data);
+Vector<T>::Vector(Allocator allocator, const T* buff, uint32_t count) : Vector(allocator, count) {
+    m_count = count;
+    for (auto first = buff, output = m_data, end = buff + count; first != end; ++first, ++output) {
+        ::new (output) T(*first);
+    }
 }
 
 template <class T>
 Vector<T>::Vector(Allocator allocator, const T& value, uint32_t count) : Vector(allocator, count) {
     m_count = count;
-    std::uninitialized_fill_n(m_data, count, value);
+    for (uint32_t i = 0; i < count; ++i) { ::new (m_data + i) T(value); }
 }
 
 template <class T>
 void Vector<T>::clear() {
     if (m_data) {
-        std::destroy_n(m_data, m_count);
+        for (uint32_t i = 0; i < m_count; ++i) { m_data[i].~T(); }
         m_allocator.free({.ptr = static_cast<void*>(m_data),
                           .len = static_cast<uint32_t>(m_capacity * sizeof(T))});
     }
@@ -360,8 +440,11 @@ void Vector<T>::grow(size_t new_capacity) {
     } else {
         MemoryBlock blk = m_allocator.alloc(new_capacity * sizeof(T));
         if (blk.ptr == nullptr) { return; }
-        std::uninitialized_move_n(m_data, m_count, reinterpret_cast<T*>(blk.ptr));
-        std::destroy_n(m_data, m_count);
+
+        for (uint32_t i = 0; i < m_count; ++i) {
+            ::new (reinterpret_cast<T*>(blk.ptr) + i) T(std::move(m_data[i]));
+            m_data[i].~T();
+        }
         new_capacity = blk.len / sizeof(T);
         m_allocator.free(current_blk);
         m_capacity = new_capacity;
