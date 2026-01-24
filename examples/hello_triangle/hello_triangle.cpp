@@ -67,7 +67,7 @@ HelloTriangle::HelloTriangle(const WindowState& window_state) {
             .spirv       = Span(fragment_spirv.data(), fragment_spirv.size()).as_bytes(),
             .entry_point = "fragmentMain"_sv,
         },
-        RasterDesc{.colorTargets = {{.format = m_swapchain_format}}});
+        RasterDesc{.color_targets = {{.format = m_swapchain_format}}});
 
     assert(m_render_pipeline.h != 0);
 
@@ -105,11 +105,11 @@ void HelloTriangle::Update(const WindowState& window) {
 
     auto swapchain_view = m_device.create_texture_view(surface_texture.texture,
                                                        TextureViewDesc{
-                                                           .format     = m_swapchain_format,
-                                                           .baseMip    = 0,
-                                                           .mipCount   = 1,
-                                                           .baseLayer  = 0,
-                                                           .layerCount = 1,
+                                                           .format      = m_swapchain_format,
+                                                           .base_mip    = 0,
+                                                           .mip_count   = 1,
+                                                           .base_layer  = 0,
+                                                           .layer_count = 1,
                                                        });
 
     auto command_buffer = m_device.start_command_recording(m_queue);

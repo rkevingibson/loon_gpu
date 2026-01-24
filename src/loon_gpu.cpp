@@ -1186,8 +1186,8 @@ Handle<Texture> Device::Impl::create_texture(const TextureDesc& desc) {
         .format    = bridge(desc.format),
         .extent
         = {.width = desc.dimensions.x, .height = desc.dimensions.y, .depth = desc.dimensions.z},
-        .mipLevels             = desc.mipCount,
-        .arrayLayers           = desc.layerCount,
+        .mipLevels             = desc.mip_count,
+        .arrayLayers           = desc.layer_count,
         .samples               = VK_SAMPLE_COUNT_1_BIT,  // TODO: Support multisampling
         .tiling                = VK_IMAGE_TILING_OPTIMAL,
         .usage                 = bridge_usage_flags(desc.usage),
@@ -1268,10 +1268,10 @@ Handle<TextureView> Device::Impl::create_texture_view(Handle<Texture> tex, Textu
                         VK_COMPONENT_SWIZZLE_IDENTITY,},
         .subresourceRange = {
         .aspectMask = aspects_for_format(desc.format),
-        .baseMipLevel = desc.baseMip,
-        .levelCount = desc.mipCount,
-        .baseArrayLayer = desc.baseLayer,
-        .layerCount = desc.layerCount,
+        .baseMipLevel = desc.base_mip,
+        .levelCount = desc.mip_count,
+        .baseArrayLayer = desc.base_layer,
+        .layerCount = desc.layer_count,
         },
     };
     VkImageView image_view;
@@ -1437,15 +1437,15 @@ Handle<Pipeline> Device::Impl::create_graphics_pipeline(ShaderSource vertex,
 
 
     // Depth-stencil state:
-    VkFormat depth_attachment_format   = bridge(desc.depthFormat);
-    VkFormat stencil_attachment_format = bridge(desc.stencilFormat);
+    VkFormat depth_attachment_format   = bridge(desc.depth_format);
+    VkFormat stencil_attachment_format = bridge(desc.stencil_format);
 
     // Color blend state
     Arena                                     arena = *get_thread_local_arena();
     Span<VkPipelineColorBlendAttachmentState> color_blend_attachment_states{};
     Span<VkFormat>                            color_attachment_formats{};
 
-    for (auto& t : desc.colorTargets) {
+    for (auto& t : desc.color_targets) {
         // const auto attachment_state = loon::gpu::bridge(target);
         color_blend_attachment_states
             = concat(&arena, color_blend_attachment_states, loon::gpu::bridge(desc.blendstate));

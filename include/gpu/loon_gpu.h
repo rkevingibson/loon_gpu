@@ -546,30 +546,30 @@ struct DepthStencilDesc {
 };
 
 struct BlendDesc {
-    BLEND   color_op          = BLEND_ADD;
-    FACTOR  src_color_factor  = FACTOR_ONE;
-    FACTOR  dst_color_factor  = FACTOR_ZERO;
-    BLEND   alpha_op          = BLEND_ADD;
-    FACTOR  src_alpha_factor  = FACTOR_ONE;
-    FACTOR  dst_alpha_factor  = FACTOR_ZERO;
-    uint8_t color_wsrite_mask = 0xf;
+    BLEND   color_op         = BLEND_ADD;
+    FACTOR  src_color_factor = FACTOR_ONE;
+    FACTOR  dst_color_factor = FACTOR_ZERO;
+    BLEND   alpha_op         = BLEND_ADD;
+    FACTOR  src_alpha_factor = FACTOR_ONE;
+    FACTOR  dst_alpha_factor = FACTOR_ZERO;
+    uint8_t color_write_mask = 0xf;
 };
 
 struct ColorTarget {
-    FORMAT  format    = FORMAT_NONE;
-    uint8_t writeMask = 0xf;
+    FORMAT  format     = FORMAT_NONE;
+    uint8_t write_mask = 0xf;
 };
 
 struct RasterDesc {
-    TOPOLOGY                topology                  = TOPOLOGY_TRIANGLE_LIST;
-    CULL                    cull                      = CULL_NONE;
-    bool                    alphaToCoverage           = false;
-    bool                    supportDualSourceBlending = false;
-    uint8_t                 sampleCount               = 1;
-    FORMAT                  depthFormat               = FORMAT_NONE;
-    FORMAT                  stencilFormat             = FORMAT_NONE;
-    Span<const ColorTarget> colorTargets              = {};
-    BlendDesc               blendstate                = {};
+    TOPOLOGY                topology                     = TOPOLOGY_TRIANGLE_LIST;
+    CULL                    cull                         = CULL_NONE;
+    bool                    alpha_to_coverage            = false;
+    bool                    support_dual_source_blending = false;
+    uint8_t                 sample_count                 = 1;
+    FORMAT                  depth_format                 = FORMAT_NONE;
+    FORMAT                  stencil_format               = FORMAT_NONE;
+    Span<const ColorTarget> color_targets                = {};
+    BlendDesc               blendstate                   = {};
 };
 
 struct RenderAttachment {
@@ -588,19 +588,19 @@ struct RenderPassDesc {
 struct TextureDesc {
     TEXTURE     type = TEXTURE_2D;
     Dimension3D dimensions;
-    uint32_t    mipCount    = 1;
-    uint32_t    layerCount  = 1;
-    uint32_t    sampleCount = 1;
-    FORMAT      format      = FORMAT_NONE;
-    USAGE_FLAGS usage       = USAGE_NONE;
+    uint32_t    mip_count    = 1;
+    uint32_t    layer_count  = 1;
+    uint32_t    sample_count = 1;
+    FORMAT      format       = FORMAT_NONE;
+    USAGE_FLAGS usage        = USAGE_NONE;
 };
 
 struct TextureViewDesc {
-    FORMAT   format     = FORMAT_NONE;
-    uint8_t  baseMip    = 0;
-    uint8_t  mipCount   = 1;
-    uint16_t baseLayer  = 0;
-    uint16_t layerCount = 1;
+    FORMAT   format      = FORMAT_NONE;
+    uint8_t  base_mip    = 0;
+    uint8_t  mip_count   = 1;
+    uint16_t base_layer  = 0;
+    uint16_t layer_count = 1;
 };
 
 struct TextureSizeAlign {

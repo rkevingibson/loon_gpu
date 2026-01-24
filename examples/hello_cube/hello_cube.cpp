@@ -118,8 +118,8 @@ HelloCube::HelloCube(const WindowState& window_state) {
             .entry_point = "fragmentMain"_sv,
         },
         RasterDesc{
-            .depthFormat  = loon::gpu::FORMAT_Depth32Float,
-            .colorTargets = {{.format = m_swapchain_format}},
+            .depth_format  = loon::gpu::FORMAT_Depth32Float,
+            .color_targets = {{.format = m_swapchain_format}},
         });
 
     assert(m_render_pipeline.h != 0);
@@ -234,11 +234,11 @@ void HelloCube::Update(const WindowState& window) {
 
     auto swapchain_view = m_device.create_texture_view(surface_texture.texture,
                                                        TextureViewDesc{
-                                                           .format     = m_swapchain_format,
-                                                           .baseMip    = 0,
-                                                           .mipCount   = 1,
-                                                           .baseLayer  = 0,
-                                                           .layerCount = 1,
+                                                           .format      = m_swapchain_format,
+                                                           .base_mip    = 0,
+                                                           .mip_count   = 1,
+                                                           .base_layer  = 0,
+                                                           .layer_count = 1,
                                                        });
 
     auto command_buffer = m_device.start_command_recording(m_queue);
