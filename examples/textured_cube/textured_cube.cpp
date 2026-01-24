@@ -262,7 +262,7 @@ void TexturedCube::Update(const WindowState& window) {
 
     auto commandBuffer = m_device.start_command_recording(m_queue);
 
-    commandBuffer.set_active_texture_heap(m_texture_heap);
+    commandBuffer.set_texture_heap(m_texture_heap);
 
     commandBuffer.barrier(STAGE_FLAGS(STAGE_HOST | STAGE_RASTER_COLOR_OUT),
                           STAGE_FLAGS(STAGE_PIXEL_SHADER | STAGE_RASTER_COLOR_OUT),

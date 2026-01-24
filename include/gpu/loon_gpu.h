@@ -747,7 +747,7 @@ class CommandBuffer {
     void copy_to_texture(GpuPtr src, Handle<Texture> texture, const BufferToTextureCopyInfo& info);
     void copy_from_texture(GpuPtr destGpu, GpuPtr srcGpu, Handle<Texture> texture);
 
-    void set_active_texture_heap(Handle<TextureHeap> heap);
+    void set_texture_heap(Handle<TextureHeap> heap);
 
     void barrier(STAGE_FLAGS                   before,
                  STAGE_FLAGS                   after,
@@ -756,8 +756,6 @@ class CommandBuffer {
 
     void set_pipeline(Handle<Pipeline> pipeline);
     void set_depth_stencil_State(Handle<DepthStencilState> state);
-
-    void set_texture_heap(Handle<TextureHeap> heap);
 
     void dispatch(GpuPtr dataGpu, const Dimension3D& gridDimensions);
     void dispatch_indirect(GpuPtr dataGpu, GpuPtr gridDimensionsGpu);

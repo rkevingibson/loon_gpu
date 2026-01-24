@@ -20,26 +20,3 @@ TEST(utilities_tests, vector_basic_usage) {
 
     // TODO: Check other allocators, work on allocation failure case, etc.
 }
-
-TEST(utilities_tests, hash_table_test) {
-    HashTable<uint64_t, uint32_t> table;
-
-    const auto result = table.insert({42, 999});
-    ASSERT_TRUE(result.inserted);
-    ASSERT_NE(result.pair, nullptr);
-    ASSERT_EQ(result.pair->value, 999);
-
-    // Trying to reinsert won't overwrite previously inserted value
-    const auto second_result = table.insert({42, 1234});
-    ASSERT_FALSE(second_result.inserted);
-    ASSERT_EQ(second_result.pair, result.pair);
-
-    for (uint64_t i = 0; i < 100; i++) { table.insert({i, {}}); }
-
-    const auto lookup_result = table.find(42);
-    ASSERT_NE(lookup_result, nullptr);
-
-    const auto replaced_result = table.insert_or_assign(42, 0);
-    ASSERT_EQ(replaced_result.inserted, false);
-    ASSERT_EQ(replaced_result.pair->value, 0);
-}

@@ -737,8 +737,6 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
         VkSemaphore s = VK_NULL_HANDLE;
         chk(m_api.vkCreateSemaphore(m_device, &semaphore_create_info, nullptr, &s));
         m_surface.acquire_semaphores[i] = s;
-
-        fprintf(stderr, "Acquire semaphore %u= %p\n", i, s);
     }
 
     m_immutable_samplers = Vector<VkSampler>(m_allocator);
@@ -1043,7 +1041,6 @@ SurfaceTextureInfo Device::Impl::get_current_texture() {
 }
 
 SURFACE_STATUS Device::Impl::present(Handle<Queue> queue) {
-    // printf("Presenting idx %u\n", m_surface.current_image_idx);
     auto presenting_texture_handle = m_surface.swapchain_images[m_surface.current_image_idx];
 
     VkPresentInfoKHR present_info{
@@ -1166,8 +1163,6 @@ void* Device::Impl::get_host_pointer(Handle<Buffer> buffer) {
 }
 
 BufferAndOffset Device::Impl::buffer_and_offset_from_ptr(GpuPtr ptr) {
-    // TODO: On buffer creation, store the ptr in a sorted list, so we can look it up later.
-
     const auto  it = std::lower_bound(m_ptr_map.begin(),
                                      m_ptr_map.end(),
                                      GpuPtrMap{.ptr = ptr},
@@ -2153,7 +2148,7 @@ void CommandBuffer::copy_from_texture(GpuPtr destGpu, GpuPtr srcGpu, Handle<Text
     assert(false);
 }
 
-void CommandBuffer::set_active_texture_heap(Handle<TextureHeap> heap) {
+void CommandBuffer::set_texture_heap(Handle<TextureHeap> heap) {
     auto impl = reinterpret_cast<Device::Impl*>(device);
     auto cmd  = reinterpret_cast<VkCommandBuffer>(buffer);
 

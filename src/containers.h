@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <mutex>
 #include <utility>
+#include <cstdint>
 
 #include "gpu/loon_gpu.h"
 #include "platform_utils.h"
@@ -284,94 +285,20 @@ class SegmentArray {
     T* m_segments[26] = {nullptr};
 };
 
-// MARK: Hash Table
 
-template <class Key, class Value>
-class HashTable {
+class TwoLevelBitset {
    public:
-    HashTable() {};
-    HashTable(Allocator& allocator, uint32_t initial_size) :
-        m_allocator(allocator),
-        m_key_values(allocator),
-        m_metadata(allocator, Metadata{0, 0}, initial_size) {
-        m_resize_threshold = (initial_size * kLoadFactorPercent) / 100;
-        m_mask             = initial_size - 1;
-    }
-    HashTable(HashTable const& other) = delete;
-    HashTable(HashTable&& other) : HashTable() { swap(*this, other); }
-    HashTable& operator=(const HashTable& other) = delete;
-    HashTable& operator=(HashTable&& other) {
-        swap(*this, other);
-        return *this;
-    }
+    explicit TwoLevelBitset(Allocator alloc, size_t size);
 
-    ~HashTable() = default;
+    TwoLevelBitset(const TwoLevelBitset&) = delete;
+    TwoLevelBitset& operator=(const TwoLevelBitset&) = delete;
+    TwoLevelBitset(TwoLevelBitset&&)                 = default;
+    TwoLevelBitset& operator=(TwoLevelBitset&&)      = default;
 
-    friend void swap(HashTable& a, HashTable& b) {
-        using std::swap;
-        swap(a.m_key_values, b.m_key_values);
-        swap(a.m_metadata, b.m_metadata);
-        swap(a.m_allocator, b.m_allocator);
-        swap(a.m_resize_threshold, b.m_resize_threshold);
-        swap(a.m_mask, b.m_mask);
-        swap(a.m_hasher, b.m_hasher);
-    }
-
-    struct KeyValuePair {
-        Key   key;
-        Value value;
-    };
-
-    KeyValuePair*       begin() { return m_key_values.begin(); }
-    KeyValuePair*       end() { return m_key_values.end(); }
-    const KeyValuePair* begin() const { return m_key_values.begin(); }
-    const KeyValuePair* end() const { return m_key_values.end(); }
-
-    size_t size() const { return m_key_values.size(); }
-
-    const KeyValuePair* find(const Key& key) const { return find_impl(key); };
-    KeyValuePair*       find(const Key& key) { return const_cast<KeyValuePair*>(find_impl(key)); }
-    bool                contains(const Key& key) { return find(key) != nullptr; }
-
-    struct InsertResult {
-        KeyValuePair* pair;
-        bool          inserted;
-    };
-
-    InsertResult insert(KeyValuePair&& slot);
-    template <class M>
-    InsertResult insert_or_assign(const Key& k, M&& v);
-
-
-    void clear() {
-        m_key_values.clear();
-        m_metadata.clear();
-    }
+    uint64_t count_leading_zeros() const;
 
    private:
-    struct Metadata {
-        uint32_t hash  = 0;
-        uint32_t index = 0;
-    };
-    uint32_t              hash_key(const Key& key) const;
-    static constexpr bool is_deleted(uint32_t hash) { return (hash >> 31) != 0; }
-    uint32_t              desired_pos(uint32_t hash) const { return hash & m_mask; }
-    uint32_t              probe_distance(uint32_t hash, uint32_t slot_index) const {
-        return (slot_index + m_metadata.size() - desired_pos(hash)) & m_mask;
-    }
-    const KeyValuePair*       find_impl(const Key& key) const;
-    void                      grow();
-    uint32_t&                 elem_hash(int idx) { return m_metadata[idx].hash; }
-    uint32_t                  elem_hash(int idx) const { return m_metadata[idx].hash; }
-    uint32_t                  elem_idx(int idx) const { return m_metadata[idx].index; }
-    static constexpr uint32_t kLoadFactorPercent = 90;
-
-    Vector<KeyValuePair> m_key_values;
-    Vector<Metadata>     m_metadata;
-    uint32_t             m_resize_threshold = 0;
-    uint32_t             m_mask             = 0;
-    Allocator            m_allocator;
-    NO_UNIQUE_ADDR std::hash<Key> m_hasher{};
+    Vector<uint64_t> m_data;
 };
 
 // MARK: Implementations:
@@ -435,133 +362,6 @@ void Vector<T>::grow(size_t new_capacity) {
         m_capacity = new_capacity;
         m_data     = reinterpret_cast<T*>(blk.ptr);
     }
-}
-
-
-// MARK: Hash table
-
-template <class K, class V>
-const HashTable<K, V>::KeyValuePair* HashTable<K, V>::find_impl(const K& key) const {
-    if (m_key_values.is_empty()) { return nullptr; }
-    const uint32_t hash = hash_key(key);
-    uint32_t       pos  = desired_pos(hash);
-    uint32_t       dist = 0;
-    for (;;) {
-        if (elem_hash(pos) == 0 || dist > probe_distance(elem_hash(pos), pos)) {
-            return nullptr;
-        } else if (elem_hash(pos) == hash && m_key_values[elem_idx(pos)].key == key) {
-            return &m_key_values[elem_idx(pos)];
-        }
-        pos = (pos + 1) & m_mask;
-        ++dist;
-    }
-    return nullptr;
-}
-
-template <class K, class V>
-HashTable<K, V>::InsertResult HashTable<K, V>::insert(KeyValuePair&& slot) {
-    // Construct the metadata based on where we would insert it if it's not already in the table.
-    if (m_key_values.size() >= m_resize_threshold) { grow(); }
-
-    Metadata metadata{
-        .hash  = hash_key(slot.key),
-        .index = m_key_values.size(),
-    };
-
-    uint32_t pos  = desired_pos(metadata.hash);
-    uint32_t dist = 0;
-    for (;;) {
-        // Empty slot:
-        if (elem_hash(pos) == 0) {
-            m_metadata[pos] = metadata;
-            m_key_values.emplace_back(std::move(slot));
-            return {
-                .pair     = &m_key_values[metadata.index],
-                .inserted = true,
-            };
-        }
-
-        if (elem_hash(pos) == metadata.hash && m_key_values[elem_idx(pos)].key == slot.key) {
-            // Found the existing key
-            return {
-                .pair     = &m_key_values[elem_idx(pos)],
-                .inserted = false,
-            };
-        }
-
-        const uint32_t existing_dist = probe_distance(elem_hash(pos), pos);
-        if (dist > existing_dist) {
-            // Probe length tells us this map does not contain this key, so we're safe to
-            // insert/swap
-            m_key_values.emplace_back(std::move(slot));
-            if (is_deleted(elem_hash(pos))) {
-                // Insert here
-                m_metadata[pos] = metadata;
-                return {
-                    .pair     = &m_key_values[elem_idx(pos)],
-                    .inserted = true,
-                };
-            }
-
-            // Swap with entry at pos
-            // Note: we only need to swap metadata, not the actual data.
-            std::swap(metadata, m_metadata[pos]);
-        }
-
-        pos = (pos + 1) & m_mask;
-        ++dist;
-    }
-}
-
-template <class K, class V>
-template <class M>
-HashTable<K, V>::InsertResult HashTable<K, V>::insert_or_assign(const K& k, M&& v) {
-    auto slot = find(k);
-    if (slot) {
-        slot->value = std::forward<M>(v);
-        return {.pair = slot, .inserted = false};
-    } else {
-        return insert(KeyValuePair(k, std::forward<M>(v)));
-    }
-}
-
-template <class K, class V>
-void HashTable<K, V>::grow() {
-    const uint32_t   old_capacity = m_metadata.size();
-    const uint32_t   new_capacity = old_capacity * 2 > 16 ? old_capacity * 2 : 16;
-    Vector<Metadata> old_metadata = std::move(m_metadata);
-
-    m_metadata = Vector<Metadata>(m_allocator, Metadata{.hash = 0, .index = 0}, new_capacity);
-    m_resize_threshold = (new_capacity * kLoadFactorPercent) / 100;
-    m_mask             = new_capacity - 1;
-
-    for (Metadata m : old_metadata) {
-        if (m.hash != 0 && !is_deleted(m.hash)) {
-            // Rehash the metadata into the new array
-            uint32_t pos  = desired_pos(m.hash);
-            uint32_t dist = 0;
-            for (;;) {
-                if (elem_hash(pos) == 0) {
-                    m_metadata[pos] = m;
-                    break;
-                }
-
-                const uint32_t existing_dist = probe_distance(elem_hash(pos), pos);
-                if (dist > existing_dist) {
-                    // Swap with entry at pos
-                    // Note: we only need to swap metadata, not the actual data.
-                    std::swap(m, m_metadata[pos]);
-                }
-
-                pos = (pos + 1) & m_mask;
-                ++dist;
-            }
-        }
-    }
-}
-template <class Key, class Value>
-uint32_t HashTable<Key, Value>::hash_key(const Key& key) const {
-    return static_cast<uint32_t>(m_hasher(key));
 }
 
 }  // namespace loon::gpu
