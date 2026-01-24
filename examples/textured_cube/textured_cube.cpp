@@ -180,8 +180,8 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
     m_device.free(copy_semaphore);
 
     m_depth_stencil_state = m_device.create_depth_stencil_state(DepthStencilDesc{
-        .depthMode = DEPTH_FLAGS(loon::gpu::DEPTH_WRITE | loon::gpu::DEPTH_READ),
-        .depthTest = loon::gpu::OP_GREATER,
+        .depth_mode = DEPTH_FLAGS(loon::gpu::DEPTH_WRITE | loon::gpu::DEPTH_READ),
+        .depth_test = loon::gpu::OP_GREATER,
     });
 }
 
@@ -265,23 +265,23 @@ void TexturedCube::Update(const WindowState& window) {
                                                            .layerCount = 1,
                                                        });
 
-    auto commandBuffer = m_device.start_command_recording(m_queue);
+    auto command_buffer = m_device.start_command_recording(m_queue);
 
-    commandBuffer.set_texture_heap(m_texture_heap);
+    command_buffer.set_texture_heap(m_texture_heap);
 
-    commandBuffer.barrier(STAGE_FLAGS(STAGE_HOST | STAGE_RASTER_COLOR_OUT),
-                          STAGE_FLAGS(STAGE_PIXEL_SHADER | STAGE_RASTER_COLOR_OUT),
-                          {TextureTransition{
-                               .texture    = surface_texture.texture,
-                               .old_layout = loon::gpu::LAYOUT_DONT_CARE,
-                               .new_layout = LAYOUT_ATTACHMENT,
-                           },
-                           TextureTransition{
-                               .texture    = m_depth_texture,
-                               .old_layout = loon::gpu::LAYOUT_DONT_CARE,
-                               .new_layout = LAYOUT_ATTACHMENT,
-                           }});
-    commandBuffer.begin_render_pass({
+    command_buffer.barrier(STAGE_FLAGS(STAGE_HOST | STAGE_RASTER_COLOR_OUT),
+                           STAGE_FLAGS(STAGE_PIXEL_SHADER | STAGE_RASTER_COLOR_OUT),
+                           {TextureTransition{
+                                .texture    = surface_texture.texture,
+                                .old_layout = loon::gpu::LAYOUT_DONT_CARE,
+                                .new_layout = LAYOUT_ATTACHMENT,
+                            },
+                            TextureTransition{
+                                .texture    = m_depth_texture,
+                                .old_layout = loon::gpu::LAYOUT_DONT_CARE,
+                                .new_layout = LAYOUT_ATTACHMENT,
+                            }});
+    command_buffer.begin_render_pass({
                                    .color_attachments = RenderAttachment{
                                        .texture_view = swapchain_view,
                                        .load_op      = loon::gpu::LOAD_OP_CLEAR,
@@ -296,28 +296,28 @@ void TexturedCube::Update(const WindowState& window) {
                                    }, 
                                    .render_area = {.width = m_swapchain_width, .height = m_swapchain_height},
                                 });
-    commandBuffer.set_depth_stencil_State(m_depth_stencil_state);
-    commandBuffer.set_pipeline(m_render_pipeline);
+    command_buffer.set_depth_stencil_State(m_depth_stencil_state);
+    command_buffer.set_pipeline(m_render_pipeline);
     uint32_t args_offset = sizeof(ShaderArgs) * (m_frame_idx % 3);
     GpuPtr   argsGpu     = m_device.get_device_pointer(m_constant_buffer) + args_offset;
 
-    commandBuffer.draw_indexed_instanced(
+    command_buffer.draw_indexed_instanced(
         argsGpu,
         argsGpu + offsetof(ShaderArgs, texture),
         m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
         Cube::kNumIndices,
         1);
 
-    commandBuffer.end_render_pass();
-    commandBuffer.barrier(STAGE_RASTER_COLOR_OUT,
-                          STAGE_RASTER_COLOR_OUT,
-                          TextureTransition{
-                              .texture    = surface_texture.texture,
-                              .old_layout = LAYOUT_ATTACHMENT,
-                              .new_layout = LAYOUT_PRESENT,
-                          });
+    command_buffer.end_render_pass();
+    command_buffer.barrier(STAGE_RASTER_COLOR_OUT,
+                           STAGE_RASTER_COLOR_OUT,
+                           TextureTransition{
+                               .texture    = surface_texture.texture,
+                               .old_layout = LAYOUT_ATTACHMENT,
+                               .new_layout = LAYOUT_PRESENT,
+                           });
     m_device.submit(m_queue,
-                    commandBuffer,
+                    command_buffer,
                     SemaphoreInfo{
                         .semaphore = surface_texture.acquire_semaphore,
                         .stage     = loon::gpu::STAGE_PIXEL_SHADER,

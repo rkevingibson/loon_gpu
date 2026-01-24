@@ -495,11 +495,11 @@ struct Color {
 };
 
 struct Stencil {
-    OP      test        = OP_ALWAYS;
-    OP      failOp      = OP_KEEP;
-    OP      passOp      = OP_KEEP;
-    OP      depthFailOp = OP_KEEP;
-    uint8_t reference   = 0;
+    OP      test          = OP_ALWAYS;
+    OP      fail_op       = OP_KEEP;
+    OP      pass_op       = OP_KEEP;
+    OP      depth_fail_op = OP_KEEP;
+    uint8_t reference     = 0;
 };
 
 struct SamplerDesc {
@@ -534,25 +534,25 @@ struct DeviceDesc {
 };
 
 struct DepthStencilDesc {
-    DEPTH_FLAGS depthMode            = DEPTH_NONE;
-    OP          depthTest            = OP_ALWAYS;
-    float       depthBias            = 0.0f;
-    float       depthBiasSlopeFactor = 0.0f;
-    float       depthBiasClamp       = 0.0f;
-    uint8_t     stencilReadMask      = 0xff;
-    uint8_t     stencilWriteMask     = 0xff;
-    Stencil     stencilFront;
-    Stencil     stencilBack;
+    DEPTH_FLAGS depth_mode              = DEPTH_NONE;
+    OP          depth_test              = OP_ALWAYS;
+    float       depth_bias              = 0.0f;
+    float       depth_bias_slope_factor = 0.0f;
+    float       depth_bias_clamp        = 0.0f;
+    uint8_t     stencil_read_mask       = 0xff;
+    uint8_t     stencil_write_mask      = 0xff;
+    Stencil     stencil_front;
+    Stencil     stencil_bsack;
 };
 
 struct BlendDesc {
-    BLEND   colorOp        = BLEND_ADD;
-    FACTOR  srcColorFactor = FACTOR_ONE;
-    FACTOR  dstColorFactor = FACTOR_ZERO;
-    BLEND   alphaOp        = BLEND_ADD;
-    FACTOR  srcAlphaFactor = FACTOR_ONE;
-    FACTOR  dstAlphaFactor = FACTOR_ZERO;
-    uint8_t colorWriteMask = 0xf;
+    BLEND   color_op          = BLEND_ADD;
+    FACTOR  src_color_factor  = FACTOR_ONE;
+    FACTOR  dst_color_factor  = FACTOR_ZERO;
+    BLEND   alpha_op          = BLEND_ADD;
+    FACTOR  src_alpha_factor  = FACTOR_ONE;
+    FACTOR  dst_alpha_factor  = FACTOR_ZERO;
+    uint8_t color_wsrite_mask = 0xf;
 };
 
 struct ColorTarget {

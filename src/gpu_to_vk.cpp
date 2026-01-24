@@ -341,13 +341,13 @@ VkBlendOp bridge(BLEND op) {
 VkPipelineColorBlendAttachmentState bridge(const BlendDesc& state) {
     return VkPipelineColorBlendAttachmentState{
         .blendEnable         = true,
-        .srcColorBlendFactor = bridge(state.srcColorFactor),
-        .dstColorBlendFactor = bridge(state.dstColorFactor),
-        .colorBlendOp        = bridge(state.colorOp),
-        .srcAlphaBlendFactor = bridge(state.srcAlphaFactor),
-        .dstAlphaBlendFactor = bridge(state.dstAlphaFactor),
-        .alphaBlendOp        = bridge(state.alphaOp),
-        .colorWriteMask      = state.colorWriteMask,
+        .srcColorBlendFactor = bridge(state.src_color_factor),
+        .dstColorBlendFactor = bridge(state.dst_color_factor),
+        .colorBlendOp        = bridge(state.color_op),
+        .srcAlphaBlendFactor = bridge(state.src_alpha_factor),
+        .dstAlphaBlendFactor = bridge(state.dst_alpha_factor),
+        .alphaBlendOp        = bridge(state.alpha_op),
+        .colorWriteMask      = state.color_write_mask,
     };
 }
 

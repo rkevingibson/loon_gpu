@@ -2255,9 +2255,9 @@ void CommandBuffer::set_depth_stencil_State(Handle<DepthStencilState> state) {
 
     auto& desc = impl->m_depth_stencil_desc[state.h];
 
-    impl->m_api.vkCmdSetDepthWriteEnable(cmd, (desc.depthMode & DEPTH_WRITE) != 0);
-    impl->m_api.vkCmdSetDepthTestEnable(cmd, (desc.depthMode & DEPTH_READ) != 0);
-    impl->m_api.vkCmdSetDepthCompareOp(cmd, bridge(desc.depthTest));
+    impl->m_api.vkCmdSetDepthWriteEnable(cmd, (desc.depth_mode & DEPTH_WRITE) != 0);
+    impl->m_api.vkCmdSetDepthTestEnable(cmd, (desc.depth_mode & DEPTH_READ) != 0);
+    impl->m_api.vkCmdSetDepthCompareOp(cmd, bridge(desc.depth_test));
     // TODO: More stuff here.
     impl->m_api.vkCmdSetStencilTestEnable(cmd, false);
     impl->m_api.vkCmdSetStencilOp(cmd,

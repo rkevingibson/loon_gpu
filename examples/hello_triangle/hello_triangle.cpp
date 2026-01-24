@@ -112,16 +112,16 @@ void HelloTriangle::Update(const WindowState& window) {
                                                            .layerCount = 1,
                                                        });
 
-    auto commandBuffer = m_device.start_command_recording(m_queue);
+    auto command_buffer = m_device.start_command_recording(m_queue);
 
-    commandBuffer.barrier(loon::gpu::STAGE_RASTER_COLOR_OUT,
-                          loon::gpu::STAGE_RASTER_COLOR_OUT,
-                          TextureTransition{
-                              .texture    = surface_texture.texture,
-                              .old_layout = loon::gpu::LAYOUT_DONT_CARE,
-                              .new_layout = LAYOUT_ATTACHMENT,
-                          });
-    commandBuffer.begin_render_pass({
+    command_buffer.barrier(loon::gpu::STAGE_RASTER_COLOR_OUT,
+                           loon::gpu::STAGE_RASTER_COLOR_OUT,
+                           TextureTransition{
+                               .texture    = surface_texture.texture,
+                               .old_layout = loon::gpu::LAYOUT_DONT_CARE,
+                               .new_layout = LAYOUT_ATTACHMENT,
+                           });
+    command_buffer.begin_render_pass({
                                    .color_attachments = RenderAttachment{
                                        .texture_view = swapchain_view,
                                        .load_op      = loon::gpu::LOAD_OP_CLEAR,
@@ -129,20 +129,20 @@ void HelloTriangle::Update(const WindowState& window) {
                                        .clear_color  = Color(0, 0, 0, 0),
                                    }, .render_area = {.width = m_swapchain_width, .height = m_swapchain_height},});
 
-    commandBuffer.set_pipeline(m_render_pipeline);
-    commandBuffer.draw(0, 0, 3, 1);
+    command_buffer.set_pipeline(m_render_pipeline);
+    command_buffer.draw(0, 0, 3, 1);
 
-    commandBuffer.end_render_pass();
-    commandBuffer.barrier(STAGE_RASTER_COLOR_OUT,
-                          STAGE_RASTER_COLOR_OUT,
-                          TextureTransition{
-                              .texture    = surface_texture.texture,
-                              .old_layout = LAYOUT_ATTACHMENT,
-                              .new_layout = LAYOUT_PRESENT,
-                          });
+    command_buffer.end_render_pass();
+    command_buffer.barrier(STAGE_RASTER_COLOR_OUT,
+                           STAGE_RASTER_COLOR_OUT,
+                           TextureTransition{
+                               .texture    = surface_texture.texture,
+                               .old_layout = LAYOUT_ATTACHMENT,
+                               .new_layout = LAYOUT_PRESENT,
+                           });
 
     m_device.submit(m_queue,
-                    commandBuffer,
+                    command_buffer,
                     SemaphoreInfo{
                         .semaphore = surface_texture.acquire_semaphore,
                         .stage     = loon::gpu::STAGE_RASTER_COLOR_OUT,
