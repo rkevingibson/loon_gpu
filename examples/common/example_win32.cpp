@@ -21,6 +21,7 @@ struct RawInput {
     ButtonState keys[256] = {kButtonStateDefault};  //
 
     void update() {
+        GetModuleFileNameA(nullptr, nullptr, 0);
         BYTE keyboard_state[256];
         GetKeyboardState(keyboard_state);
 
@@ -90,7 +91,8 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
                                 (int)bytes.size(),
                                 NULL,
                                 NULL);
-            window_state.file_paths.shader_directory = std::path(bytes.begin(), bytes.end());
+            window_state.file_paths.shader_directory
+                = std::filesystem::path(bytes.begin(), bytes.end());
         }
     }
 

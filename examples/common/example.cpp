@@ -4,6 +4,10 @@
 
 #if __APPLE__
 #    include <mach-o/dyld.h>
+#elif _WIN32
+#    include <Windows.h>
+//__declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void*, char*, unsigned long);
+
 #endif
 
 #include <filesystem>
@@ -21,6 +25,13 @@ static std::filesystem::path get_executable_directory() {
     std::vector<char> path(bufsize);
     _NSGetExecutablePath(path.data(), &bufsize);
     return std::filesystem::path(path.begin(), path.end()).parent_path();
+
+#elif _WIN32
+
+    std::vector<char> path(256);
+    GetModuleFileNameA(nullptr, path.data(), (uint32_t)path.size());
+
+    return std::filesystem::path(path.begin(), path.end()).parent_path();
 #endif
 }
 
@@ -31,8 +42,8 @@ FilePaths default_file_paths() {
     auto default_asset_dir  = (exec_dir / "../../../assets").lexically_normal();
 
     return {
-        .asset_directory  = default_asset_dir.string(),
         .shader_directory = default_shader_dir.string(),
+        .asset_directory  = default_asset_dir.string(),
     };
 }
 

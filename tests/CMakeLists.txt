@@ -1,12 +1,3 @@
-set(BUILD_GMOCK "OFF")
-FetchContent_Declare(
-    googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG v1.15.2
-)
-FetchContent_MakeAvailable(googletest)
-
-
 add_executable(
     loon_gpu_tests
     main.cpp
@@ -14,7 +5,7 @@ add_executable(
     example_tests.cpp
 )
 
-target_link_libraries(loon_gpu_tests PRIVATE GTest::gtest loon_gpu volk VulkanMemoryAllocator example_utilities)
+target_link_libraries(loon_gpu_tests PRIVATE loon_gpu example_utilities)
 
 target_include_directories(loon_gpu_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 

@@ -1975,7 +1975,10 @@ Device Device::create(const DeviceDesc& desc) {
 }
 
 Device::~Device() {
-    if (impl) { delete impl; }
+    if (impl) {
+        impl->shutdown();
+        delete impl;
+    }
 }
 
 void Device::wait_for_device_idle() {

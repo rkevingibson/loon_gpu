@@ -1,9 +1,9 @@
-#include <gtest/gtest.h>
-
 #include "containers.h"
+#include "utest.h"
+
 using namespace loon::gpu;
 
-TEST(utilities_tests, vector_basic_usage) {
+UTEST(utilities_tests, vector_basic_usage) {
     // With no allocator, all operations should work fine, using the default allocator
     Vector<uint32_t> a{};
     auto             result = a.push_back(42);
@@ -22,7 +22,7 @@ TEST(utilities_tests, vector_basic_usage) {
 }
 
 
-TEST(utilities_tests, two_level_bitset) {
+UTEST(utilities_tests, two_level_bitset) {
     TwoLevelBitset bitset(Allocator(), 1024);
 
     for (uint32_t i = 0; i < 1024; ++i) {

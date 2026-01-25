@@ -5,6 +5,7 @@
 // here instead of including the header.
 #    define WIN32_LEAN_AND_MEAN
 #    include <Windows.h>
+#    include <synchapi.h>
 #elif __linux__ || __APPLE__
 #    include <pthread.h>
 #else
@@ -48,11 +49,11 @@ bool atomic_compare_exchange(int64_t* dst, int64_t* expected, int64_t desired) {
 }
 
 void mutex_lock(mutex* mtx) {
-    AcquireSRWLockExclusive(mtx);
+    AcquireSRWLockExclusive((PSRWLOCK)mtx);
 }
 
 void mutex_unlock(mutex* mtx) {
-    ReleaseSRWLockExclusive(mtx);
+    ReleaseSRWLockExclusive((PSRWLOCK)mtx);
 }
 
 #elif __linux__ || __APPLE__
