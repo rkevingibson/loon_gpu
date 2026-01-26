@@ -249,14 +249,13 @@ class SlotMap {
     static Handle<T>        create_handle(uint32_t idx, uint32_t gen);
     static DecomposedHandle decompose_handle(Handle<T> h);
 
-    mutex m_mutex = LOON_MUTEX_INIT;
-    // Smallest segment is 64 items, 26 segments get us to ~4 billion items
-    Entry*       m_segments[26]  = {nullptr};
-    uint32_t     m_count         = 0;
+    mutex        m_mutex         = LOON_MUTEX_INIT;
     uint32_t     m_used_segments = 0;
     uint32_t     m_head          = kEndOfList;
     Allocator    m_allocator;
     DestructorFn m_destructor_fn;
+    // Smallest segment is 64 items, 26 segments get us to ~4 billion items
+    Entry* m_segments[26] = {nullptr};
 };
 
 class TwoLevelBitset {
@@ -383,7 +382,7 @@ void SlotMap<T>::clear() {
 template <class T>
 Handle<T> SlotMap<T>::emplace(T&& val) {
     mutex_lock(&m_mutex);
-    if (m_count >= capacity_for_segment_count(m_used_segments)) { add_segment(); }
+    if (m_head == kEndOfList) { add_segment(); }
 
     const uint32_t idx = m_head;
     assert(idx != kNotInFreelist

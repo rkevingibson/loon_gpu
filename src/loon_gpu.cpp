@@ -897,6 +897,8 @@ Device::Impl::~Impl() {
 
     vkDestroyInstance(m_instance, nullptr);
     volkFinalize();
+
+    tls_free(m_tls_key);
 }
 
 
@@ -1052,6 +1054,7 @@ bool Device::Impl::configure_surface(const SurfaceConfiguration& config) {
         m_surface.present_semaphores[i] = m_semaphore_pool.emplace({s});
     }
 
+    m_surface.frame_idx       = 0;
     m_surface.frame_semaphore = create_semaphore(0);
 
     return true;
