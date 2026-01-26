@@ -198,171 +198,66 @@ class Vector {
     T*        m_data     = nullptr;
 };
 
+// MARK: Slot Map
 
-// MARK: ObjectPool
-
-template <typename T, size_t N>
-class ObjectPool {
-   public:
-    ObjectPool() { reset(); }
-    ~ObjectPool() = default;
-
-    void reset() noexcept {
-        m_head = N - 1;
-        for (uint32_t i = N - 1; i > 0; --i) {
-            // TODO: Proper destruction needed.
-            // For non-trivial objects, may need to destruct here, but would need to know which ones
-            // aren't in the list first.
-            m_freelist[i].next = i - 1;
-        }
-        m_freelist[0].next = INVALID_INDEX;
-    }
-
-    void release(uint32_t idx) noexcept {
-        if (idx >= N) return;
-        mutex_lock(&m_mutex);
-        m_freelist[idx].next = m_head;
-        m_head               = idx;
-        mutex_unlock(&m_mutex);
-    }
-
-    static constexpr uint32_t INVALID_INDEX = ~0;
-    uint32_t                  get() noexcept {
-        mutex_lock(&m_mutex);
-        const uint32_t idx = m_head;
-        if (idx != INVALID_INDEX) { m_head = m_freelist[idx].next; }
-        mutex_unlock(&m_mutex);
-        return idx;
-    }
-
-    T&       operator[](uint32_t idx) { return m_freelist[idx].data; }
-    const T& operator[](uint32_t idx) const { return m_freelist[idx].data; }
-
-    static constexpr size_t size() { return N; }
-
-   private:
-    mutex m_mutex = LOON_MUTEX_INIT;
-    struct Node {
-        T        data;
-        uint32_t next;
-    };
-    Node     m_freelist[N];
-    uint32_t m_head;
-};
-
-// MARK: Segment Array
-
-// As described https://danielchasehooper.com/posts/segment_array
-// This is effectively a Vector but with pointer stability on reallocations, at the cost of slightly
-// slower iteration.
+// This combines a segment array, as described in https://danielchasehooper.com/posts/segment_array
+// with a intrusive freelist. This gives us a way to create handles to objects, with fast O(1)
+// accesses, pointer stability (you can access an object while other threads create/destroy objects)
+// and dyanmic growth.
 
 template <class T>
-class SegmentArray {
+class SlotMap {
    public:
-    SegmentArray() = default;
-    SegmentArray(Allocator allocator) : m_allocator(allocator) {}
-    SegmentArray(SegmentArray&& rhs) : SegmentArray() { swap(*this, rhs); }
-    SegmentArray& operator=(SegmentArray&& rhs) {
-        swap(*this, rhs);
-        return *this;
-    }
-    ~SegmentArray() { clear(); }
+    using DestructorFn = Function<void, T*>;
+    SlotMap()          = default;
+    SlotMap(Allocator alloc, DestructorFn destructor);
+    ~SlotMap();
 
-    friend void swap(SegmentArray& a, SegmentArray& b) {
-        std::swap(a.m_allocator, b.m_allocator);
-        std::swap(a.m_count, b.m_count);
-        std::swap(a.m_used_segments, b.m_used_segments);
-        std::swap(a.m_segments, b.m_segments);
-    }
+    SlotMap(const SlotMap&)            = delete;
+    SlotMap& operator=(const SlotMap&) = delete;
 
-    T* get(uint32_t index) {
-        const uint64_t segment = int_log_2((index >> kSmallSegmentsToSkip) + 1);
-        uint32_t       slot    = index - capacity_for_segment_count(segment);
-        return &m_segments[segment][slot];
-    }
+    void clear();
 
-    const T* get(uint32_t index) const {
-        const uint64_t segment = int_log_2((index >> kSmallSegmentsToSkip) + 1);
-        uint32_t       slot    = index - capacity_for_segment_count(segment);
-        return &m_segments[segment][slot];
-    }
+    Handle<T> emplace(T&& val);
+    void      erase(Handle<T> h);
 
-    T* push() {
-        if (m_count >= capacity_for_segment_count(m_used_segments)) {
-            const size_t segment_size     = sizeof(T) * slots_in_segment(m_used_segments);
-            const auto   blk              = m_allocator.alloc(segment_size);
-            m_segments[m_used_segments++] = reinterpret_cast<T*>(blk.ptr);
-        }
-
-        T* result = ::new (get(m_count)) T();
-        m_count++;
-        return result;
-    }
-
-    template <class... Args>
-    T& emplace_back(Args&&... args) {
-        if (m_count >= capacity_for_segment_count(m_used_segments)) {
-            const size_t segment_size     = sizeof(T) * slots_in_segment(m_used_segments);
-            const auto   blk              = m_allocator.alloc(segment_size);
-            m_segments[m_used_segments++] = reinterpret_cast<T*>(blk.ptr);
-        }
-
-        T* result = ::new (get(m_count)) T(std::forward<Args>(args)...);
-        m_count++;
-        return *result;
-    }
-
-    void pop() {
-        if (m_count > 0) {
-            get(m_count - 1)->~T();
-            m_count--;
-        }
-    }
-
-    uint32_t size() const { return m_count; }
-
-    void clear() {
-        for (uint32_t s_idx = 0; s_idx < m_used_segments; ++s_idx) {
-            const uint32_t segment_size = slots_in_segment(s_idx);
-            T*             segment      = m_segments[s_idx];
-            // Segments may not be full - and may be empty if pops have happened.
-            const uint32_t freed_count = capacity_for_segment_count(m_used_segments - 1);
-            if (m_count > freed_count) {
-                const uint32_t element_count
-                    = m_count - freed_count > segment_size ? segment_size : (m_count - freed_count);
-
-                for (auto start = segment, end = segment + element_count; start != end; ++start) {
-                    start->~T();
-                }
-            }
-
-            m_allocator.free({
-                .ptr = segment,
-                .len = static_cast<uint32_t>(slots_in_segment(s_idx) * sizeof(T)),
-            });
-            m_segments[s_idx] = nullptr;
-        }
-        m_count         = 0;
-        m_used_segments = 0;
-    }
+    T&       operator[](Handle<T> h);
+    const T& operator[](Handle<T> h) const;
 
    private:
     static constexpr uint32_t kSmallSegmentsToSkip = 6;
+    static constexpr uint32_t kNotInFreelist       = UINT32_MAX;
+    static constexpr uint32_t kEndOfList           = kNotInFreelist - 1;
+    struct Entry {
+        T        data;
+        uint32_t next;
+        uint32_t gen;
+    };
+    struct DecomposedHandle {
+        uint32_t idx;
+        uint32_t gen;
+    };
+
     static constexpr uint32_t slots_in_segment(uint32_t segment_index) {
         return (1 << kSmallSegmentsToSkip) << segment_index;
     }
     static constexpr uint32_t capacity_for_segment_count(uint32_t segment_count) {
         return ((1 << kSmallSegmentsToSkip) << segment_count) - (1 << kSmallSegmentsToSkip);
     }
+    void                    add_segment();
+    Entry*                  get(uint32_t idx);
+    static Handle<T>        create_handle(uint32_t idx, uint32_t gen);
+    static DecomposedHandle decompose_handle(Handle<T> h);
 
-
-    Allocator m_allocator;
-    uint32_t  m_count         = 0;
-    uint32_t  m_used_segments = 0;
-    // Smallest segment is 64 items, so 26 segments gets us to ~4 billion items.
-    T* m_segments[26] = {nullptr};
+    mutex m_mutex = LOON_MUTEX_INIT;
+    // Smallest segment is 64 items, 26 segments get us to ~4 billion items
+    Entry*       m_segments[26]  = {nullptr};
+    uint32_t     m_count         = 0;
+    uint32_t     m_used_segments = 0;
+    uint32_t     m_head          = kEndOfList;
+    Allocator    m_allocator;
+    DestructorFn m_destructor_fn;
 };
-
 
 class TwoLevelBitset {
    public:
@@ -450,6 +345,121 @@ void Vector<T>::grow(size_t new_capacity) {
         m_capacity = new_capacity;
         m_data     = reinterpret_cast<T*>(blk.ptr);
     }
+}
+
+// MARK: Slot Map
+
+template <class T>
+SlotMap<T>::SlotMap(Allocator alloc, DestructorFn destructor) :
+    m_allocator(alloc), m_destructor_fn{std::move(destructor)} {}
+
+template <class T>
+SlotMap<T>::~SlotMap() {
+    clear();
+}
+
+template <class T>
+void SlotMap<T>::clear() {
+    mutex_lock(&m_mutex);
+    for (uint32_t segment_idx = 0; segment_idx < m_used_segments; ++segment_idx) {
+        const uint32_t segment_size = slots_in_segment(segment_idx);
+        Entry*         segment      = m_segments[segment_idx];
+
+        // Destroy any objects in this segment that aren't in the free'd state
+        for (uint32_t idx = 0; idx < segment_size; ++idx) {
+            if (segment[idx].next == kNotInFreelist) { m_destructor_fn(&segment[idx].data); }
+        }
+
+        m_allocator.free({
+            .ptr = segment,
+            .len = static_cast<uint32_t>(segment_size * sizeof(Entry)),
+        });
+        m_segments[segment_idx] = nullptr;
+    }
+    m_used_segments = 0;
+    mutex_unlock(&m_mutex);
+}
+
+template <class T>
+Handle<T> SlotMap<T>::emplace(T&& val) {
+    mutex_lock(&m_mutex);
+    if (m_count >= capacity_for_segment_count(m_used_segments)) { add_segment(); }
+
+    const uint32_t idx = m_head;
+    assert(idx != kNotInFreelist
+           && idx != kEndOfList);  // Out of memory, need to identify a leak somewhere.
+
+    Entry* entry = get(idx);
+    assert(entry->next != kNotInFreelist);
+    m_head      = entry->next;
+    entry->next = kNotInFreelist;
+    ::new (&entry->data) T(std::forward<T&&>(val));
+    mutex_unlock(&m_mutex);
+
+    return create_handle(idx, ++entry->gen);
+}
+
+template <class T>
+void SlotMap<T>::erase(Handle<T> h) {
+    mutex_lock(&m_mutex);
+    const auto [idx, gen] = decompose_handle(h);
+    Entry* entry          = get(idx);
+    assert(entry->gen == gen);
+    m_destructor_fn(&entry->data);
+    entry->next = m_head;
+    m_head      = idx;
+    mutex_unlock(&m_mutex);
+}
+
+template <class T>
+T& SlotMap<T>::operator[](Handle<T> h) {
+    const auto [idx, gen] = decompose_handle(h);
+    Entry* e              = get(idx);
+    assert(e && e->gen == gen);
+    return e->data;
+}
+
+template <class T>
+const T& SlotMap<T>::operator[](Handle<T> h) const {
+    const auto [idx, gen] = decompose_handle(h);
+    Entry* e              = get(idx);
+    assert(e && e->gen == gen);
+    return e->data;
+}
+
+template <class T>
+void SlotMap<T>::add_segment() {
+    const size_t segment_size     = slots_in_segment(m_used_segments);
+    const auto   blk              = m_allocator.alloc(sizeof(Entry) * segment_size);
+    auto         segment          = reinterpret_cast<Entry*>(blk.ptr);
+    m_segments[m_used_segments++] = segment;
+    // Now add this segment to the freelist, back to front.
+    const uint32_t segment_offset = capacity_for_segment_count(m_used_segments - 1);
+    for (size_t i = segment_size; i > 0; --i) {
+        segment[i - 1].gen  = 0;
+        segment[i - 1].next = m_head;
+        m_head              = i + segment_offset;
+    }
+}
+
+template <class T>
+SlotMap<T>::Entry* SlotMap<T>::get(uint32_t idx) {
+    const uint64_t segment = int_log_2((idx >> kSmallSegmentsToSkip) + 1);
+    uint32_t       slot    = idx - capacity_for_segment_count(segment);
+    return &m_segments[segment][slot];
+}
+
+template <class T>
+Handle<T> SlotMap<T>::create_handle(uint32_t idx, uint32_t gen) {
+    return {.h = ((uint64_t)gen) << 32ull | idx};
+}
+
+template <class T>
+SlotMap<T>::DecomposedHandle SlotMap<T>::decompose_handle(Handle<T> h) {
+    return {
+        .idx = static_cast<uint32_t>(h.h & 0xFFFF'FFFFull),
+        .gen = static_cast<uint32_t>((h.h >> 32) & 0xFFFF'FFFFull),
+    };
 }
 
 }  // namespace loon::gpu

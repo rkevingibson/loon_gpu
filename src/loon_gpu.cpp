@@ -44,6 +44,10 @@ struct TextureHeap {
     TwoLevelBitset  bitset;
 };
 
+struct Semaphore {
+    VkSemaphore vk_semaphore;
+};
+
 struct PhysicalDeviceInfo {
     VkPhysicalDevice device                     = VK_NULL_HANDLE;
     uint32_t         graphics_queue_family      = 0;
@@ -54,6 +58,9 @@ struct PhysicalDeviceInfo {
     // It will be a string literal, so returning a span is fine - no freeing needed.
     Span<const char> error_string;
 };
+
+struct DepthStencilState : DepthStencilDesc {};
+
 static PhysicalDeviceInfo    select_physical_device(VkInstance    instance,
                                                     VkSurfaceKHR  surface,
                                                     GpuPreference preference,
@@ -95,8 +102,8 @@ struct Surface {
     // which semaphore to use before we know which image index we have.
     uint64_t          frame_idx = 0;
     Handle<Semaphore> frame_semaphore;
-    VkSemaphore       acquire_semaphores[kMaxFramesInFlight];
-    VkSemaphore       present_semaphores[kMaxSwapchainImages];
+    Handle<Semaphore> acquire_semaphores[kMaxFramesInFlight];
+    Handle<Semaphore> present_semaphores[kMaxSwapchainImages];
 
     // We store the command buffer that recording
     // the transition to PRESENT_KHR, so we can
@@ -110,12 +117,12 @@ struct Queue {
         Function<void> callback;
     };
 
-    VkQueue       queue          = VK_NULL_HANDLE;
-    VkCommandPool command_pool   = VK_NULL_HANDLE;
-    VkSemaphore   timeline       = VK_NULL_HANDLE;
-    uint32_t      queue_family   = 0;
-    uint64_t      timeline_value = 0;
-    Vector<Event> pending_events;
+    VkQueue           queue          = VK_NULL_HANDLE;
+    VkCommandPool     command_pool   = VK_NULL_HANDLE;
+    Handle<Semaphore> timeline       = {};
+    uint32_t          queue_family   = 0;
+    uint64_t          timeline_value = 0;
+    Vector<Event>     pending_events;
 };
 
 struct ThreadLocalState {
@@ -136,9 +143,10 @@ struct BufferAndOffset {
 };
 
 struct Device::Impl {
-    bool initialize(const DeviceDesc& desc);
+    Impl(const DeviceDesc& desc);
+    ~Impl();
 
-    void shutdown();
+    bool initialize(const DeviceDesc& desc);
 
     void wait_for_device_idle();
 
@@ -228,17 +236,18 @@ struct Device::Impl {
     VkPipelineLayout      m_default_graphics_layout;
     VkPipelineLayout      m_default_compute_layout;
 
-    ObjectPool<Buffer, kMaxNumBuffers>                      m_buffer_pool;
-    ObjectPool<Texture, kMaxNumTextures>                    m_texture_pool;
-    ObjectPool<TextureView, kMaxNumTextureViews>            m_texture_view_pool;
-    ObjectPool<TextureHeap, kMaxNumTextureHeaps>            m_texture_heap_pool;
-    ObjectPool<DepthStencilDesc, kMaxNumDepthStencilStates> m_depth_stencil_desc;
+    SlotMap<Buffer>            m_buffer_pool;
+    SlotMap<Texture>           m_texture_pool;
+    SlotMap<TextureView>       m_texture_view_pool;
+    SlotMap<TextureHeap>       m_texture_heap_pool;
+    SlotMap<DepthStencilState> m_depth_stencil_pool;
+    SlotMap<Semaphore>         m_semaphore_pool;
 
     Vector<VkSampler> m_immutable_samplers;
 
     struct GpuPtrMap {
-        GpuPtr   ptr;
-        uint32_t buffer_idx;
+        GpuPtr         ptr;
+        Handle<Buffer> buffer;
     };
     static constexpr auto kPtrMapCompare
         = [](const GpuPtrMap& a, const GpuPtrMap& b) -> bool { return a.ptr > b.ptr; };
@@ -506,18 +515,51 @@ VkPipelineLayout create_default_compute_layout(VkDevice               device,
     return result == VK_SUCCESS ? pipeline_layout : VK_NULL_HANDLE;
 }
 
-bool Device::Impl::initialize(const DeviceDesc& desc) {
-    // Setup basics: Logging, Allocator, TLS:
-    if (desc.alloc_callback) { m_allocator = Allocator(desc.alloc_callback, desc.alloc_userdata); }
-    if (desc.log_callback) {
-        m_log_callback = desc.log_callback;
-        m_log_userdata = desc.log_userdata;
-        m_log_level    = desc.log_level;
-    }
-    m_tls_key = loon::gpu::tls_alloc([](void* data) {
+Device::Impl::Impl(const DeviceDesc& desc) :
+    m_allocator{desc.alloc_callback ? Allocator(desc.alloc_callback, desc.alloc_userdata)
+                                    : Allocator()},
+    m_log_callback(desc.log_callback),
+    m_log_userdata(desc.log_userdata),
+    m_log_level(desc.log_level),
+    m_tls_key{loon::gpu::tls_alloc([](void* data) {
         auto state = reinterpret_cast<ThreadLocalState*>(data);
         state->~ThreadLocalState();
-    });
+    })},
+    m_buffer_pool{m_allocator,
+                  [this](Buffer* b) {
+                      vmaDestroyBuffer(m_vma, b->vk_buffer, b->vk_allocation);
+                      auto it = std::lower_bound(m_ptr_map.begin(),
+                                                 m_ptr_map.end(),
+                                                 GpuPtrMap{.ptr = b->device_ptr},
+                                                 kPtrMapCompare);
+                      m_ptr_map.erase(it, it + 1);
+                      b->~Buffer();
+                  }},
+    m_texture_pool{m_allocator,
+                   [this](Texture* t) {
+                       if (t->vk_allocation != VK_NULL_HANDLE) {
+                           vmaDestroyImage(m_vma, t->vk_image, t->vk_allocation);
+                       }
+                   }},
+    m_texture_view_pool{m_allocator,
+                        [this](TextureView* v) {
+                            m_api.vkDestroyImageView(m_device, v->vk_image_view, nullptr);
+                            v->~TextureView();
+                        }},
+    m_texture_heap_pool(
+        m_allocator,
+        [this](TextureHeap* h) {
+            m_api.vkFreeDescriptorSets(m_device, m_descriptor_pool, 1, &h->vk_descriptor_set);
+            h->~TextureHeap();
+        }),
+    m_depth_stencil_pool(m_allocator, [](DepthStencilState* d) { d->~DepthStencilState(); }),
+    m_semaphore_pool(m_allocator, [this](Semaphore* s) {
+        m_api.vkDestroySemaphore(m_device, s->vk_semaphore, nullptr);
+        s->~Semaphore();
+    }) {}
+
+bool Device::Impl::initialize(const DeviceDesc& desc) {
+    // Actual vulkan init goes here because it can fail.
 
     // Setup instance
     VkResult result = volkInitialize();
@@ -736,7 +778,7 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
     for (uint32_t i = 0; i < Surface::kMaxFramesInFlight; ++i) {
         VkSemaphore s = VK_NULL_HANDLE;
         chk(m_api.vkCreateSemaphore(m_device, &semaphore_create_info, nullptr, &s));
-        m_surface.acquire_semaphores[i] = s;
+        m_surface.acquire_semaphores[i] = m_semaphore_pool.emplace({s});
     }
 
     m_immutable_samplers = Vector<VkSampler>(m_allocator);
@@ -825,7 +867,34 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
     return true;
 }
 
-void Device::Impl::shutdown() {
+Device::Impl::~Impl() {
+    unconfigure_surface();
+
+    for (auto& q : m_queues) {
+        if (q.queue != VK_NULL_HANDLE) {
+            m_api.vkDestroyCommandPool(m_device, q.command_pool, nullptr);
+        }
+    }
+
+    m_buffer_pool.clear();
+    m_texture_pool.clear();
+    m_texture_view_pool.clear();
+    m_texture_heap_pool.clear();
+    m_semaphore_pool.clear();
+
+    for (auto& s : m_immutable_samplers) { m_api.vkDestroySampler(m_device, s, nullptr); }
+
+    m_api.vkDestroyDescriptorPool(m_device, m_descriptor_pool, nullptr);
+    m_api.vkDestroyDescriptorSetLayout(m_device, m_default_descriptor_layout, nullptr);
+    m_api.vkDestroyPipelineLayout(m_device, m_default_graphics_layout, nullptr);
+    m_api.vkDestroyPipelineLayout(m_device, m_default_compute_layout, nullptr);
+
+    vmaDestroyAllocator(m_vma);
+
+    m_api.vkDestroyDevice(m_device, nullptr);
+
+    vkDestroySurfaceKHR(m_instance, m_surface.surface, nullptr);
+
     vkDestroyInstance(m_instance, nullptr);
     volkFinalize();
 }
@@ -973,15 +1042,14 @@ bool Device::Impl::configure_surface(const SurfaceConfiguration& config) {
         .flags = 0,
     };
     for (int i = 0; i < image_count; ++i) {
-        const uint32_t handle_idx  = m_texture_pool.get();
-        m_texture_pool[handle_idx] = {
-            .vk_image = swapchain_images[i],
-        };
-        m_surface.swapchain_images[i] = Handle<Texture>{.h = handle_idx};
+        m_surface.swapchain_images[i] = m_texture_pool.emplace({
+            .vk_image      = swapchain_images[i],
+            .vk_allocation = VK_NULL_HANDLE,
+        });
 
         VkSemaphore s = VK_NULL_HANDLE;
         chk(m_api.vkCreateSemaphore(m_device, &semaphore_create_info, nullptr, &s));
-        m_surface.present_semaphores[i] = s;
+        m_surface.present_semaphores[i] = m_semaphore_pool.emplace({s});
     }
 
     m_surface.frame_semaphore = create_semaphore(0);
@@ -995,6 +1063,10 @@ void Device::Impl::unconfigure_surface() {
         m_surface.swapchain         = VK_NULL_HANDLE;
         m_surface.image_count       = 0;
         m_surface.current_image_idx = 0;
+        for (int i = 0; i < m_surface.image_count; ++i) {
+            m_semaphore_pool.erase(m_surface.present_semaphores[i]);
+        }
+        free(m_surface.frame_semaphore);
     }
 }
 
@@ -1004,6 +1076,7 @@ SurfaceTextureInfo Device::Impl::get_current_texture() {
                                     : 0;
     wait_semaphore(m_surface.frame_semaphore, wait_value);
 
+
     auto semaphore
         = m_surface.acquire_semaphores[m_surface.frame_idx % Surface::kMaxFramesInFlight];
     m_surface.frame_idx++;
@@ -1012,7 +1085,7 @@ SurfaceTextureInfo Device::Impl::get_current_texture() {
         .pNext      = nullptr,
         .swapchain  = m_surface.swapchain,
         .timeout    = 0,
-        .semaphore  = semaphore,
+        .semaphore  = m_semaphore_pool[semaphore].vk_semaphore,
         .fence      = VK_NULL_HANDLE,
         .deviceMask = 1,
     };
@@ -1021,7 +1094,7 @@ SurfaceTextureInfo Device::Impl::get_current_texture() {
     SurfaceTextureInfo info{
         .status            = SURFACE_STATUS_SUCCESS,
         .texture           = m_surface.swapchain_images[image_idx],
-        .acquire_semaphore = {.h = reinterpret_cast<uintptr_t>(semaphore)},
+        .acquire_semaphore = semaphore,
     };
     m_surface.current_image_idx = image_idx;
 
@@ -1043,11 +1116,12 @@ SurfaceTextureInfo Device::Impl::get_current_texture() {
 SURFACE_STATUS Device::Impl::present(Handle<Queue> queue) {
     auto presenting_texture_handle = m_surface.swapchain_images[m_surface.current_image_idx];
 
+    auto s = m_semaphore_pool[m_surface.present_semaphores[m_surface.current_image_idx]];
     VkPresentInfoKHR present_info{
         .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .pNext              = nullptr,
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores    = &m_surface.present_semaphores[m_surface.current_image_idx],
+        .pWaitSemaphores    = &s.vk_semaphore,
         .swapchainCount     = 1,
         .pSwapchains        = &m_surface.swapchain,
         .pImageIndices      = &m_surface.current_image_idx,
@@ -1127,39 +1201,31 @@ Handle<Buffer> Device::Impl::malloc(size_t bytes, size_t align, MEMORY memory) {
     };
     GpuPtr device_ptr = m_api.vkGetBufferDeviceAddress(m_device, &addr_info);
 
-    const uint32_t buffer_idx = m_buffer_pool.get();
-    m_buffer_pool[buffer_idx] = {
+    const auto handle = m_buffer_pool.emplace(Buffer{
         .vk_buffer     = vk_buffer,
         .vk_allocation = vk_allocation,
         .host_ptr      = vma_alloc_info.pMappedData,
         .device_ptr    = device_ptr,
-    };
+    });
 
 
     // TODO: Don't re-sort the whole thing, insert in the right spot.
-    m_ptr_map.push_back({.ptr = device_ptr, .buffer_idx = buffer_idx});
+    m_ptr_map.push_back({.ptr = device_ptr, .buffer = handle});
     std::sort(m_ptr_map.begin(), m_ptr_map.end(), kPtrMapCompare);
 
-    return {.h = buffer_idx};
+    return handle;
 }
 
 void Device::Impl::free(Handle<Buffer> buffer) {
-    auto& b = m_buffer_pool[buffer.h];
-    vmaDestroyBuffer(m_vma, b.vk_buffer, b.vk_allocation);
-    auto it = std::lower_bound(
-        m_ptr_map.begin(),
-        m_ptr_map.end(),
-        GpuPtrMap{.ptr = b.device_ptr, .buffer_idx = static_cast<uint32_t>(buffer.h)},
-        kPtrMapCompare);
-    m_ptr_map.erase(it, it + 1);
+    m_buffer_pool.erase(buffer);
 }
 
 GpuPtr Device::Impl::get_device_pointer(Handle<Buffer> buffer) {
-    return m_buffer_pool[buffer.h].device_ptr;
+    return m_buffer_pool[buffer].device_ptr;
 }
 
 void* Device::Impl::get_host_pointer(Handle<Buffer> buffer) {
-    return m_buffer_pool[buffer.h].host_ptr;
+    return m_buffer_pool[buffer].host_ptr;
 }
 
 BufferAndOffset Device::Impl::buffer_and_offset_from_ptr(GpuPtr ptr) {
@@ -1167,7 +1233,7 @@ BufferAndOffset Device::Impl::buffer_and_offset_from_ptr(GpuPtr ptr) {
                                      m_ptr_map.end(),
                                      GpuPtrMap{.ptr = ptr},
                                      kPtrMapCompare);
-    const auto& b  = m_buffer_pool[it->buffer_idx];
+    const auto& b  = m_buffer_pool[it->buffer];
     return {
         .buffer = b.vk_buffer,
         .offset = static_cast<uint32_t>(ptr - b.device_ptr),
@@ -1212,15 +1278,14 @@ Handle<Texture> Device::Impl::create_texture(const TextureDesc& desc) {
         return {};
     }
 
-    const auto handle      = m_texture_pool.get();
-    m_texture_pool[handle] = Texture{
+    const auto handle = m_texture_pool.emplace(Texture{
         .vk_image      = image,
         .vk_allocation = allocation,
         .vk_type       = bridge_view_type(desc.type),
         .format        = desc.format,
-    };
+    });
 
-    return {handle};
+    return handle;
 }
 
 Handle<TextureHeap> Device::Impl::create_texture_heap(size_t size) {
@@ -1243,17 +1308,16 @@ Handle<TextureHeap> Device::Impl::create_texture_heap(size_t size) {
     VkDescriptorSet set;
     chk(m_api.vkAllocateDescriptorSets(m_device, &info, &set));
 
-    const auto handle           = m_texture_heap_pool.get();
-    m_texture_heap_pool[handle] = TextureHeap{
+    const auto handle = m_texture_heap_pool.emplace(TextureHeap{
         .vk_descriptor_set = set,
         .bitset            = TwoLevelBitset(m_allocator, size),
-    };
+    });
 
     return {handle};
 }
 
 Handle<TextureView> Device::Impl::create_texture_view(Handle<Texture> tex, TextureViewDesc desc) {
-    auto& texture = m_texture_pool[tex.h];
+    auto& texture = m_texture_pool[tex];
     const VkImageViewCreateInfo info {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .pNext = nullptr,
@@ -1275,16 +1339,14 @@ Handle<TextureView> Device::Impl::create_texture_view(Handle<Texture> tex, Textu
     };
     VkImageView image_view;
     if (!chk(m_api.vkCreateImageView(m_device, &info, nullptr, &image_view))) { return {}; }
-    const auto handle = m_texture_view_pool.get();
-
-    m_texture_view_pool[handle].vk_image_view = image_view;
-    return {.h = handle};
+    const auto handle = m_texture_view_pool.emplace({.vk_image_view = image_view});
+    return handle;
 }
 
 uint32_t Device::Impl::add_texture_view_to_heap(Handle<TextureHeap> heap,
                                                 Handle<TextureView> view) {
-    auto&       texture_heap = m_texture_heap_pool[heap.h];
-    const auto& texture_view = m_texture_view_pool[view.h];
+    auto&       texture_heap = m_texture_heap_pool[heap];
+    const auto& texture_view = m_texture_view_pool[view];
     // TODO: Use some data structure to find an empty slot in the heap.
     uint32_t free_slot = texture_heap.bitset.set_leading_zero();
 
@@ -1311,16 +1373,18 @@ uint32_t Device::Impl::add_texture_view_to_heap(Handle<TextureHeap> heap,
     return free_slot;
 }
 
+void Device::Impl::free(Handle<Texture> t) {
+    m_texture_pool.erase(t);
+}
+
 void Device::Impl::remove_texture_view_from_heap(Handle<TextureHeap>, uint32_t) {}
 
 void Device::Impl::free(Handle<TextureHeap> heap) {
-    VkDescriptorSet set = m_texture_heap_pool[heap.h].vk_descriptor_set;
-    m_api.vkFreeDescriptorSets(m_device, m_descriptor_pool, 1, &set);
+    m_texture_heap_pool.erase(heap);
 }
 
 void Device::Impl::free(Handle<TextureView> view) {
-    m_api.vkDestroyImageView(m_device, m_texture_view_pool[view.h].vk_image_view, nullptr);
-    m_texture_view_pool.release(static_cast<uint32_t>(view.h));
+    m_texture_view_pool.erase(view);
 }
 
 // MARK: Pipelines
@@ -1583,9 +1647,8 @@ void Device::Impl::free(Handle<Pipeline> pipeline) {
 }
 
 Handle<DepthStencilState> Device::Impl::create_depth_stencil_state(const DepthStencilDesc& desc) {
-    auto h                  = m_depth_stencil_desc.get();
-    m_depth_stencil_desc[h] = desc;
-    return {h};
+    auto h = m_depth_stencil_pool.emplace(DepthStencilState{desc});
+    return h;
 }
 
 // MARK: Queue
@@ -1613,7 +1676,7 @@ Handle<Queue> Device::Impl::get_queue(QUEUE_TYPE type) {
         VkCommandPool command_pool;
         chk(m_api.vkCreateCommandPool(m_device, &pool_info, nullptr, &command_pool));
 
-        VkSemaphore timeline = reinterpret_cast<VkSemaphore>(create_semaphore(0).h);
+        auto timeline = create_semaphore(0);
 
         m_queues[type] = {
             .queue          = queue,
@@ -1669,11 +1732,11 @@ void Device::Impl::submit(Handle<Queue>             queue,
             = concat(&arena,
                      wait_info,
                      VkSemaphoreSubmitInfo{
-                         .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-                         .pNext     = nullptr,
-                         .semaphore = reinterpret_cast<VkSemaphore>(wait_semaphores[i].semaphore.h),
-                         .value     = wait_semaphores[i].value,
-                         .stageMask = bridge_pipeline_stage(wait_semaphores[i].stage),
+                         .sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+                         .pNext       = nullptr,
+                         .semaphore   = m_semaphore_pool[wait_semaphores[i].semaphore].vk_semaphore,
+                         .value       = wait_semaphores[i].value,
+                         .stageMask   = bridge_pipeline_stage(wait_semaphores[i].stage),
                          .deviceIndex = 0,
                      });
     }
@@ -1693,43 +1756,45 @@ void Device::Impl::submit(Handle<Queue>             queue,
                               });
 
         if (buf == m_surface.transitioning_command[m_surface.current_image_idx]) {
+            signal_info = concat(
+                &arena,
+                signal_info,
+                VkSemaphoreSubmitInfo{
+                    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+                    .pNext = nullptr,
+                    .semaphore
+                    = m_semaphore_pool[m_surface.present_semaphores[m_surface.current_image_idx]]
+                          .vk_semaphore,
+                    .value       = 0,
+                    .stageMask   = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    .deviceIndex = 0,
+                });
             signal_info
                 = concat(&arena,
                          signal_info,
                          VkSemaphoreSubmitInfo{
                              .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
                              .pNext     = nullptr,
-                             .semaphore = m_surface.present_semaphores[m_surface.current_image_idx],
-                             .value     = 0,
-                             .stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                             .semaphore = m_semaphore_pool[m_surface.frame_semaphore].vk_semaphore,
+                             .value     = m_surface.frame_idx,
+                             .stageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
                              .deviceIndex = 0,
                          });
-            signal_info = concat(
-                &arena,
-                signal_info,
-                VkSemaphoreSubmitInfo{
-                    .sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-                    .pNext       = nullptr,
-                    .semaphore   = reinterpret_cast<VkSemaphore>(m_surface.frame_semaphore.h),
-                    .value       = m_surface.frame_idx,
-                    .stageMask   = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
-                    .deviceIndex = 0,
-                });
         }
     }
 
     for (uint32_t i = 0; i < signal_semaphores.size(); ++i) {
-        signal_info = concat(
-            &arena,
-            signal_info,
-            VkSemaphoreSubmitInfo{
-                .sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-                .pNext       = nullptr,
-                .semaphore   = reinterpret_cast<VkSemaphore>(signal_semaphores[i].semaphore.h),
-                .value       = signal_semaphores[i].value,
-                .stageMask   = bridge_pipeline_stage(signal_semaphores[i].stage),
-                .deviceIndex = 0,
-            });
+        signal_info
+            = concat(&arena,
+                     signal_info,
+                     VkSemaphoreSubmitInfo{
+                         .sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+                         .pNext     = nullptr,
+                         .semaphore = m_semaphore_pool[signal_semaphores[i].semaphore].vk_semaphore,
+                         .value     = signal_semaphores[i].value,
+                         .stageMask = bridge_pipeline_stage(signal_semaphores[i].stage),
+                         .deviceIndex = 0,
+                     });
     }
 
     // We add one extra signal to advance the queue timeline
@@ -1738,7 +1803,7 @@ void Device::Impl::submit(Handle<Queue>             queue,
                          VkSemaphoreSubmitInfo{
                              .sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
                              .pNext       = nullptr,
-                             .semaphore   = q.timeline,
+                             .semaphore   = m_semaphore_pool[q.timeline].vk_semaphore,
                              .value       = ++q.timeline_value,
                              .stageMask   = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
                              .deviceIndex = 0,
@@ -1784,7 +1849,9 @@ void Device::Impl::on_submitted_work_completed(Handle<Queue> queue, Function<voi
 void Device::Impl::process_events(Handle<Queue> queue) {
     auto&    q            = m_queues[queue.h];
     uint64_t current_time = 0;
-    chk(m_api.vkGetSemaphoreCounterValue(m_device, q.timeline, &current_time));
+    chk(m_api.vkGetSemaphoreCounterValue(m_device,
+                                         m_semaphore_pool[q.timeline].vk_semaphore,
+                                         &current_time));
     uint32_t i = 0;
     while (i < q.pending_events.size() && q.pending_events[i].completed_time <= current_time) {
         q.pending_events[i].callback();
@@ -1812,14 +1879,11 @@ Handle<Semaphore> Device::Impl::create_semaphore(uint64_t initValue) {
     VkSemaphore s = VK_NULL_HANDLE;
     chk(m_api.vkCreateSemaphore(m_device, &timeline_create_info, nullptr, &s));
 
-    // For semaphores, we don't need anything beyond the handle, so we just return the vk handle
-    // directly.
-
-    return {.h = reinterpret_cast<uintptr_t>(s)};
+    return m_semaphore_pool.emplace({.vk_semaphore = s});
 }
 
 void Device::Impl::wait_semaphore(Handle<Semaphore> sema, uint64_t value) {
-    VkSemaphore         s = reinterpret_cast<VkSemaphore>(sema.h);
+    VkSemaphore         s = m_semaphore_pool[sema].vk_semaphore;
     VkSemaphoreWaitInfo wait_info{
         .sType          = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
         .pNext          = nullptr,
@@ -1832,7 +1896,7 @@ void Device::Impl::wait_semaphore(Handle<Semaphore> sema, uint64_t value) {
 }
 
 void Device::Impl::free(Handle<Semaphore> sema) {
-    m_api.vkDestroySemaphore(m_device, reinterpret_cast<VkSemaphore>(sema.h), nullptr);
+    m_semaphore_pool.erase(sema);
 }
 
 void Device::Impl::log(LogLevel lvl, Span<const char> msg) {
@@ -1968,17 +2032,14 @@ Arena* Device::Impl::get_thread_local_arena() {
 }
 
 Device Device::create(const DeviceDesc& desc) {
-    Impl* impl = new Impl;
+    Impl* impl = new Impl(desc);
     if (impl->initialize(desc)) { return Device(impl); }
 
     return Device(nullptr);
 }
 
 Device::~Device() {
-    if (impl) {
-        impl->shutdown();
-        delete impl;
-    }
+    if (impl) { delete impl; }
 }
 
 void Device::wait_for_device_idle() {
@@ -2128,7 +2189,7 @@ void CommandBuffer::copy_to_texture(GpuPtr                         srcPtr,
     auto cmd  = reinterpret_cast<VkCommandBuffer>(buffer);
 
     auto        src = impl->buffer_and_offset_from_ptr(srcPtr);
-    const auto& tex = impl->m_texture_pool[texture.h];
+    const auto& tex = impl->m_texture_pool[texture];
     const VkBufferImageCopy region{
         .bufferOffset      = src.offset,
         .bufferRowLength   = info.buffer_image_size.x,
@@ -2156,12 +2217,13 @@ void CommandBuffer::set_texture_heap(Handle<TextureHeap> heap) {
     auto impl = reinterpret_cast<Device::Impl*>(device);
     auto cmd  = reinterpret_cast<VkCommandBuffer>(buffer);
 
+    auto vk_descriptor_set = impl->m_texture_heap_pool[heap].vk_descriptor_set;
     impl->m_api.vkCmdBindDescriptorSets(cmd,
                                         VK_PIPELINE_BIND_POINT_GRAPHICS,
                                         impl->m_default_graphics_layout,
                                         0,
                                         1,
-                                        &impl->m_texture_heap_pool[heap.h].vk_descriptor_set,
+                                        &vk_descriptor_set,
                                         0,
                                         nullptr);
     impl->m_api.vkCmdBindDescriptorSets(cmd,
@@ -2169,7 +2231,7 @@ void CommandBuffer::set_texture_heap(Handle<TextureHeap> heap) {
                                         impl->m_default_compute_layout,
                                         0,
                                         1,
-                                        &impl->m_texture_heap_pool[heap.h].vk_descriptor_set,
+                                        &vk_descriptor_set,
                                         0,
                                         nullptr);
 }
@@ -2197,7 +2259,7 @@ void CommandBuffer::barrier(STAGE_FLAGS                   before,
 
     Span<VkImageMemoryBarrier2> image_barriers;
     for (const auto& t : image_transitions) {
-        const auto& tex = impl->m_texture_pool[t.texture.h];
+        const auto& tex = impl->m_texture_pool[t.texture];
         image_barriers = concat(&arena,
                                 image_barriers,
                                 VkImageMemoryBarrier2{
@@ -2209,7 +2271,7 @@ void CommandBuffer::barrier(STAGE_FLAGS                   before,
                                     .dstAccessMask    = t.new_layout == LAYOUT_PRESENT ? 0 : access,
                                     .oldLayout        = bridge(t.old_layout),
                                     .newLayout        = bridge(t.new_layout),
-                                    .image            = impl->m_texture_pool[t.texture.h].vk_image,
+                                    .image            = tex.vk_image,
                                     .subresourceRange = VkImageSubresourceRange{
                                         .aspectMask = aspects_for_format(tex.format),
                                         .baseMipLevel = 0,
@@ -2255,7 +2317,7 @@ void CommandBuffer::set_depth_stencil_State(Handle<DepthStencilState> state) {
     auto impl = reinterpret_cast<Device::Impl*>(device);
     auto cmd  = reinterpret_cast<VkCommandBuffer>(buffer);
 
-    auto& desc = impl->m_depth_stencil_desc[state.h];
+    auto& desc = impl->m_depth_stencil_pool[state];
 
     impl->m_api.vkCmdSetDepthWriteEnable(cmd, (desc.depth_mode & DEPTH_WRITE) != 0);
     impl->m_api.vkCmdSetDepthTestEnable(cmd, (desc.depth_mode & DEPTH_READ) != 0);
@@ -2310,7 +2372,7 @@ void CommandBuffer::begin_render_pass(RenderPassDesc desc) {
         color_attachments = concat(&arena, color_attachments, {
             .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
             .pNext              = nullptr,
-            .imageView          = impl->m_texture_view_pool[attachment.texture_view.h].vk_image_view,
+            .imageView          = impl->m_texture_view_pool[attachment.texture_view].vk_image_view,
             .imageLayout        = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
             .resolveMode        = VK_RESOLVE_MODE_NONE,  // TODO: Multisampling support
             .resolveImageView   = VK_NULL_HANDLE,
@@ -2329,7 +2391,7 @@ void CommandBuffer::begin_render_pass(RenderPassDesc desc) {
         depth_attachment = VkRenderingAttachmentInfo{
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
             .pNext = nullptr,
-            .imageView = impl->m_texture_view_pool[desc.depth_attachment.texture_view.h].vk_image_view, 
+            .imageView = impl->m_texture_view_pool[desc.depth_attachment.texture_view].vk_image_view, 
             .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, 
             .resolveMode = VK_RESOLVE_MODE_NONE,
             .resolveImageView = VK_NULL_HANDLE,
