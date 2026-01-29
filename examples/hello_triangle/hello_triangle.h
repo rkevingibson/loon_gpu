@@ -15,7 +15,7 @@ class HelloTriangle : public Example {
     void             recreate_swapchain(uint32_t width, uint32_t height);
     Device           m_device;
     Handle<Queue>    m_queue;
-    FORMAT           m_swapchain_format;
+    Format           m_swapchain_format;
     Handle<Pipeline> m_render_pipeline;
     uint32_t         m_swapchain_width  = 0;
     uint32_t         m_swapchain_height = 0;

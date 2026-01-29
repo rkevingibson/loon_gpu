@@ -18,7 +18,7 @@ class ParticleEmitter : public Example {
 
     Device        m_device;
     Handle<Queue> m_queue;
-    FORMAT        m_swapchain_format;
+    Format        m_swapchain_format;
     uint32_t      m_swapchain_width  = 0;
     uint32_t      m_swapchain_height = 0;
 

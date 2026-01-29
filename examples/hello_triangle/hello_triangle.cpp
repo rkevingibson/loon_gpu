@@ -17,9 +17,9 @@
 
 using namespace loon::gpu;
 
-static FORMAT select_surface_format(const loon::gpu::SurfaceCapabilities& surface_capabilities) {
-    for (FORMAT f : surface_capabilities.formats) {
-        if (f == loon::gpu::FORMAT_RGBA8UnormSrgb) {
+static Format select_surface_format(const loon::gpu::SurfaceCapabilities& surface_capabilities) {
+    for (Format f : surface_capabilities.formats) {
+        if (f == loon::gpu::Format::RGBA8UnormSrgb) {
             // Choose 8 bit srgb if we have it
             return f;
         }
@@ -30,12 +30,12 @@ static FORMAT select_surface_format(const loon::gpu::SurfaceCapabilities& surfac
 
 HelloTriangle::HelloTriangle(const WindowState& window_state) {
     m_device = loon::gpu::Device::create({
-        .gpu_preference         = loon::gpu::GpuPreference_Discrete,
+        .gpu_preference         = loon::gpu::GpuPreference::Discrete,
         .native_window_handle   = window_state.native_window_handle,
         .native_instance_handle = window_state.native_instance_handle,
         .log_callback           = log_callback,
         .log_userdata           = nullptr,
-        .log_level              = LogLevel_Debug,
+        .log_level              = LogLevel::Debug,
         .alloc_callback         = nullptr,
         .alloc_userdata         = nullptr,
     });
@@ -45,10 +45,10 @@ HelloTriangle::HelloTriangle(const WindowState& window_state) {
 
     m_device.configure_surface({
         .format       = m_swapchain_format,
-        .usages       = loon::gpu::USAGE_COLOR_ATTACHMENT,
+        .usages       = loon::gpu::USAGE_FLAGS::COLOR_ATTACHMENT,
         .width        = window_state.width,
         .height       = window_state.height,
-        .present_mode = PRESENT_MODE_FIFO,
+        .present_mode = PresentMode::Fifo,
     });
     m_swapchain_width  = window_state.width;
     m_swapchain_height = window_state.height;
@@ -80,10 +80,10 @@ void HelloTriangle::recreate_swapchain(uint32_t width, uint32_t height) {
     m_device.unconfigure_surface();
     m_device.configure_surface({
         .format       = m_swapchain_format,
-        .usages       = loon::gpu::USAGE_COLOR_ATTACHMENT,
+        .usages       = loon::gpu::USAGE_FLAGS::COLOR_ATTACHMENT,
         .width        = width,
         .height       = height,
-        .present_mode = PRESENT_MODE_FIFO,
+        .present_mode = PresentMode::Fifo,
     });
     m_swapchain_width  = width;
     m_swapchain_height = height;
@@ -91,11 +91,11 @@ void HelloTriangle::recreate_swapchain(uint32_t width, uint32_t height) {
 
 void HelloTriangle::Update(const WindowState& window) {
     auto surface_texture = m_device.get_current_texture();
-    if (surface_texture.status == SURFACE_STATUS_OUT_OF_DATE
-        || surface_texture.status == SURFACE_STATUS_SUBOPTIMAL) {
+    if (surface_texture.status == SurfaceStatus::OutOfDate
+        || surface_texture.status == SurfaceStatus::Suboptimal) {
         recreate_swapchain(window.width, window.height);
         return;
-    } else if (surface_texture.status == SURFACE_STATUS_ERROR) {
+    } else if (surface_texture.status == SurfaceStatus::Error) {
         return;
     }
 
@@ -114,14 +114,14 @@ void HelloTriangle::Update(const WindowState& window) {
                            loon::gpu::STAGE_RASTER_COLOR_OUT,
                            TextureTransition{
                                .texture    = surface_texture.texture,
-                               .old_layout = loon::gpu::LAYOUT_DONT_CARE,
-                               .new_layout = LAYOUT_ATTACHMENT,
+                               .old_layout = loon::gpu::Layout::DontCare,
+                               .new_layout = Layout::Attachment,
                            });
     command_buffer.begin_render_pass({
                                    .color_attachments = RenderAttachment{
                                        .texture_view = swapchain_view,
-                                       .load_op      = loon::gpu::LOAD_OP_CLEAR,
-                                       .store_op     = loon::gpu::STORE_OP_STORE,
+                                       .load_op      = loon::gpu::LoadOp::Clear,
+                                       .store_op     = loon::gpu::StoreOp::Store,
                                        .clear_color  = Color(0, 0, 0, 0),
                                    }, .render_area = {.width = m_swapchain_width, .height = m_swapchain_height},});
 
@@ -133,8 +133,8 @@ void HelloTriangle::Update(const WindowState& window) {
                            STAGE_RASTER_COLOR_OUT,
                            TextureTransition{
                                .texture    = surface_texture.texture,
-                               .old_layout = LAYOUT_ATTACHMENT,
-                               .new_layout = LAYOUT_PRESENT,
+                               .old_layout = Layout::Attachment,
+                               .new_layout = Layout::Present,
                            });
 
     m_device.submit(m_queue,
@@ -145,7 +145,7 @@ void HelloTriangle::Update(const WindowState& window) {
                     });
 
     const auto status = m_device.present(m_queue);
-    if (status == SURFACE_STATUS_OUT_OF_DATE || status == SURFACE_STATUS_SUBOPTIMAL) {
+    if (status == SurfaceStatus::OutOfDate || status == SurfaceStatus::Suboptimal) {
         recreate_swapchain(window.width, window.height);
     }
     m_device.on_submitted_work_completed(m_queue,

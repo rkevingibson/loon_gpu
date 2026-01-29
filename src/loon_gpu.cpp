@@ -32,7 +32,7 @@ struct Texture {
     VkImage         vk_image;
     VmaAllocation   vk_allocation;
     VkImageViewType vk_type = VK_IMAGE_VIEW_TYPE_2D;
-    FORMAT          format;
+    Format          format;
 };
 
 struct TextureView {
@@ -89,10 +89,10 @@ struct Surface {
     VkSwapchainKHR swapchain = VK_NULL_HANDLE;
 
     // No swapchain will support all the formats, but makes memory allocation simpler.
-    static constexpr size_t kMaxNumFormats      = FORMAT_ValidCount;
-    static constexpr size_t kMaxNumPresentModes = PRESENT_MODE_VALID_COUNT;
-    FORMAT                  supported_formats[kMaxNumFormats];
-    PRESENT_MODE            supported_present_modes[kMaxNumPresentModes];
+    static constexpr size_t kMaxNumFormats      = static_cast<size_t>(Format::ValidCount);
+    static constexpr size_t kMaxNumPresentModes = static_cast<size_t>(PresentMode::ValidCount);
+    Format                  supported_formats[kMaxNumFormats];
+    PresentMode            supported_present_modes[kMaxNumPresentModes];
     size_t                  num_supported_formats       = 0;
     size_t                  num_supported_present_modes = 0;
 
@@ -160,11 +160,11 @@ struct Device::Impl {
     bool                configure_surface(const SurfaceConfiguration& config);
     void                unconfigure_surface();
     SurfaceTextureInfo  get_current_texture();
-    SURFACE_STATUS      present(Handle<Queue> queue);
+    SurfaceStatus      present(Handle<Queue> queue);
 
     // Buffers:
-    Handle<Buffer>  malloc(size_t bytes, MEMORY memory = MEMORY_DEFAULT);
-    Handle<Buffer>  malloc(size_t bytes, size_t align, MEMORY memory = MEMORY_DEFAULT);
+    Handle<Buffer>  malloc(size_t bytes, Memory memory = Memory::Default);
+    Handle<Buffer>  malloc(size_t bytes, size_t align, Memory memory = Memory::Default);
     void            free(Handle<Buffer> buffer);
     GpuPtr          get_device_pointer(Handle<Buffer> buffer);
     void*           get_host_pointer(Handle<Buffer> buffer);
@@ -198,7 +198,7 @@ struct Device::Impl {
     void                      free(Handle<DepthStencilState> state);
 
     // Queue
-    Handle<Queue> get_queue(QUEUE_TYPE type);
+    Handle<Queue> get_queue(QueueType type);
     CommandBuffer start_command_recording(Handle<Queue> queue);
     void          submit(Handle<Queue>             queue,
                          Span<const CommandBuffer> commandBuffers,
@@ -221,7 +221,7 @@ struct Device::Impl {
     Allocator          m_allocator;
     ProcLogCallback    m_log_callback = nullptr;
     void*              m_log_userdata = nullptr;
-    LogLevel           m_log_level    = LogLevel_Off;
+    LogLevel           m_log_level    = LogLevel::Off;
     loon::gpu::tls_key m_tls_key;
 
     VkInstance       m_instance                   = VK_NULL_HANDLE;
@@ -259,7 +259,7 @@ struct Device::Impl {
         = [](const GpuPtrMap& a, const GpuPtrMap& b) -> bool { return a.ptr > b.ptr; };
     Vector<GpuPtrMap> m_ptr_map;
 
-    Queue m_queues[QUEUE_VALID_COUNT];
+    Queue m_queues[static_cast<size_t>(QueueType::ValidCount)];
 
     void              log(LogLevel lvl, Span<const char> msg);
     bool              chk(VkResult result);
@@ -291,8 +291,8 @@ PhysicalDeviceInfo select_physical_device(VkInstance    instance,
     vkresult = vkEnumeratePhysicalDevices(instance, &device_count, physical_devices);
     if (vkresult != VK_SUCCESS) { device_count = 0; }
 
-    const bool prefer_integrated = preference == GpuPreference_Integrated;
-    const bool prefer_dedicated  = preference == GpuPreference_Discrete;
+    const bool prefer_integrated = preference == GpuPreference::Integrated;
+    const bool prefer_dedicated  = preference == GpuPreference::Discrete;
 
     PhysicalDeviceInfo best_device_info = {
         .device = VK_NULL_HANDLE,
@@ -609,7 +609,7 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
     };
 
     if (!chk(vkCreateInstance(&instance_info, nullptr, &m_instance))) {
-        log(LogLevel_Error, "Failed to create vulkan instance");
+        log(LogLevel::Error, "Failed to create vulkan instance");
         return false;
     }
     volkLoadInstanceOnly(m_instance);
@@ -658,7 +658,7 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
     auto physical_device_info
         = select_physical_device(m_instance, surface, desc.gpu_preference, arena);
     if (physical_device_info.device == VK_NULL_HANDLE) {
-        log(LogLevel_Error, physical_device_info.error_string);
+        log(LogLevel::Error, physical_device_info.error_string);
         return false;
     }
     m_physical_device            = physical_device_info.device;
@@ -753,7 +753,7 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
     };
 
     if (!chk(vkCreateDevice(m_physical_device, &create_info, nullptr, &m_device))) {
-        log(LogLevel_Error, "Failed to create vulkan device"_sv);
+        log(LogLevel::Error, "Failed to create vulkan device"_sv);
         return false;
     }
 
@@ -794,25 +794,25 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
 
     m_immutable_samplers = Vector<VkSampler>(m_allocator);
 
-    constexpr auto bridge_filter = [](SamplerDesc::FILTER f) {
+    constexpr auto bridge_filter = [](SamplerDesc::Filter f) {
         switch (f) {
-            case SamplerDesc::NEAREST: return VK_FILTER_NEAREST;
-            case SamplerDesc::LINEAR: return VK_FILTER_LINEAR;
+            case SamplerDesc::Filter::NEAREST: return VK_FILTER_NEAREST;
+            case SamplerDesc::Filter::LINEAR: return VK_FILTER_LINEAR;
         }
     };
 
-    constexpr auto bridge_mip_mode = [](SamplerDesc::FILTER f) {
+    constexpr auto bridge_mip_mode = [](SamplerDesc::Filter f) {
         switch (f) {
-            case SamplerDesc::NEAREST: return VK_SAMPLER_MIPMAP_MODE_NEAREST;
-            case SamplerDesc::LINEAR: return VK_SAMPLER_MIPMAP_MODE_LINEAR;
+            case SamplerDesc::Filter::NEAREST: return VK_SAMPLER_MIPMAP_MODE_NEAREST;
+            case SamplerDesc::Filter::LINEAR: return VK_SAMPLER_MIPMAP_MODE_LINEAR;
         }
     };
 
-    constexpr auto bridge_address = [](SamplerDesc::ADDRESS a) {
+    constexpr auto bridge_address = [](SamplerDesc::Address a) {
         switch (a) {
-            case SamplerDesc::CLAMP_TO_EDGE: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-            case SamplerDesc::REPEAT: return VK_SAMPLER_ADDRESS_MODE_REPEAT;
-            case SamplerDesc::MIRRORED: return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+            case SamplerDesc::Address::CLAMP_TO_EDGE: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+            case SamplerDesc::Address::REPEAT: return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+            case SamplerDesc::Address::MIRRORED: return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
         }
     };
 
@@ -833,7 +833,7 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
             .minLod                  = 0.0f,
             .maxLod                  = VK_LOD_CLAMP_NONE,
             .borderColor             = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
-            .unnormalizedCoordinates = sampler_desc.coord == SamplerDesc::PIXEL,
+            .unnormalizedCoordinates = sampler_desc.coord == SamplerDesc::Coord::PIXEL,
         };
 
         VkSampler sampler;
@@ -941,8 +941,8 @@ SurfaceCapabilities Device::Impl::get_surface_capabilities() {
 
     m_surface.num_supported_formats = 0;
     for (uint32_t i = 0; i < format_count; ++i) {
-        FORMAT fmt = bridge(vk_formats[i].format);
-        if (fmt < FORMAT_ValidCount) {
+        Format fmt = bridge(vk_formats[i].format);
+        if (fmt < Format::ValidCount) {
             m_surface.supported_formats[m_surface.num_supported_formats] = fmt;
             m_surface.num_supported_formats++;
         }
@@ -963,8 +963,8 @@ SurfaceCapabilities Device::Impl::get_surface_capabilities() {
                                               vk_modes);
 
     for (uint32_t i = 0; i < present_mode_count; ++i) {
-        PRESENT_MODE mode = bridge(vk_modes[i]);
-        if (mode < PRESENT_MODE_VALID_COUNT) {
+        PresentMode mode = bridge(vk_modes[i]);
+        if (mode < PresentMode::ValidCount) {
             m_surface.supported_present_modes[m_surface.num_supported_present_modes] = mode;
             m_surface.num_supported_present_modes++;
         }
@@ -978,8 +978,8 @@ SurfaceCapabilities Device::Impl::get_surface_capabilities() {
 
     return SurfaceCapabilities{
         .usages  = bridge_usage_flags(vk_capabilities.supportedUsageFlags),
-        .formats = Span<const FORMAT>(m_surface.supported_formats, m_surface.num_supported_formats),
-        .present_modes = Span<const PRESENT_MODE>(m_surface.supported_present_modes,
+        .formats = Span<const Format>(m_surface.supported_formats, m_surface.num_supported_formats),
+        .present_modes = Span<const PresentMode>(m_surface.supported_present_modes,
                                                   m_surface.num_supported_present_modes),
     };
 }
@@ -1024,18 +1024,18 @@ bool Device::Impl::configure_surface(const SurfaceConfiguration& config) {
 
     if (!chk(
             m_api.vkCreateSwapchainKHR(m_device, &swapchain_info, nullptr, &m_surface.swapchain))) {
-        log(LogLevel_Error, "Failed in call to vkCreateSwapchainKHR"_sv);
+        log(LogLevel::Error, "Failed in call to vkCreateSwapchainKHR"_sv);
         return false;
     }
 
     image_count = 0;
     if (!chk(m_api.vkGetSwapchainImagesKHR(m_device, m_surface.swapchain, &image_count, nullptr))) {
-        log(LogLevel_Error, "Failed in call to vkGetSwapchainImagesKHR"_sv);
+        log(LogLevel::Error, "Failed in call to vkGetSwapchainImagesKHR"_sv);
         return false;
     }
 
     if (image_count > Surface::kMaxSwapchainImages) {
-        log(LogLevel_Error, "Swapchain creating too many images"_sv);
+        log(LogLevel::Error, "Swapchain creating too many images"_sv);
         return false;
     }
 
@@ -1045,7 +1045,7 @@ bool Device::Impl::configure_surface(const SurfaceConfiguration& config) {
                                            m_surface.swapchain,
                                            &image_count,
                                            swapchain_images))) {
-        log(LogLevel_Error, "Swapchain failed to retrieve images"_sv);
+        log(LogLevel::Error, "Swapchain failed to retrieve images"_sv);
         return false;
     }
 
@@ -1108,28 +1108,28 @@ SurfaceTextureInfo Device::Impl::get_current_texture() {
     uint32_t           image_idx = 0;
     VkResult           result = m_api.vkAcquireNextImage2KHR(m_device, &acquire_info, &image_idx);
     SurfaceTextureInfo info{
-        .status            = SURFACE_STATUS_SUCCESS,
+        .status            = SurfaceStatus::Success,
         .texture           = m_surface.swapchain_images[image_idx],
         .acquire_semaphore = semaphore,
     };
     m_surface.current_image_idx = image_idx;
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-        info.status = SURFACE_STATUS_OUT_OF_DATE;
+        info.status = SurfaceStatus::OutOfDate;
     } else if (result == VK_SUBOPTIMAL_KHR) {
-        info.status = SURFACE_STATUS_SUBOPTIMAL;
+        info.status = SurfaceStatus::Suboptimal;
     } else if (result < 0) {
-        log(LogLevel_Error, "Error in swapchain acquireNextImage"_sv);
-        info.status = SURFACE_STATUS_ERROR;
+        log(LogLevel::Error, "Error in swapchain acquireNextImage"_sv);
+        info.status = SurfaceStatus::Error;
     } else if (result != VK_SUCCESS) {
-        log(LogLevel_Error, "Unknown swapchain status"_sv);
-        info.status = SURFACE_STATUS_OUT_OF_DATE;
+        log(LogLevel::Error, "Unknown swapchain status"_sv);
+        info.status = SurfaceStatus::OutOfDate;
     }
 
     return info;
 }
 
-SURFACE_STATUS Device::Impl::present(Handle<Queue> queue) {
+SurfaceStatus Device::Impl::present(Handle<Queue> queue) {
     auto presenting_texture_handle = m_surface.swapchain_images[m_surface.current_image_idx];
 
     auto s = m_semaphore_pool[m_surface.present_semaphores[m_surface.current_image_idx]];
@@ -1147,20 +1147,20 @@ SURFACE_STATUS Device::Impl::present(Handle<Queue> queue) {
     VkResult res = m_api.vkQueuePresentKHR(m_queues[queue.h].queue, &present_info);
 
     switch (res) {
-        case VK_SUCCESS: return SURFACE_STATUS_SUCCESS;
-        case VK_SUBOPTIMAL_KHR: return SURFACE_STATUS_SUBOPTIMAL;
-        case VK_ERROR_OUT_OF_DATE_KHR: return SURFACE_STATUS_OUT_OF_DATE;
-        default: chk(res); return SURFACE_STATUS_ERROR;
+        case VK_SUCCESS: return SurfaceStatus::Success;
+        case VK_SUBOPTIMAL_KHR: return SurfaceStatus::Suboptimal;
+        case VK_ERROR_OUT_OF_DATE_KHR: return SurfaceStatus::OutOfDate;
+        default: chk(res); return SurfaceStatus::Error;
     }
 }
 
 // MARK: Buffers
 
-Handle<Buffer> Device::Impl::malloc(size_t bytes, MEMORY memory) {
+Handle<Buffer> Device::Impl::malloc(size_t bytes, Memory memory) {
     return malloc(bytes, 64, memory);
 }
 
-Handle<Buffer> Device::Impl::malloc(size_t bytes, size_t align, MEMORY memory) {
+Handle<Buffer> Device::Impl::malloc(size_t bytes, size_t align, Memory memory) {
     constexpr VkBufferUsageFlags kDefaultUsages
         = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
           | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT
@@ -1179,12 +1179,12 @@ Handle<Buffer> Device::Impl::malloc(size_t bytes, size_t align, MEMORY memory) {
 
     VmaAllocationCreateFlags flags = 0;
     switch (memory) {
-        case MEMORY_DEFAULT:
+        case Memory::Default:
             flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
                     | VMA_ALLOCATION_CREATE_MAPPED_BIT;
             break;
-        case MEMORY_GPU: flags = 0; break;
-        case MEMORY_READBACK:
+        case Memory::Gpu: flags = 0; break;
+        case Memory::Readback:
             flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
             break;
     }
@@ -1552,10 +1552,10 @@ Handle<Pipeline> Device::Impl::create_graphics_pipeline(ShaderSource vertex,
     VkCullModeFlags cull_mode  = VK_CULL_MODE_BACK_BIT;
     VkFrontFace     front_face = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     switch (desc.cull) {
-        case CULL_CCW: front_face = VK_FRONT_FACE_COUNTER_CLOCKWISE; break;
-        case CULL_CW: front_face = VK_FRONT_FACE_CLOCKWISE; break;
-        case CULL_ALL: cull_mode = VK_CULL_MODE_FRONT_AND_BACK; break;
-        case CULL_NONE: cull_mode = VK_CULL_MODE_NONE; break;
+        case Cull::CCW: front_face = VK_FRONT_FACE_COUNTER_CLOCKWISE; break;
+        case Cull::CW: front_face = VK_FRONT_FACE_CLOCKWISE; break;
+        case Cull::All: cull_mode = VK_CULL_MODE_FRONT_AND_BACK; break;
+        case Cull::None: cull_mode = VK_CULL_MODE_NONE; break;
     }
 
     VkPipelineRasterizationStateCreateInfo rasterization_state{
@@ -1679,15 +1679,15 @@ Handle<DepthStencilState> Device::Impl::create_depth_stencil_state(const DepthSt
 
 // MARK: Queue
 
-Handle<Queue> Device::Impl::get_queue(QUEUE_TYPE type) {
+Handle<Queue> Device::Impl::get_queue(QueueType type) {
     // Initialize the queue on-demand.
-    if (m_queues[type].queue == VK_NULL_HANDLE) {
+    if (m_queues[static_cast<uint32_t>(type)].queue == VK_NULL_HANDLE) {
         uint32_t queue_family = 0;
         switch (type) {
-            case QUEUE_DEFAULT: queue_family = m_graphics_queue_family; break;
-            case QUEUE_COMPUTE: queue_family = m_async_compute_queue_family; break;
-            case QUEUE_TRANSFER: queue_family = m_transfer_queue_family; break;
-            case QUEUE_VALID_COUNT: break;
+            case QueueType::Default: queue_family = m_graphics_queue_family; break;
+            case QueueType::Compute: queue_family = m_async_compute_queue_family; break;
+            case QueueType::Transfer: queue_family = m_transfer_queue_family; break;
+            case QueueType::ValidCount: break;
         }
 
         VkQueue queue;
@@ -1704,7 +1704,7 @@ Handle<Queue> Device::Impl::get_queue(QUEUE_TYPE type) {
 
         auto timeline = create_semaphore(0);
 
-        m_queues[type] = {
+        m_queues[static_cast<uint32_t>(type)] = {
             .queue          = queue,
             .command_pool   = command_pool,
             .timeline       = timeline,
@@ -1933,111 +1933,111 @@ bool Device::Impl::chk(VkResult result) {
     if (result == VK_SUCCESS) { return true; }
 
     switch (result) {
-        case VK_NOT_READY: log(LogLevel_Error, "VK_NOT_READY"_sv); break;
-        case VK_TIMEOUT: log(LogLevel_Error, "VK_TIMEOUT"_sv); break;
-        case VK_EVENT_SET: log(LogLevel_Error, "VK_EVENT_SET"_sv); break;
-        case VK_EVENT_RESET: log(LogLevel_Error, "VK_EVENT_RESET"_sv); break;
-        case VK_INCOMPLETE: log(LogLevel_Error, "VK_INCOMPLETE"_sv); break;
+        case VK_NOT_READY: log(LogLevel::Error, "VK_NOT_READY"_sv); break;
+        case VK_TIMEOUT: log(LogLevel::Error, "VK_TIMEOUT"_sv); break;
+        case VK_EVENT_SET: log(LogLevel::Error, "VK_EVENT_SET"_sv); break;
+        case VK_EVENT_RESET: log(LogLevel::Error, "VK_EVENT_RESET"_sv); break;
+        case VK_INCOMPLETE: log(LogLevel::Error, "VK_INCOMPLETE"_sv); break;
         case VK_ERROR_OUT_OF_HOST_MEMORY:
-            log(LogLevel_Error, "VK_ERROR_OUT_OF_HOST_MEMORY"_sv);
+            log(LogLevel::Error, "VK_ERROR_OUT_OF_HOST_MEMORY"_sv);
             break;
         case VK_ERROR_OUT_OF_DEVICE_MEMORY:
-            log(LogLevel_Error, "VK_ERROR_OUT_OF_DEVICE_MEMORY");
+            log(LogLevel::Error, "VK_ERROR_OUT_OF_DEVICE_MEMORY");
             break;
         case VK_ERROR_INITIALIZATION_FAILED:
-            log(LogLevel_Error, "VK_ERROR_INITIALIZATION_FAILED");
+            log(LogLevel::Error, "VK_ERROR_INITIALIZATION_FAILED");
             break;
-        case VK_ERROR_DEVICE_LOST: log(LogLevel_Error, "VK_ERROR_DEVICE_LOST"); break;
-        case VK_ERROR_MEMORY_MAP_FAILED: log(LogLevel_Error, "VK_ERROR_MEMORY_MAP_FAILED"); break;
-        case VK_ERROR_LAYER_NOT_PRESENT: log(LogLevel_Error, "VK_ERROR_LAYER_NOT_PRESENT"); break;
+        case VK_ERROR_DEVICE_LOST: log(LogLevel::Error, "VK_ERROR_DEVICE_LOST"); break;
+        case VK_ERROR_MEMORY_MAP_FAILED: log(LogLevel::Error, "VK_ERROR_MEMORY_MAP_FAILED"); break;
+        case VK_ERROR_LAYER_NOT_PRESENT: log(LogLevel::Error, "VK_ERROR_LAYER_NOT_PRESENT"); break;
         case VK_ERROR_EXTENSION_NOT_PRESENT:
-            log(LogLevel_Error, "VK_ERROR_EXTENSION_NOT_PRESENT");
+            log(LogLevel::Error, "VK_ERROR_EXTENSION_NOT_PRESENT");
             break;
         case VK_ERROR_FEATURE_NOT_PRESENT:
-            log(LogLevel_Error, "VK_ERROR_FEATURE_NOT_PRESENT");
+            log(LogLevel::Error, "VK_ERROR_FEATURE_NOT_PRESENT");
             break;
         case VK_ERROR_INCOMPATIBLE_DRIVER:
-            log(LogLevel_Error, "VK_ERROR_INCOMPATIBLE_DRIVER");
+            log(LogLevel::Error, "VK_ERROR_INCOMPATIBLE_DRIVER");
             break;
-        case VK_ERROR_TOO_MANY_OBJECTS: log(LogLevel_Error, "VK_ERROR_TOO_MANY_OBJECTS"); break;
+        case VK_ERROR_TOO_MANY_OBJECTS: log(LogLevel::Error, "VK_ERROR_TOO_MANY_OBJECTS"); break;
         case VK_ERROR_FORMAT_NOT_SUPPORTED:
-            log(LogLevel_Error, "VK_ERROR_FORMAT_NOT_SUPPORTED");
+            log(LogLevel::Error, "VK_ERROR_FORMAT_NOT_SUPPORTED");
             break;
-        case VK_ERROR_FRAGMENTED_POOL: log(LogLevel_Error, "VK_ERROR_FRAGMENTED_POOL"); break;
-        case VK_ERROR_UNKNOWN: log(LogLevel_Error, "VK_ERROR_UNKNOWN"); break;
-        // case VK_ERROR_VALIDATION_FAILED: log(LogLevel_Error, "VK_ERROR_VALIDATION_FAILED");
+        case VK_ERROR_FRAGMENTED_POOL: log(LogLevel::Error, "VK_ERROR_FRAGMENTED_POOL"); break;
+        case VK_ERROR_UNKNOWN: log(LogLevel::Error, "VK_ERROR_UNKNOWN"); break;
+        // case VK_ERROR_VALIDATION_FAILED: log(LogLevel::LogLevel_Error, "VK_ERROR_VALIDATION_FAILED");
         // break;
-        case VK_ERROR_OUT_OF_POOL_MEMORY: log(LogLevel_Error, "VK_ERROR_OUT_OF_POOL_MEMORY"); break;
+        case VK_ERROR_OUT_OF_POOL_MEMORY: log(LogLevel::Error, "VK_ERROR_OUT_OF_POOL_MEMORY"); break;
         case VK_ERROR_INVALID_EXTERNAL_HANDLE:
-            log(LogLevel_Error, "VK_ERROR_INVALID_EXTERNAL_HANDLE");
+            log(LogLevel::Error, "VK_ERROR_INVALID_EXTERNAL_HANDLE");
             break;
         case VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS:
-            log(LogLevel_Error, "VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS");
+            log(LogLevel::Error, "VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS");
             break;
-        case VK_ERROR_FRAGMENTATION: log(LogLevel_Error, "VK_ERROR_FRAGMENTATION"); break;
+        case VK_ERROR_FRAGMENTATION: log(LogLevel::Error, "VK_ERROR_FRAGMENTATION"); break;
         case VK_PIPELINE_COMPILE_REQUIRED:
-            log(LogLevel_Error, "VK_PIPELINE_COMPILE_REQUIRED");
+            log(LogLevel::Error, "VK_PIPELINE_COMPILE_REQUIRED");
             break;
-        // case VK_ERROR_NOT_PERMITTED: log(LogLevel_Error, "VK_ERROR_NOT_PERMITTED"); break;
-        case VK_ERROR_SURFACE_LOST_KHR: log(LogLevel_Error, "VK_ERROR_SURFACE_LOST_KHR"); break;
+        // case VK_ERROR_NOT_PERMITTED: log(LogLevel::LogLevel_Error, "VK_ERROR_NOT_PERMITTED"); break;
+        case VK_ERROR_SURFACE_LOST_KHR: log(LogLevel::Error, "VK_ERROR_SURFACE_LOST_KHR"); break;
         case VK_ERROR_NATIVE_WINDOW_IN_USE_KHR:
-            log(LogLevel_Error, "VK_ERROR_NATIVE_WINDOW_IN_USE_KHR");
+            log(LogLevel::Error, "VK_ERROR_NATIVE_WINDOW_IN_USE_KHR");
             break;
-        case VK_SUBOPTIMAL_KHR: log(LogLevel_Error, "VK_SUBOPTIMAL_KHR"); break;
-        case VK_ERROR_OUT_OF_DATE_KHR: log(LogLevel_Error, "VK_ERROR_OUT_OF_DATE_KHR"); break;
+        case VK_SUBOPTIMAL_KHR: log(LogLevel::Error, "VK_SUBOPTIMAL_KHR"); break;
+        case VK_ERROR_OUT_OF_DATE_KHR: log(LogLevel::Error, "VK_ERROR_OUT_OF_DATE_KHR"); break;
         case VK_ERROR_INCOMPATIBLE_DISPLAY_KHR:
-            log(LogLevel_Error, "VK_ERROR_INCOMPATIBLE_DISPLAY_KHR");
+            log(LogLevel::Error, "VK_ERROR_INCOMPATIBLE_DISPLAY_KHR");
             break;
-        case VK_ERROR_INVALID_SHADER_NV: log(LogLevel_Error, "VK_ERROR_INVALID_SHADER_NV"); break;
+        case VK_ERROR_INVALID_SHADER_NV: log(LogLevel::Error, "VK_ERROR_INVALID_SHADER_NV"); break;
         case VK_ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR:
-            log(LogLevel_Error, "VK_ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR");
+            log(LogLevel::Error, "VK_ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR");
             break;
         case VK_ERROR_VIDEO_PICTURE_LAYOUT_NOT_SUPPORTED_KHR:
-            log(LogLevel_Error, "VK_ERROR_VIDEO_PICTURE_LAYOUT_NOT_SUPPORTED_KHR");
+            log(LogLevel::Error, "VK_ERROR_VIDEO_PICTURE_LAYOUT_NOT_SUPPORTED_KHR");
             break;
         case VK_ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR:
-            log(LogLevel_Error, "VK_ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR");
+            log(LogLevel::Error, "VK_ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR");
             break;
         case VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR:
-            log(LogLevel_Error, "VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR");
+            log(LogLevel::Error, "VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR");
             break;
         case VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR:
-            log(LogLevel_Error, "VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR");
+            log(LogLevel::Error, "VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR");
             break;
         case VK_ERROR_VIDEO_STD_VERSION_NOT_SUPPORTED_KHR:
-            log(LogLevel_Error, "VK_ERROR_VIDEO_STD_VERSION_NOT_SUPPORTED_KHR");
+            log(LogLevel::Error, "VK_ERROR_VIDEO_STD_VERSION_NOT_SUPPORTED_KHR");
             break;
         case VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT:
-            log(LogLevel_Error, "VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT");
+            log(LogLevel::Error, "VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT");
             break;
         // case VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT:
-        //     log(LogLevel_Error, "VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT");
+        //     log(LogLevel::LogLevel_Error, "VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT");
         //     break;
         case VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT:
-            log(LogLevel_Error, "VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT");
+            log(LogLevel::Error, "VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT");
             break;
-        case VK_THREAD_IDLE_KHR: log(LogLevel_Error, "VK_THREAD_IDLE_KHR"); break;
-        case VK_THREAD_DONE_KHR: log(LogLevel_Error, "VK_THREAD_DONE_KHR"); break;
-        case VK_OPERATION_DEFERRED_KHR: log(LogLevel_Error, "VK_OPERATION_DEFERRED_KHR"); break;
+        case VK_THREAD_IDLE_KHR: log(LogLevel::Error, "VK_THREAD_IDLE_KHR"); break;
+        case VK_THREAD_DONE_KHR: log(LogLevel::Error, "VK_THREAD_DONE_KHR"); break;
+        case VK_OPERATION_DEFERRED_KHR: log(LogLevel::Error, "VK_OPERATION_DEFERRED_KHR"); break;
         case VK_OPERATION_NOT_DEFERRED_KHR:
-            log(LogLevel_Error, "VK_OPERATION_NOT_DEFERRED_KHR");
+            log(LogLevel::Error, "VK_OPERATION_NOT_DEFERRED_KHR");
             break;
         case VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR:
-            log(LogLevel_Error, "VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR");
+            log(LogLevel::Error, "VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR");
             break;
         case VK_ERROR_COMPRESSION_EXHAUSTED_EXT:
-            log(LogLevel_Error, "VK_ERROR_COMPRESSION_EXHAUSTED_EXT");
+            log(LogLevel::Error, "VK_ERROR_COMPRESSION_EXHAUSTED_EXT");
             break;
         case VK_INCOMPATIBLE_SHADER_BINARY_EXT:
-            log(LogLevel_Error, "VK_INCOMPATIBLE_SHADER_BINARY_EXT");
+            log(LogLevel::Error, "VK_INCOMPATIBLE_SHADER_BINARY_EXT");
             break;
         // case VK_PIPELINE_BINARY_MISSING_KHR:
-        //     log(LogLevel_Error, "VK_PIPELINE_BINARY_MISSING_KHR");
+        //     log(LogLevel::LogLevel_Error, "VK_PIPELINE_BINARY_MISSING_KHR");
         //     break;
         // case VK_ERROR_NOT_ENOUGH_SPACE_KHR:
-        //     log(LogLevel_Error, "VK_ERROR_NOT_ENOUGH_SPACE_KHR");
+        //     log(LogLevel::LogLevel_Error, "VK_ERROR_NOT_ENOUGH_SPACE_KHR");
         //     break;
-        default: log(LogLevel_Error, "Unknown error"_sv); break;
+        default: log(LogLevel::Error, "Unknown error"_sv); break;
     }
 
     return false;
@@ -2048,7 +2048,7 @@ Arena* Device::Impl::get_thread_local_arena() {
     if (state == nullptr) {
         auto tls_block = m_allocator.alloc(sizeof(ThreadLocalState));
         if (tls_block.ptr == nullptr) {
-            log(LogLevel_Error, "Allocator out of memory"_sv);
+            log(LogLevel::Error, "Allocator out of memory"_sv);
             return nullptr;
         }
         state = ::new (tls_block.ptr) ThreadLocalState(m_allocator);
@@ -2088,15 +2088,15 @@ SurfaceTextureInfo Device::get_current_texture() {
     return impl->get_current_texture();
 }
 
-SURFACE_STATUS Device::present(Handle<Queue> queue) {
+SurfaceStatus Device::present(Handle<Queue> queue) {
     return impl->present(queue);
 }
 
-Handle<Buffer> Device::malloc(size_t bytes, MEMORY memory) {
+Handle<Buffer> Device::malloc(size_t bytes, Memory memory) {
     return impl->malloc(bytes, memory);
 }
 
-Handle<Buffer> Device::malloc(size_t bytes, size_t align, MEMORY memory) {
+Handle<Buffer> Device::malloc(size_t bytes, size_t align, Memory memory) {
     return impl->malloc(bytes, align, memory);
 }
 
@@ -2151,7 +2151,7 @@ Handle<DepthStencilState> Device::create_depth_stencil_state(DepthStencilDesc de
     return impl->create_depth_stencil_state(desc);
 }
 
-Handle<Queue> Device::get_queue(QUEUE_TYPE type) {
+Handle<Queue> Device::get_queue(QueueType type) {
     return impl->get_queue(type);
 }
 
@@ -2294,7 +2294,7 @@ void CommandBuffer::barrier(STAGE_FLAGS                   before,
                                     .srcStageMask     = src_stage,
                                     .srcAccessMask    = access,
                                     .dstStageMask     = dst_stage,
-                                    .dstAccessMask    = t.new_layout == LAYOUT_PRESENT ? 0 : access,
+                                    .dstAccessMask    = t.new_layout == Layout::Present ? 0 : access,
                                     .oldLayout        = bridge(t.old_layout),
                                     .newLayout        = bridge(t.new_layout),
                                     .image            = tex.vk_image,
@@ -2308,7 +2308,7 @@ void CommandBuffer::barrier(STAGE_FLAGS                   before,
                                 });
 
 
-        if (t.new_layout == LAYOUT_PRESENT) {
+        if (t.new_layout == Layout::Present) {
             assert(t.texture.h
                    == impl->m_surface.swapchain_images[impl->m_surface.current_image_idx].h);
             impl->m_surface.transitioning_command[impl->m_surface.current_image_idx]

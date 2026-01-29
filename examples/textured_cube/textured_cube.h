@@ -17,7 +17,7 @@ class TexturedCube : public Example {
     static constexpr uint64_t kMaxFramesInFlight = 3;
     Device                    m_device;
     Handle<Queue>             m_queue;
-    FORMAT                    m_swapchain_format;
+    Format                    m_swapchain_format;
     Handle<Pipeline>          m_render_pipeline;
     uint64_t                  m_frame_idx        = 0;
     uint32_t                  m_swapchain_width  = 0;

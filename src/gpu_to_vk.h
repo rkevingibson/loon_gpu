@@ -6,21 +6,21 @@
 
 namespace loon::gpu {
 
-VkFormat                            bridge(FORMAT format);
-VkImageAspectFlags                  aspects_for_format(FORMAT format);
-FORMAT                              bridge(VkFormat fmt);
-VkPrimitiveTopology                 bridge(TOPOLOGY topo);
-PRESENT_MODE                        bridge(VkPresentModeKHR mode);
-VkPresentModeKHR                    bridge(PRESENT_MODE mode);
+VkFormat                            bridge(Format format);
+VkImageAspectFlags                  aspects_for_format(Format format);
+Format                              bridge(VkFormat fmt);
+VkPrimitiveTopology                 bridge(Topology topo);
+PresentMode                        bridge(VkPresentModeKHR mode);
+VkPresentModeKHR                    bridge(PresentMode mode);
 VkPipelineStageFlags2               bridge_pipeline_stage(STAGE_FLAGS stage);
 USAGE_FLAGS                         bridge_usage_flags(VkImageUsageFlags flags);
 VkImageUsageFlags                   bridge_usage_flags(USAGE_FLAGS usage);
-VkImageType                         bridge(TEXTURE tex);
-VkImageViewType                     bridge_view_type(TEXTURE tex);
+VkImageType                         bridge(TextureType tex);
+VkImageViewType                     bridge_view_type(TextureType tex);
 VkPipelineColorBlendAttachmentState bridge(const BlendDesc& state);
-VkAttachmentLoadOp                  bridge(LOAD_OP op);
-VkAttachmentStoreOp                 bridge(STORE_OP op);
-VkCompareOp                         bridge(OP op);
-VkImageLayout                       bridge(LAYOUT layout);
+VkAttachmentLoadOp                  bridge(LoadOp op);
+VkAttachmentStoreOp                 bridge(StoreOp op);
+VkCompareOp                         bridge(Op op);
+VkImageLayout                       bridge(Layout layout);
 
 };  // namespace loon::gpu

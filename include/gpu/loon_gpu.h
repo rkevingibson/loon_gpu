@@ -211,172 +211,197 @@ struct Semaphore;
 
 using GpuPtr = uint64_t;
 
-// Enums
-typedef enum LogLevel {
-    LogLevel_Off     = 0x00000000,
-    LogLevel_Error   = 0x00000001,
-    LogLevel_Warning = 0x00000002,
-    LogLevel_Info    = 0x00000003,
-    LogLevel_Debug   = 0x00000004,
-    LogLevel_Force32 = 0x7FFFFFFF,
-} LogLevel;
-
-typedef enum GpuPreference {
-    GpuPreference_Discrete = 0,
-    GpuPreference_Integrated,
-} GpuPreference;
-
-enum MEMORY { MEMORY_DEFAULT, MEMORY_GPU, MEMORY_READBACK };
-enum CULL { CULL_CCW, CULL_CW, CULL_ALL, CULL_NONE };
-enum DEPTH_FLAGS { DEPTH_NONE = 0, DEPTH_READ = 0x1, DEPTH_WRITE = 0x2 };
-enum OP {
-    OP_NEVER,
-    OP_LESS,
-    OP_EQUAL,
-    OP_LESS_EQUAL,
-    OP_GREATER,
-    OP_NOT_EQUAL,
-    OP_GREATER_EQUAL,
-    OP_ALWAYS,
-    OP_KEEP,
-};
-enum BLEND { BLEND_ADD, BLEND_SUBTRACT, BLEND_REV_SUBTRACT, BLEND_MIN, BLEND_MAX };
-enum FACTOR {
-    FACTOR_ZERO,
-    FACTOR_ONE,
-    FACTOR_SRC_COLOR,
-    FACTOR_DST_COLOR,
-    FACTOR_SRC_ALPHA,
+// MARK: Enums
+enum class LogLevel : uint8_t {
+    Off,
+    Error,
+    Warning,
+    Info,
+    Debug,
 };
 
-
-enum TOPOLOGY { TOPOLOGY_TRIANGLE_LIST, TOPOLOGY_TRIANGLE_STRIP, TOPOLOGY_TRIANGLE_FAN };
-
-enum TEXTURE {
-    TEXTURE_1D,
-    TEXTURE_2D,
-    TEXTURE_3D,
-    TEXTURE_CUBE,
-    TEXTURE_2D_ARRAY,
-    TEXTURE_CUBE_ARRAY
+enum class GpuPreference : uint8_t {
+    Discrete = 0,
+    Integrated,
 };
 
-enum FORMAT {
-    FORMAT_NONE                 = 0x00000000,
-    FORMAT_R8Unorm              = 0x00000001,
-    FORMAT_R8Snorm              = 0x00000002,
-    FORMAT_R8Uint               = 0x00000003,
-    FORMAT_R8Sint               = 0x00000004,
-    FORMAT_R16Unorm             = 0x00000005,
-    FORMAT_R16Snorm             = 0x00000006,
-    FORMAT_R16Uint              = 0x00000007,
-    FORMAT_R16Sint              = 0x00000008,
-    FORMAT_R16Float             = 0x00000009,
-    FORMAT_RG8Unorm             = 0x0000000A,
-    FORMAT_RG8Snorm             = 0x0000000B,
-    FORMAT_RG8Uint              = 0x0000000C,
-    FORMAT_RG8Sint              = 0x0000000D,
-    FORMAT_R32Float             = 0x0000000E,
-    FORMAT_R32Uint              = 0x0000000F,
-    FORMAT_R32Sint              = 0x00000010,
-    FORMAT_RG16Unorm            = 0x00000011,
-    FORMAT_RG16Snorm            = 0x00000012,
-    FORMAT_RG16Uint             = 0x00000013,
-    FORMAT_RG16Sint             = 0x00000014,
-    FORMAT_RG16Float            = 0x00000015,
-    FORMAT_RGBA8Unorm           = 0x00000016,
-    FORMAT_RGBA8UnormSrgb       = 0x00000017,
-    FORMAT_RGBA8Snorm           = 0x00000018,
-    FORMAT_RGBA8Uint            = 0x00000019,
-    FORMAT_RGBA8Sint            = 0x0000001A,
-    FORMAT_BGRA8Unorm           = 0x0000001B,
-    FORMAT_BGRA8UnormSrgb       = 0x0000001C,
-    FORMAT_RGB10A2Uint          = 0x0000001D,
-    FORMAT_RGB10A2Unorm         = 0x0000001E,
-    FORMAT_RG11B10Ufloat        = 0x0000001F,
-    FORMAT_RGB9E5Ufloat         = 0x00000020,
-    FORMAT_RG32Float            = 0x00000021,
-    FORMAT_RG32Uint             = 0x00000022,
-    FORMAT_RG32Sint             = 0x00000023,
-    FORMAT_RGBA16Unorm          = 0x00000024,
-    FORMAT_RGBA16Snorm          = 0x00000025,
-    FORMAT_RGBA16Uint           = 0x00000026,
-    FORMAT_RGBA16Sint           = 0x00000027,
-    FORMAT_RGBA16Float          = 0x00000028,
-    FORMAT_RGBA32Float          = 0x00000029,
-    FORMAT_RGBA32Uint           = 0x0000002A,
-    FORMAT_RGBA32Sint           = 0x0000002B,
-    FORMAT_Stencil8             = 0x0000002C,
-    FORMAT_Depth16Unorm         = 0x0000002D,
-    FORMAT_Depth24Plus          = 0x0000002E,
-    FORMAT_Depth24PlusStencil8  = 0x0000002F,
-    FORMAT_Depth32Float         = 0x00000030,
-    FORMAT_Depth32FloatStencil8 = 0x00000031,
-    FORMAT_BC1RGBAUnorm         = 0x00000032,
-    FORMAT_BC1RGBAUnormSrgb     = 0x00000033,
-    FORMAT_BC2RGBAUnorm         = 0x00000034,
-    FORMAT_BC2RGBAUnormSrgb     = 0x00000035,
-    FORMAT_BC3RGBAUnorm         = 0x00000036,
-    FORMAT_BC3RGBAUnormSrgb     = 0x00000037,
-    FORMAT_BC4RUnorm            = 0x00000038,
-    FORMAT_BC4RSnorm            = 0x00000039,
-    FORMAT_BC5RGUnorm           = 0x0000003A,
-    FORMAT_BC5RGSnorm           = 0x0000003B,
-    FORMAT_BC6HRGBUfloat        = 0x0000003C,
-    FORMAT_BC6HRGBFloat         = 0x0000003D,
-    FORMAT_BC7RGBAUnorm         = 0x0000003E,
-    FORMAT_BC7RGBAUnormSrgb     = 0x0000003F,
-    FORMAT_ETC2RGB8Unorm        = 0x00000040,
-    FORMAT_ETC2RGB8UnormSrgb    = 0x00000041,
-    FORMAT_ETC2RGB8A1Unorm      = 0x00000042,
-    FORMAT_ETC2RGB8A1UnormSrgb  = 0x00000043,
-    FORMAT_ETC2RGBA8Unorm       = 0x00000044,
-    FORMAT_ETC2RGBA8UnormSrgb   = 0x00000045,
-    FORMAT_EACR11Unorm          = 0x00000046,
-    FORMAT_EACR11Snorm          = 0x00000047,
-    FORMAT_EACRG11Unorm         = 0x00000048,
-    FORMAT_EACRG11Snorm         = 0x00000049,
-    FORMAT_ASTC4x4Unorm         = 0x0000004A,
-    FORMAT_ASTC4x4UnormSrgb     = 0x0000004B,
-    FORMAT_ASTC5x4Unorm         = 0x0000004C,
-    FORMAT_ASTC5x4UnormSrgb     = 0x0000004D,
-    FORMAT_ASTC5x5Unorm         = 0x0000004E,
-    FORMAT_ASTC5x5UnormSrgb     = 0x0000004F,
-    FORMAT_ASTC6x5Unorm         = 0x00000050,
-    FORMAT_ASTC6x5UnormSrgb     = 0x00000051,
-    FORMAT_ASTC6x6Unorm         = 0x00000052,
-    FORMAT_ASTC6x6UnormSrgb     = 0x00000053,
-    FORMAT_ASTC8x5Unorm         = 0x00000054,
-    FORMAT_ASTC8x5UnormSrgb     = 0x00000055,
-    FORMAT_ASTC8x6Unorm         = 0x00000056,
-    FORMAT_ASTC8x6UnormSrgb     = 0x00000057,
-    FORMAT_ASTC8x8Unorm         = 0x00000058,
-    FORMAT_ASTC8x8UnormSrgb     = 0x00000059,
-    FORMAT_ASTC10x5Unorm        = 0x0000005A,
-    FORMAT_ASTC10x5UnormSrgb    = 0x0000005B,
-    FORMAT_ASTC10x6Unorm        = 0x0000005C,
-    FORMAT_ASTC10x6UnormSrgb    = 0x0000005D,
-    FORMAT_ASTC10x8Unorm        = 0x0000005E,
-    FORMAT_ASTC10x8UnormSrgb    = 0x0000005F,
-    FORMAT_ASTC10x10Unorm       = 0x00000060,
-    FORMAT_ASTC10x10UnormSrgb   = 0x00000061,
-    FORMAT_ASTC12x10Unorm       = 0x00000062,
-    FORMAT_ASTC12x10UnormSrgb   = 0x00000063,
-    FORMAT_ASTC12x12Unorm       = 0x00000064,
-    FORMAT_ASTC12x12UnormSrgb   = 0x00000065,
+enum class Memory : uint8_t {
+    Default,
+    Gpu,
+    Readback,
+};
 
-    FORMAT_ValidCount,
-    FORMAT_Force32 = 0x7FFFFFFF
+enum class Cull : uint8_t {
+    CCW,
+    CW,
+    All,
+    None,
+};
+
+enum DEPTH_FLAGS {
+    DEPTH_NONE  = 0,
+    DEPTH_READ  = 0x1,
+    DEPTH_WRITE = 0x2,
+};
+
+enum class Op : uint8_t {
+    Never,
+    Less,
+    Equal,
+    LessEqual,
+    Greater,
+    NotEqual,
+    GreaterEqual,
+    Always,
+    Keep,
+};
+
+enum class Blend : uint8_t {
+    Add,
+    Subtract,
+    RevSubtract,
+    Min,
+    Max,
+};
+
+enum class Factor : uint8_t {
+    Zero,
+    One,
+    SrcColor,
+    DstColor,
+    SrcAlpha,
+};
+
+enum class Topology : uint8_t {
+    TriangleList,
+    TriangleStrip,
+    TriangleFan,
+};
+
+enum class TextureType {
+    Tex1D,
+    Tex2D,
+    Tex3D,
+    TexCube,
+    Tex2DArray,
+    TexCubeArray
+};
+
+enum class Format : uint32_t {
+    NONE                 = 0x00000000,
+    R8Unorm              = 0x00000001,
+    R8Snorm              = 0x00000002,
+    R8Uint               = 0x00000003,
+    R8Sint               = 0x00000004,
+    R16Unorm             = 0x00000005,
+    R16Snorm             = 0x00000006,
+    R16Uint              = 0x00000007,
+    R16Sint              = 0x00000008,
+    R16Float             = 0x00000009,
+    RG8Unorm             = 0x0000000A,
+    RG8Snorm             = 0x0000000B,
+    RG8Uint              = 0x0000000C,
+    RG8Sint              = 0x0000000D,
+    R32Float             = 0x0000000E,
+    R32Uint              = 0x0000000F,
+    R32Sint              = 0x00000010,
+    RG16Unorm            = 0x00000011,
+    RG16Snorm            = 0x00000012,
+    RG16Uint             = 0x00000013,
+    RG16Sint             = 0x00000014,
+    RG16Float            = 0x00000015,
+    RGBA8Unorm           = 0x00000016,
+    RGBA8UnormSrgb       = 0x00000017,
+    RGBA8Snorm           = 0x00000018,
+    RGBA8Uint            = 0x00000019,
+    RGBA8Sint            = 0x0000001A,
+    BGRA8Unorm           = 0x0000001B,
+    BGRA8UnormSrgb       = 0x0000001C,
+    RGB10A2Uint          = 0x0000001D,
+    RGB10A2Unorm         = 0x0000001E,
+    RG11B10Ufloat        = 0x0000001F,
+    RGB9E5Ufloat         = 0x00000020,
+    RG32Float            = 0x00000021,
+    RG32Uint             = 0x00000022,
+    RG32Sint             = 0x00000023,
+    RGBA16Unorm          = 0x00000024,
+    RGBA16Snorm          = 0x00000025,
+    RGBA16Uint           = 0x00000026,
+    RGBA16Sint           = 0x00000027,
+    RGBA16Float          = 0x00000028,
+    RGBA32Float          = 0x00000029,
+    RGBA32Uint           = 0x0000002A,
+    RGBA32Sint           = 0x0000002B,
+    Stencil8             = 0x0000002C,
+    Depth16Unorm         = 0x0000002D,
+    Depth24Plus          = 0x0000002E,
+    Depth24PlusStencil8  = 0x0000002F,
+    Depth32Float         = 0x00000030,
+    Depth32FloatStencil8 = 0x00000031,
+    BC1RGBAUnorm         = 0x00000032,
+    BC1RGBAUnormSrgb     = 0x00000033,
+    BC2RGBAUnorm         = 0x00000034,
+    BC2RGBAUnormSrgb     = 0x00000035,
+    BC3RGBAUnorm         = 0x00000036,
+    BC3RGBAUnormSrgb     = 0x00000037,
+    BC4RUnorm            = 0x00000038,
+    BC4RSnorm            = 0x00000039,
+    BC5RGUnorm           = 0x0000003A,
+    BC5RGSnorm           = 0x0000003B,
+    BC6HRGBUfloat        = 0x0000003C,
+    BC6HRGBFloat         = 0x0000003D,
+    BC7RGBAUnorm         = 0x0000003E,
+    BC7RGBAUnormSrgb     = 0x0000003F,
+    ETC2RGB8Unorm        = 0x00000040,
+    ETC2RGB8UnormSrgb    = 0x00000041,
+    ETC2RGB8A1Unorm      = 0x00000042,
+    ETC2RGB8A1UnormSrgb  = 0x00000043,
+    ETC2RGBA8Unorm       = 0x00000044,
+    ETC2RGBA8UnormSrgb   = 0x00000045,
+    EACR11Unorm          = 0x00000046,
+    EACR11Snorm          = 0x00000047,
+    EACRG11Unorm         = 0x00000048,
+    EACRG11Snorm         = 0x00000049,
+    ASTC4x4Unorm         = 0x0000004A,
+    ASTC4x4UnormSrgb     = 0x0000004B,
+    ASTC5x4Unorm         = 0x0000004C,
+    ASTC5x4UnormSrgb     = 0x0000004D,
+    ASTC5x5Unorm         = 0x0000004E,
+    ASTC5x5UnormSrgb     = 0x0000004F,
+    ASTC6x5Unorm         = 0x00000050,
+    ASTC6x5UnormSrgb     = 0x00000051,
+    ASTC6x6Unorm         = 0x00000052,
+    ASTC6x6UnormSrgb     = 0x00000053,
+    ASTC8x5Unorm         = 0x00000054,
+    ASTC8x5UnormSrgb     = 0x00000055,
+    ASTC8x6Unorm         = 0x00000056,
+    ASTC8x6UnormSrgb     = 0x00000057,
+    ASTC8x8Unorm         = 0x00000058,
+    ASTC8x8UnormSrgb     = 0x00000059,
+    ASTC10x5Unorm        = 0x0000005A,
+    ASTC10x5UnormSrgb    = 0x0000005B,
+    ASTC10x6Unorm        = 0x0000005C,
+    ASTC10x6UnormSrgb    = 0x0000005D,
+    ASTC10x8Unorm        = 0x0000005E,
+    ASTC10x8UnormSrgb    = 0x0000005F,
+    ASTC10x10Unorm       = 0x00000060,
+    ASTC10x10UnormSrgb   = 0x00000061,
+    ASTC12x10Unorm       = 0x00000062,
+    ASTC12x10UnormSrgb   = 0x00000063,
+    ASTC12x12Unorm       = 0x00000064,
+    ASTC12x12UnormSrgb   = 0x00000065,
+
+    ValidCount,
 };
 
 enum USAGE_FLAGS {
-    USAGE_NONE                     = 0,
-    USAGE_SAMPLED                  = 0x01,
-    USAGE_STORAGE                  = 0x02,
-    USAGE_COLOR_ATTACHMENT         = 0x04,
-    USAGE_DEPTH_STENCIL_ATTACHMENT = 0x08,
-    USAGE_TRANSFER_SRC             = 0x10,
-    USAGE_TRANSFER_DST             = 0x20,
+    NONE                     = 0,
+    SAMPLED                  = 0x01,
+    STORAGE                  = 0x02,
+    COLOR_ATTACHMENT         = 0x04,
+    DEPTH_STENCIL_ATTACHMENT = 0x08,
+    TRANSFER_SRC             = 0x10,
+    TRANSFER_DST             = 0x20,
 };
 
 enum STAGE_FLAGS {
@@ -389,11 +414,11 @@ enum STAGE_FLAGS {
     STAGE_HOST             = 0x20,
 };
 
-enum LAYOUT {
-    LAYOUT_DONT_CARE = 0,
-    LAYOUT_GENERAL,
-    LAYOUT_ATTACHMENT,
-    LAYOUT_PRESENT,
+enum class Layout {
+    DontCare = 0,
+    General,
+    Attachment,
+    Present,
 };
 
 enum ACCESS_FLAGS {
@@ -408,46 +433,40 @@ enum HAZARD_FLAGS {
     HAZARD_DEPTH_STENCIL  = 0x4
 };
 
-enum SIGNAL {
-    SIGNAL_ATOMIC_SET,
-    SIGNAL_ATOMIC_MAX,
-    SIGNAL_ATOMIC_OR,
+enum class LoadOp {
+    Undefined,
+    Load,
+    Clear,
 };
 
-enum LOAD_OP {
-    LOAD_OP_UNDEFINED,
-    LOAD_OP_LOAD,
-    LOAD_OP_CLEAR,
+enum class StoreOp {
+    Undefined,
+    Store,
+    Discard,
 };
 
-enum STORE_OP {
-    STORE_OP_UNDEFINED,
-    STORE_OP_STORE,
-    STORE_OP_DISCARD,
+enum class QueueType {
+    Default,
+    Compute,
+    Transfer,
+
+    ValidCount,
 };
 
-enum QUEUE_TYPE {
-    QUEUE_DEFAULT,
-    QUEUE_COMPUTE,
-    QUEUE_TRANSFER,
+enum class PresentMode {
+    Immediate,
+    Mailbox,
+    Fifo,
+    FifoRelaxed,
 
-    QUEUE_VALID_COUNT,
+    ValidCount,
 };
 
-enum PRESENT_MODE {
-    PRESENT_MODE_IMMEDIATE,
-    PRESENT_MODE_MAILBOX,
-    PRESENT_MODE_FIFO,
-    PRESENT_MODE_FIFO_RELAXED,
-
-    PRESENT_MODE_VALID_COUNT,
-};
-
-enum SURFACE_STATUS {
-    SURFACE_STATUS_SUCCESS,
-    SURFACE_STATUS_SUBOPTIMAL,
-    SURFACE_STATUS_OUT_OF_DATE,
-    SURFACE_STATUS_ERROR,
+enum class SurfaceStatus {
+    Success,
+    Suboptimal,
+    OutOfDate,
+    Error,
 };
 
 // Custom allocation callback - essentially a realloc function but not exactly
@@ -463,7 +482,8 @@ typedef MemoryBlock (*ProcAllocatorCallback)(void*    userdata,
                                              uint32_t new_size);
 typedef void (*ProcLogCallback)(LogLevel lvl, Span<const char> message, void* userdata);
 
-// Structs
+// MARK: Structs
+
 struct Dimension2D {
     uint32_t x, y;
 };
@@ -487,38 +507,38 @@ struct Color {
 };
 
 struct Stencil {
-    OP      test          = OP_ALWAYS;
-    OP      fail_op       = OP_KEEP;
-    OP      pass_op       = OP_KEEP;
-    OP      depth_fail_op = OP_KEEP;
+    Op      test          = Op::Always;
+    Op      fail_op       = Op::Keep;
+    Op      pass_op       = Op::Keep;
+    Op      depth_fail_op = Op::Keep;
     uint8_t reference     = 0;
 };
 
 struct SamplerDesc {
-    enum COORD { NORMALIZED, PIXEL };
-    enum FILTER { NEAREST, LINEAR };
-    enum ADDRESS { CLAMP_TO_EDGE, REPEAT, MIRRORED };
+    enum class Coord { NORMALIZED, PIXEL };
+    enum class Filter { NEAREST, LINEAR };
+    enum class Address { CLAMP_TO_EDGE, REPEAT, MIRRORED };
 
-    COORD   coord   = NORMALIZED;
-    FILTER  filter  = NEAREST;
-    ADDRESS address = CLAMP_TO_EDGE;
+    Coord   coord   = Coord::NORMALIZED;
+    Filter  filter  = Filter::NEAREST;
+    Address address = Address::CLAMP_TO_EDGE;
 };
 
 static constexpr SamplerDesc kDefaultSamplers[] = {SamplerDesc{
-    .coord   = SamplerDesc::NORMALIZED,
-    .filter  = SamplerDesc::LINEAR,
-    .address = SamplerDesc::CLAMP_TO_EDGE,
+    .coord   = SamplerDesc::Coord::NORMALIZED,
+    .filter  = SamplerDesc::Filter::LINEAR,
+    .address = SamplerDesc::Address::CLAMP_TO_EDGE,
 }};
 
 struct DeviceDesc {
-    GpuPreference gpu_preference = GpuPreference_Discrete;
+    GpuPreference gpu_preference = GpuPreference::Discrete;
 
     uintptr_t native_window_handle   = 0;
     uintptr_t native_instance_handle = 0;
 
     ProcLogCallback       log_callback   = nullptr;
     void*                 log_userdata   = nullptr;
-    LogLevel              log_level      = LogLevel_Off;
+    LogLevel              log_level      = LogLevel::Off;
     ProcAllocatorCallback alloc_callback = nullptr;
     void*                 alloc_userdata = nullptr;
 
@@ -527,7 +547,7 @@ struct DeviceDesc {
 
 struct DepthStencilDesc {
     DEPTH_FLAGS depth_mode              = DEPTH_NONE;
-    OP          depth_test              = OP_ALWAYS;
+    Op          depth_test              = Op::Always;
     float       depth_bias              = 0.0f;
     float       depth_bias_slope_factor = 0.0f;
     float       depth_bias_clamp        = 0.0f;
@@ -538,36 +558,36 @@ struct DepthStencilDesc {
 };
 
 struct BlendDesc {
-    BLEND   color_op         = BLEND_ADD;
-    FACTOR  src_color_factor = FACTOR_ONE;
-    FACTOR  dst_color_factor = FACTOR_ZERO;
-    BLEND   alpha_op         = BLEND_ADD;
-    FACTOR  src_alpha_factor = FACTOR_ONE;
-    FACTOR  dst_alpha_factor = FACTOR_ZERO;
+    Blend   color_op         = Blend::Add;
+    Factor  src_color_factor = Factor::One;
+    Factor  dst_color_factor = Factor::Zero;
+    Blend   alpha_op         = Blend::Add;
+    Factor  src_alpha_factor = Factor::One;
+    Factor  dst_alpha_factor = Factor::Zero;
     uint8_t color_write_mask = 0xf;
 };
 
 struct ColorTarget {
-    FORMAT  format     = FORMAT_NONE;
+    Format  format     = Format::NONE;
     uint8_t write_mask = 0xf;
 };
 
 struct RasterDesc {
-    TOPOLOGY                topology                     = TOPOLOGY_TRIANGLE_LIST;
-    CULL                    cull                         = CULL_NONE;
+    Topology                topology                     = Topology::TriangleList;
+    Cull                    cull                         = Cull::None;
     bool                    alpha_to_coverage            = false;
     bool                    support_dual_source_blending = false;
     uint8_t                 sample_count                 = 1;
-    FORMAT                  depth_format                 = FORMAT_NONE;
-    FORMAT                  stencil_format               = FORMAT_NONE;
+    Format                  depth_format                 = Format::NONE;
+    Format                  stencil_format               = Format::NONE;
     Span<const ColorTarget> color_targets                = {};
     BlendDesc               blendstate                   = {};
 };
 
 struct RenderAttachment {
     Handle<TextureView> texture_view = {0};
-    LOAD_OP             load_op;
-    STORE_OP            store_op;
+    LoadOp             load_op;
+    StoreOp            store_op;
     Color               clear_color;
 };
 
@@ -578,17 +598,17 @@ struct RenderPassDesc {
 };
 
 struct TextureDesc {
-    TEXTURE     type = TEXTURE_2D;
+    TextureType     type = TextureType::Tex2D;
     Dimension3D dimensions;
     uint32_t    mip_count    = 1;
     uint32_t    layer_count  = 1;
     uint32_t    sample_count = 1;
-    FORMAT      format       = FORMAT_NONE;
-    USAGE_FLAGS usage        = USAGE_NONE;
+    Format      format       = Format::NONE;
+    USAGE_FLAGS usage        = USAGE_FLAGS::NONE;
 };
 
 struct TextureViewDesc {
-    FORMAT   format      = FORMAT_NONE;
+    Format   format      = Format::NONE;
     uint8_t  base_mip    = 0;
     uint8_t  mip_count   = 1;
     uint16_t base_layer  = 0;
@@ -606,21 +626,21 @@ struct ShaderSource {
 };
 
 struct SurfaceCapabilities {
-    USAGE_FLAGS              usages;
-    Span<const FORMAT>       formats;
-    Span<const PRESENT_MODE> present_modes;
+    USAGE_FLAGS             usages;
+    Span<const Format>      formats;
+    Span<const PresentMode> present_modes;
 };
 
 struct SurfaceConfiguration {
-    FORMAT       format;
-    USAGE_FLAGS  usages;
-    uint32_t     width;
-    uint32_t     height;
-    PRESENT_MODE present_mode;
+    Format      format;
+    USAGE_FLAGS usages;
+    uint32_t    width;
+    uint32_t    height;
+    PresentMode present_mode;
 };
 
 struct SurfaceTextureInfo {
-    SURFACE_STATUS  status;
+    SurfaceStatus   status;
     Handle<Texture> texture;
 
     // Semaphore needs to be waited on before the texture can safely be used.
@@ -636,8 +656,8 @@ struct SemaphoreInfo {
 
 struct TextureTransition {
     Handle<Texture> texture;
-    LAYOUT          old_layout = LAYOUT_DONT_CARE;
-    LAYOUT          new_layout = LAYOUT_GENERAL;
+    Layout          old_layout = Layout::DontCare;
+    Layout          new_layout = Layout::General;
 };
 
 struct BufferToTextureCopyInfo {
@@ -667,11 +687,11 @@ class Device {
     bool                configure_surface(const SurfaceConfiguration& config);
     void                unconfigure_surface();
     SurfaceTextureInfo  get_current_texture();
-    SURFACE_STATUS      present(Handle<Queue> queue);
+    SurfaceStatus       present(Handle<Queue> queue);
 
     // Buffers:
-    Handle<Buffer> malloc(size_t bytes, MEMORY memory = MEMORY_DEFAULT);
-    Handle<Buffer> malloc(size_t bytes, size_t align, MEMORY memory = MEMORY_DEFAULT);
+    Handle<Buffer> malloc(size_t bytes, Memory memory = Memory::Default);
+    Handle<Buffer> malloc(size_t bytes, size_t align, Memory memory = Memory::Default);
     void           free(Handle<Buffer> buffer);
     GpuPtr         get_device_pointer(Handle<Buffer> buffer);
     void*          get_host_pointer(Handle<Buffer> buffer);
@@ -704,7 +724,7 @@ class Device {
     void                      free_depth_stencil_state(Handle<DepthStencilState> state);
 
     // Queue
-    Handle<Queue> get_queue(QUEUE_TYPE type = QUEUE_DEFAULT);
+    Handle<Queue> get_queue(QueueType type = QueueType::Default);
     CommandBuffer start_command_recording(Handle<Queue> queue);
 
     // TODO: May want to wrap these args in a struct.

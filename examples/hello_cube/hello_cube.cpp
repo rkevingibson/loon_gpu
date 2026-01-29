@@ -68,9 +68,9 @@ struct ShaderArgs {
     MeshGpu    mesh;
 };
 
-static FORMAT select_surface_format(const loon::gpu::SurfaceCapabilities& surface_capabilities) {
-    for (FORMAT f : surface_capabilities.formats) {
-        if (f == loon::gpu::FORMAT_RGBA8UnormSrgb) {
+static Format select_surface_format(const loon::gpu::SurfaceCapabilities& surface_capabilities) {
+    for (Format f : surface_capabilities.formats) {
+        if (f == loon::gpu::Format::RGBA8UnormSrgb) {
             // Choose 8 bit srgb if we have it
             return f;
         }
@@ -80,12 +80,12 @@ static FORMAT select_surface_format(const loon::gpu::SurfaceCapabilities& surfac
 
 HelloCube::HelloCube(const WindowState& window_state) {
     m_device = loon::gpu::Device::create({
-        .gpu_preference         = loon::gpu::GpuPreference_Discrete,
+        .gpu_preference         = GpuPreference::Discrete,
         .native_window_handle   = window_state.native_window_handle,
         .native_instance_handle = window_state.native_instance_handle,
         .log_callback           = log_callback,
         .log_userdata           = nullptr,
-        .log_level              = LogLevel_Debug,
+        .log_level              = LogLevel::Debug,
         .alloc_callback         = nullptr,
         .alloc_userdata         = nullptr,
     });
@@ -95,10 +95,10 @@ HelloCube::HelloCube(const WindowState& window_state) {
 
     m_device.configure_surface({
         .format       = m_swapchain_format,
-        .usages       = loon::gpu::USAGE_COLOR_ATTACHMENT,
+        .usages       = loon::gpu::USAGE_FLAGS::COLOR_ATTACHMENT,
         .width        = window_state.width,
         .height       = window_state.height,
-        .present_mode = PRESENT_MODE_FIFO,
+        .present_mode = PresentMode::Fifo,
     });
     m_swapchain_width  = window_state.width;
     m_swapchain_height = window_state.height;
@@ -118,7 +118,7 @@ HelloCube::HelloCube(const WindowState& window_state) {
             .entry_point = "fragmentMain"_sv,
         },
         RasterDesc{
-            .depth_format  = loon::gpu::FORMAT_Depth32Float,
+            .depth_format  = loon::gpu::Format::Depth32Float,
             .color_targets = {{.format = m_swapchain_format}},
         });
 
@@ -126,7 +126,7 @@ HelloCube::HelloCube(const WindowState& window_state) {
 
     m_queue = m_device.get_queue();
 
-    m_geometry_buffer = m_device.malloc(Cube::kSize, MEMORY_GPU);
+    m_geometry_buffer = m_device.malloc(Cube::kSize, Memory::Gpu);
     m_vertex_ptr      = m_device.get_device_pointer(m_geometry_buffer);
 
     m_constant_buffer = m_device.malloc(1024ull * 1024);
@@ -151,20 +151,20 @@ HelloCube::HelloCube(const WindowState& window_state) {
 
     // Create a depth texture
     m_depth_texture = m_device.create_texture({
-        .type       = TEXTURE_2D,
+        .type       = TextureType::Tex2D,
         .dimensions = {.x = window_state.width, .y = window_state.height, .z = 1},
-        .format     = loon::gpu::FORMAT_Depth32Float,
-        .usage      = loon::gpu::USAGE_DEPTH_STENCIL_ATTACHMENT,
+        .format     = loon::gpu::Format::Depth32Float,
+        .usage      = loon::gpu::USAGE_FLAGS::DEPTH_STENCIL_ATTACHMENT,
     });
 
     m_depth_view = m_device.create_texture_view(m_depth_texture,
                                                 TextureViewDesc{
-                                                    .format = loon::gpu::FORMAT_Depth32Float,
+                                                    .format = loon::gpu::Format::Depth32Float,
                                                 });
 
     m_depth_stencil_state = m_device.create_depth_stencil_state(DepthStencilDesc{
         .depth_mode = DEPTH_FLAGS(loon::gpu::DEPTH_WRITE | loon::gpu::DEPTH_READ),
-        .depth_test = loon::gpu::OP_GREATER,
+        .depth_test = loon::gpu::Op::Greater,
     });
 }
 
@@ -175,10 +175,10 @@ void HelloCube::recreate_swapchain(uint32_t width, uint32_t height) {
     m_device.unconfigure_surface();
     m_device.configure_surface({
         .format       = m_swapchain_format,
-        .usages       = loon::gpu::USAGE_COLOR_ATTACHMENT,
+        .usages       = loon::gpu::USAGE_FLAGS::COLOR_ATTACHMENT,
         .width        = width,
         .height       = height,
-        .present_mode = PRESENT_MODE_FIFO,
+        .present_mode = PresentMode::Fifo,
     });
     m_swapchain_width  = width;
     m_swapchain_height = height;
@@ -188,15 +188,15 @@ void HelloCube::recreate_swapchain(uint32_t width, uint32_t height) {
     m_device.free(m_depth_view);
     m_device.free(m_depth_texture);
     m_depth_texture = m_device.create_texture({
-        .type       = TEXTURE_2D,
+        .type       = TextureType::Tex2D,
         .dimensions = {.x = width, .y = height, .z = 1},
-        .format     = loon::gpu::FORMAT_Depth32Float,
-        .usage      = loon::gpu::USAGE_DEPTH_STENCIL_ATTACHMENT,
+        .format     = loon::gpu::Format::Depth32Float,
+        .usage      = loon::gpu::USAGE_FLAGS::DEPTH_STENCIL_ATTACHMENT,
     });
 
     m_depth_view = m_device.create_texture_view(m_depth_texture,
                                                 TextureViewDesc{
-                                                    .format = loon::gpu::FORMAT_Depth32Float,
+                                                    .format = loon::gpu::Format::Depth32Float,
                                                 });
 }
 
@@ -220,11 +220,11 @@ void HelloCube::Update(const WindowState& window) {
     };
 
     auto surface_texture = m_device.get_current_texture();
-    if (surface_texture.status == SURFACE_STATUS_OUT_OF_DATE
-        || surface_texture.status == SURFACE_STATUS_SUBOPTIMAL) {
+    if (surface_texture.status == SurfaceStatus::OutOfDate
+        || surface_texture.status == SurfaceStatus::Suboptimal) {
         recreate_swapchain(window.width, window.height);
         return;
-    } else if (surface_texture.status == SURFACE_STATUS_ERROR) {
+    } else if (surface_texture.status == SurfaceStatus::Error) {
         return;
     }
 
@@ -243,25 +243,25 @@ void HelloCube::Update(const WindowState& window) {
                            STAGE_FLAGS(STAGE_PIXEL_SHADER | STAGE_RASTER_COLOR_OUT),
                            {TextureTransition{
                                 .texture    = surface_texture.texture,
-                                .old_layout = loon::gpu::LAYOUT_DONT_CARE,
-                                .new_layout = LAYOUT_ATTACHMENT,
+                                .old_layout = loon::gpu::Layout::DontCare,
+                                .new_layout = Layout::Attachment,
                             },
                             TextureTransition{
                                 .texture    = m_depth_texture,
-                                .old_layout = loon::gpu::LAYOUT_DONT_CARE,
-                                .new_layout = LAYOUT_ATTACHMENT,
+                                .old_layout = loon::gpu::Layout::DontCare,
+                                .new_layout = Layout::Attachment,
                             }});
     command_buffer.begin_render_pass({
                                    .color_attachments = RenderAttachment{
                                        .texture_view = swapchain_view,
-                                       .load_op      = loon::gpu::LOAD_OP_CLEAR,
-                                       .store_op     = loon::gpu::STORE_OP_STORE,
+                                       .load_op      = loon::gpu::LoadOp::Clear,
+                                       .store_op     = loon::gpu::StoreOp::Store,
                                        .clear_color  = Color(0, 0, 0, 0),
                                    }, 
                                    .depth_attachment = RenderAttachment{
                                     .texture_view = m_depth_view,
-                                    .load_op = loon::gpu::LOAD_OP_CLEAR,
-                                    .store_op = loon::gpu::STORE_OP_DISCARD,
+                                    .load_op = loon::gpu::LoadOp::Clear,
+                                    .store_op = loon::gpu::StoreOp::Discard,
                                     .clear_color = Color(0,0,0,0),
                                    }, 
                                    .render_area = {.width = m_swapchain_width, .height = m_swapchain_height},
@@ -280,8 +280,8 @@ void HelloCube::Update(const WindowState& window) {
                            STAGE_RASTER_COLOR_OUT,
                            TextureTransition{
                                .texture    = surface_texture.texture,
-                               .old_layout = LAYOUT_ATTACHMENT,
-                               .new_layout = LAYOUT_PRESENT,
+                               .old_layout = Layout::Attachment,
+                               .new_layout = Layout::Present,
                            });
     m_device.submit(m_queue,
                     command_buffer,
@@ -291,7 +291,7 @@ void HelloCube::Update(const WindowState& window) {
                     });
 
     const auto status = m_device.present(m_queue);
-    if (status == SURFACE_STATUS_OUT_OF_DATE || status == SURFACE_STATUS_SUBOPTIMAL) {
+    if (status == SurfaceStatus::OutOfDate || status == SurfaceStatus::Suboptimal) {
         recreate_swapchain(window.width, window.height);
     }
 
