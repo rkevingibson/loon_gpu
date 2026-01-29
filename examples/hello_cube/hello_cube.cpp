@@ -168,12 +168,7 @@ HelloCube::HelloCube(const WindowState& window_state) {
     });
 }
 
-HelloCube::~HelloCube() {
-    m_device.wait_for_device_idle();
-    m_device.process_events(m_queue);
-    m_device.free(m_render_pipeline);
-    m_device.unconfigure_surface();
-}
+HelloCube::~HelloCube() {}
 
 void HelloCube::recreate_swapchain(uint32_t width, uint32_t height) {
     m_device.wait_for_device_idle();

@@ -1,5 +1,3 @@
-static const DescriptorHandle<SamplerState> kDefaultSampler = {uint2(0,0)};
-
 struct CameraData {
     float4x4 projection;
     float4x4 cameraFromWorld;

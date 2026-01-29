@@ -48,6 +48,11 @@ struct Semaphore {
     VkSemaphore vk_semaphore;
 };
 
+struct Pipeline {
+    VkPipeline          vk_pipeline;
+    VkPipelineBindPoint bind_point;
+};
+
 struct PhysicalDeviceInfo {
     VkPhysicalDevice device                     = VK_NULL_HANDLE;
     uint32_t         graphics_queue_family      = 0;
@@ -242,6 +247,7 @@ struct Device::Impl {
     SlotMap<TextureHeap>       m_texture_heap_pool;
     SlotMap<DepthStencilState> m_depth_stencil_pool;
     SlotMap<Semaphore>         m_semaphore_pool;
+    SlotMap<Pipeline>          m_pipeline_pool;
 
     Vector<VkSampler> m_immutable_samplers;
 
@@ -553,9 +559,14 @@ Device::Impl::Impl(const DeviceDesc& desc) :
             h->~TextureHeap();
         }),
     m_depth_stencil_pool(m_allocator, [](DepthStencilState* d) { d->~DepthStencilState(); }),
-    m_semaphore_pool(m_allocator, [this](Semaphore* s) {
-        m_api.vkDestroySemaphore(m_device, s->vk_semaphore, nullptr);
-        s->~Semaphore();
+    m_semaphore_pool(m_allocator,
+                     [this](Semaphore* s) {
+                         m_api.vkDestroySemaphore(m_device, s->vk_semaphore, nullptr);
+                         s->~Semaphore();
+                     }),
+    m_pipeline_pool(m_allocator, [this](Pipeline* p) {
+        m_api.vkDestroyPipeline(m_device, p->vk_pipeline, nullptr);
+        p->~Pipeline();
     }) {}
 
 bool Device::Impl::initialize(const DeviceDesc& desc) {
@@ -868,6 +879,7 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
 }
 
 Device::Impl::~Impl() {
+    wait_for_device_idle();
     unconfigure_surface();
 
     for (auto& q : m_queues) {
@@ -881,6 +893,7 @@ Device::Impl::~Impl() {
     m_texture_view_pool.clear();
     m_texture_heap_pool.clear();
     m_semaphore_pool.clear();
+    m_pipeline_pool.clear();
 
     for (auto& s : m_immutable_samplers) { m_api.vkDestroySampler(m_device, s, nullptr); }
 
@@ -1433,7 +1446,12 @@ Handle<Pipeline> Device::Impl::create_compute_pipeline(ShaderSource source) {
     }
 
     m_api.vkDestroyShaderModule(m_device, module, nullptr);
-    return {.h = reinterpret_cast<uintptr_t>(pipeline)};
+
+    auto h = m_pipeline_pool.emplace({
+        .vk_pipeline = pipeline,
+        .bind_point  = VK_PIPELINE_BIND_POINT_COMPUTE,
+    });
+    return h;
 }
 
 Handle<Pipeline> Device::Impl::create_graphics_pipeline(ShaderSource vertex,
@@ -1642,11 +1660,16 @@ Handle<Pipeline> Device::Impl::create_graphics_pipeline(ShaderSource vertex,
     m_api.vkDestroyShaderModule(m_device, vert_module, nullptr);
     m_api.vkDestroyShaderModule(m_device, frag_module, nullptr);
 
-    return {.h = reinterpret_cast<uintptr_t>(vk_pipeline)};
+    auto h = m_pipeline_pool.emplace({
+        .vk_pipeline = vk_pipeline,
+        .bind_point  = VK_PIPELINE_BIND_POINT_GRAPHICS,
+    });
+
+    return h;
 }
 
 void Device::Impl::free(Handle<Pipeline> pipeline) {
-    m_api.vkDestroyPipeline(m_device, reinterpret_cast<VkPipeline>(pipeline.h), nullptr);
+    m_pipeline_pool.erase(pipeline);
 }
 
 Handle<DepthStencilState> Device::Impl::create_depth_stencil_state(const DepthStencilDesc& desc) {
@@ -2308,12 +2331,11 @@ void CommandBuffer::barrier(STAGE_FLAGS                   before,
 }
 
 void CommandBuffer::set_pipeline(Handle<Pipeline> pipeline) {
-    auto impl = reinterpret_cast<Device::Impl*>(device);
-    impl->m_api.vkCmdBindPipeline(
-        reinterpret_cast<VkCommandBuffer>(buffer),
-        VK_PIPELINE_BIND_POINT_GRAPHICS,  // TODO: Fix this, can't be hardcoded - need something in
-                                          // the pipeline.
-        reinterpret_cast<VkPipeline>(pipeline.h));
+    auto  impl = reinterpret_cast<Device::Impl*>(device);
+    auto& p    = impl->m_pipeline_pool[pipeline];
+    impl->m_api.vkCmdBindPipeline(reinterpret_cast<VkCommandBuffer>(buffer),
+                                  p.bind_point,
+                                  p.vk_pipeline);
 }
 
 void CommandBuffer::set_depth_stencil_State(Handle<DepthStencilState> state) {

@@ -15,6 +15,7 @@
 
 #include "hello_cube/hello_cube.h"
 #include "hello_triangle/hello_triangle.h"
+#include "particle_emitter/particle_emitter.h"
 #include "stb_image.h"
 #include "textured_cube/textured_cube.h"
 
@@ -56,6 +57,7 @@ std::unique_ptr<Example> create_example(ExampleName name, const WindowState& sta
         case ExampleName::HelloTriangle: return std::make_unique<HelloTriangle>(state);
         case ExampleName::HelloCube: return std::make_unique<HelloCube>(state);
         case ExampleName::TexturedCube: return std::make_unique<TexturedCube>(state);
+        case ExampleName::ParticleEmitter: return std::make_unique<ParticleEmitter>(state);
         default: return nullptr;
     }
 }

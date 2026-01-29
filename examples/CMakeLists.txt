@@ -75,6 +75,7 @@ set(EXAMPLE_SOURCES
     hello_triangle/hello_triangle.cpp
     hello_cube/hello_cube.cpp
     textured_cube/textured_cube.cpp
+    particle_emitter/particle_emitter.cpp
 )
 
 if (WIN32)

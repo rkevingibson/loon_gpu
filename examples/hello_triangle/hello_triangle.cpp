@@ -74,11 +74,7 @@ HelloTriangle::HelloTriangle(const WindowState& window_state) {
     m_queue = m_device.get_queue();
 }
 
-HelloTriangle::~HelloTriangle() {
-    m_device.wait_for_device_idle();
-    m_device.free(m_render_pipeline);
-    m_device.unconfigure_surface();
-}
+HelloTriangle::~HelloTriangle() {}
 
 void HelloTriangle::recreate_swapchain(uint32_t width, uint32_t height) {
     m_device.unconfigure_surface();
