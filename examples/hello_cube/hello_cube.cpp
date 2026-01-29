@@ -95,7 +95,7 @@ HelloCube::HelloCube(const WindowState& window_state) {
 
     m_device.configure_surface({
         .format       = m_swapchain_format,
-        .usages       = loon::gpu::USAGE_FLAGS::COLOR_ATTACHMENT,
+        .usages       = loon::gpu::UsageFlags::ColorAttachment,
         .width        = window_state.width,
         .height       = window_state.height,
         .present_mode = PresentMode::Fifo,
@@ -138,13 +138,13 @@ HelloCube::HelloCube(const WindowState& window_state) {
     cmd.memcpy(m_vertex_ptr, m_device.get_device_pointer(m_constant_buffer), Cube::kSize);
 
     // A little excessive, but wait for the copy to be done before returning.
-    cmd.barrier(loon::gpu::STAGE_TRANSFER, loon::gpu::STAGE_VERTEX_SHADER);
+    cmd.barrier(loon::gpu::Transfer, loon::gpu::VertexShader);
     auto copy_semaphore = m_device.create_semaphore(0);
     m_device.submit(
         m_queue,
         cmd,
         {},
-        SemaphoreInfo{.semaphore = copy_semaphore, .value = 1, .stage = STAGE_TRANSFER});
+        SemaphoreInfo{.semaphore = copy_semaphore, .value = 1, .stage = Transfer});
     m_device.wait_semaphore(copy_semaphore, 1);
     m_device.free(copy_semaphore);
 
@@ -154,7 +154,7 @@ HelloCube::HelloCube(const WindowState& window_state) {
         .type       = TextureType::Tex2D,
         .dimensions = {.x = window_state.width, .y = window_state.height, .z = 1},
         .format     = loon::gpu::Format::Depth32Float,
-        .usage      = loon::gpu::USAGE_FLAGS::DEPTH_STENCIL_ATTACHMENT,
+        .usage      = loon::gpu::UsageFlags::DepthStencilAttachment,
     });
 
     m_depth_view = m_device.create_texture_view(m_depth_texture,
@@ -163,7 +163,7 @@ HelloCube::HelloCube(const WindowState& window_state) {
                                                 });
 
     m_depth_stencil_state = m_device.create_depth_stencil_state(DepthStencilDesc{
-        .depth_mode = DEPTH_FLAGS(loon::gpu::DEPTH_WRITE | loon::gpu::DEPTH_READ),
+        .depth_mode = loon::gpu::DepthFlags::Write | loon::gpu::DepthFlags::Read,
         .depth_test = loon::gpu::Op::Greater,
     });
 }
@@ -175,7 +175,7 @@ void HelloCube::recreate_swapchain(uint32_t width, uint32_t height) {
     m_device.unconfigure_surface();
     m_device.configure_surface({
         .format       = m_swapchain_format,
-        .usages       = loon::gpu::USAGE_FLAGS::COLOR_ATTACHMENT,
+        .usages       = loon::gpu::UsageFlags::ColorAttachment,
         .width        = width,
         .height       = height,
         .present_mode = PresentMode::Fifo,
@@ -191,7 +191,7 @@ void HelloCube::recreate_swapchain(uint32_t width, uint32_t height) {
         .type       = TextureType::Tex2D,
         .dimensions = {.x = width, .y = height, .z = 1},
         .format     = loon::gpu::Format::Depth32Float,
-        .usage      = loon::gpu::USAGE_FLAGS::DEPTH_STENCIL_ATTACHMENT,
+        .usage      = loon::gpu::UsageFlags::DepthStencilAttachment,
     });
 
     m_depth_view = m_device.create_texture_view(m_depth_texture,
@@ -239,8 +239,8 @@ void HelloCube::Update(const WindowState& window) {
 
     auto command_buffer = m_device.start_command_recording(m_queue);
 
-    command_buffer.barrier(loon::gpu::STAGE_RASTER_COLOR_OUT,
-                           STAGE_FLAGS(STAGE_PIXEL_SHADER | STAGE_RASTER_COLOR_OUT),
+    command_buffer.barrier(loon::gpu::RasterColorOut,
+                           StageFlags(PixelShader | RasterColorOut),
                            {TextureTransition{
                                 .texture    = surface_texture.texture,
                                 .old_layout = loon::gpu::Layout::DontCare,
@@ -276,8 +276,8 @@ void HelloCube::Update(const WindowState& window) {
         1);
 
     command_buffer.end_render_pass();
-    command_buffer.barrier(STAGE_RASTER_COLOR_OUT,
-                           STAGE_RASTER_COLOR_OUT,
+    command_buffer.barrier(RasterColorOut,
+                           RasterColorOut,
                            TextureTransition{
                                .texture    = surface_texture.texture,
                                .old_layout = Layout::Attachment,
@@ -287,7 +287,7 @@ void HelloCube::Update(const WindowState& window) {
                     command_buffer,
                     SemaphoreInfo{
                         .semaphore = surface_texture.acquire_semaphore,
-                        .stage     = loon::gpu::STAGE_RASTER_COLOR_OUT,
+                        .stage     = loon::gpu::RasterColorOut,
                     });
 
     const auto status = m_device.present(m_queue);

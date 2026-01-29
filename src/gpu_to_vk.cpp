@@ -10,7 +10,7 @@ namespace loon::gpu {
 
 VkFormat bridge(Format format) {
     switch (format) {
-        case Format::NONE: return VK_FORMAT_UNDEFINED;
+        case Format::None: return VK_FORMAT_UNDEFINED;
         case Format::R8Unorm: return VK_FORMAT_R8_UNORM;
         case Format::R8Snorm: return VK_FORMAT_R8_SNORM;
         case Format::R8Uint: return VK_FORMAT_R8_UINT;
@@ -126,7 +126,7 @@ VkImageAspectFlags aspects_for_format(Format format) {
 
 Format bridge(VkFormat format) {
     switch (format) {
-        case VK_FORMAT_UNDEFINED: return Format::NONE;
+        case VK_FORMAT_UNDEFINED: return Format::None;
         case VK_FORMAT_R8_UNORM: return Format::R8Unorm;
         case VK_FORMAT_R8_SNORM: return Format::R8Snorm;
         case VK_FORMAT_R8_UINT: return Format::R8Uint;
@@ -255,45 +255,50 @@ VkPresentModeKHR bridge(PresentMode mode) {
     }
 }
 
-VkPipelineStageFlags2 bridge_pipeline_stage(STAGE_FLAGS stage) {
+VkPipelineStageFlags2 bridge_pipeline_stage(StageFlags stage) {
     VkPipelineStageFlags2 out = 0;
-    out |= (stage & STAGE_TRANSFER) ? VK_PIPELINE_STAGE_2_TRANSFER_BIT : 0;
-    out |= (stage & STAGE_COMPUTE) ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT : 0;
-    out |= (stage & STAGE_RASTER_COLOR_OUT) ? VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT : 0;
-    out |= (stage & STAGE_PIXEL_SHADER) ? VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
+    out |= (stage & Transfer) ? VK_PIPELINE_STAGE_2_TRANSFER_BIT : 0;
+    out |= (stage & Compute) ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT : 0;
+    out |= (stage & RasterColorOut) ? VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT : 0;
+    out |= (stage & PixelShader) ? VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
                                               | VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT
                                               | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT
                                         : 0;
-    out |= (stage & STAGE_VERTEX_SHADER)
+    out |= (stage & VertexShader)
                ? VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT
                : 0;
-    out |= (stage & STAGE_HOST) ? VK_PIPELINE_STAGE_2_HOST_BIT : 0;
+    out |= (stage & Host) ? VK_PIPELINE_STAGE_2_HOST_BIT : 0;
     return out;
 }
 
-USAGE_FLAGS bridge_usage_flags(VkImageUsageFlags flags) {
-    int usage = USAGE_FLAGS::NONE;
-    usage |= (flags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ? USAGE_FLAGS::TRANSFER_SRC : 0;
-    usage |= (flags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) ? USAGE_FLAGS::TRANSFER_DST : 0;
-    usage |= (flags & VK_IMAGE_USAGE_SAMPLED_BIT) ? USAGE_FLAGS::SAMPLED : 0;
-    usage |= (flags & VK_IMAGE_USAGE_STORAGE_BIT) ? USAGE_FLAGS::STORAGE : 0;
-    usage |= (flags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) ? USAGE_FLAGS::COLOR_ATTACHMENT : 0;
-    usage |= (flags & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) ? USAGE_FLAGS::DEPTH_STENCIL_ATTACHMENT
-                                                                   : 0;
+UsageFlags bridge_usage_flags(VkImageUsageFlags flags) {
+    UsageFlags usage = UsageFlags::None;
+    usage |= (flags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ? UsageFlags::TransferSrc
+                                                       : UsageFlags::None;
+    usage |= (flags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) ? UsageFlags::TransferDst
+                                                       : UsageFlags::None;
+    usage |= (flags & VK_IMAGE_USAGE_SAMPLED_BIT) ? UsageFlags::Sampled : UsageFlags::None;
+    usage |= (flags & VK_IMAGE_USAGE_STORAGE_BIT) ? UsageFlags::Storage : UsageFlags::None;
+    usage |= (flags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) ? UsageFlags::ColorAttachment
+                                                           : UsageFlags::None;
+    usage |= (flags & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
+                 ? UsageFlags::DepthStencilAttachment
+                 : UsageFlags::None;
     // NOTE: Should VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT also count as a render attachment
     // usage?
-    return USAGE_FLAGS(usage);
+    return UsageFlags(usage);
 }
 
-VkImageUsageFlags bridge_usage_flags(USAGE_FLAGS usage) {
+VkImageUsageFlags bridge_usage_flags(UsageFlags usage) {
     VkImageUsageFlags flags = 0;
-    flags |= (usage & USAGE_FLAGS::TRANSFER_SRC) ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0;
-    flags |= (usage & USAGE_FLAGS::TRANSFER_DST) ? VK_IMAGE_USAGE_TRANSFER_DST_BIT : 0;
-    flags |= (usage & USAGE_FLAGS::SAMPLED) ? VK_IMAGE_USAGE_SAMPLED_BIT : 0;
-    flags |= (usage & USAGE_FLAGS::STORAGE) ? VK_IMAGE_USAGE_STORAGE_BIT : 0;
-    flags |= (usage & USAGE_FLAGS::COLOR_ATTACHMENT) ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0;
-    flags |= (usage & USAGE_FLAGS::DEPTH_STENCIL_ATTACHMENT) ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
-                                                      : 0;
+    flags |= bool(usage & UsageFlags::TransferSrc) ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0;
+    flags |= bool(usage & UsageFlags::TransferDst) ? VK_IMAGE_USAGE_TRANSFER_DST_BIT : 0;
+    flags |= bool(usage & UsageFlags::Sampled) ? VK_IMAGE_USAGE_SAMPLED_BIT : 0;
+    flags |= bool(usage & UsageFlags::Storage) ? VK_IMAGE_USAGE_STORAGE_BIT : 0;
+    flags |= bool(usage & UsageFlags::ColorAttachment) ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0;
+    flags |= bool(usage & UsageFlags::DepthStencilAttachment)
+                 ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
+                 : 0;
     return flags;
 }
 

@@ -92,7 +92,7 @@ struct Surface {
     static constexpr size_t kMaxNumFormats      = static_cast<size_t>(Format::ValidCount);
     static constexpr size_t kMaxNumPresentModes = static_cast<size_t>(PresentMode::ValidCount);
     Format                  supported_formats[kMaxNumFormats];
-    PresentMode            supported_present_modes[kMaxNumPresentModes];
+    PresentMode             supported_present_modes[kMaxNumPresentModes];
     size_t                  num_supported_formats       = 0;
     size_t                  num_supported_present_modes = 0;
 
@@ -160,7 +160,7 @@ struct Device::Impl {
     bool                configure_surface(const SurfaceConfiguration& config);
     void                unconfigure_surface();
     SurfaceTextureInfo  get_current_texture();
-    SurfaceStatus      present(Handle<Queue> queue);
+    SurfaceStatus       present(Handle<Queue> queue);
 
     // Buffers:
     Handle<Buffer>  malloc(size_t bytes, Memory memory = Memory::Default);
@@ -794,25 +794,25 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
 
     m_immutable_samplers = Vector<VkSampler>(m_allocator);
 
-    constexpr auto bridge_filter = [](SamplerDesc::Filter f) {
+    constexpr auto bridge_filter = [](SamplerFilter f) {
         switch (f) {
-            case SamplerDesc::Filter::NEAREST: return VK_FILTER_NEAREST;
-            case SamplerDesc::Filter::LINEAR: return VK_FILTER_LINEAR;
+            case SamplerFilter::Nearest: return VK_FILTER_NEAREST;
+            case SamplerFilter::Linear: return VK_FILTER_LINEAR;
         }
     };
 
-    constexpr auto bridge_mip_mode = [](SamplerDesc::Filter f) {
+    constexpr auto bridge_mip_mode = [](SamplerFilter f) {
         switch (f) {
-            case SamplerDesc::Filter::NEAREST: return VK_SAMPLER_MIPMAP_MODE_NEAREST;
-            case SamplerDesc::Filter::LINEAR: return VK_SAMPLER_MIPMAP_MODE_LINEAR;
+            case SamplerFilter::Nearest: return VK_SAMPLER_MIPMAP_MODE_NEAREST;
+            case SamplerFilter::Linear: return VK_SAMPLER_MIPMAP_MODE_LINEAR;
         }
     };
 
-    constexpr auto bridge_address = [](SamplerDesc::Address a) {
+    constexpr auto bridge_address = [](SamplerAddressing a) {
         switch (a) {
-            case SamplerDesc::Address::CLAMP_TO_EDGE: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-            case SamplerDesc::Address::REPEAT: return VK_SAMPLER_ADDRESS_MODE_REPEAT;
-            case SamplerDesc::Address::MIRRORED: return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+            case SamplerAddressing::ClampToEdge: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+            case SamplerAddressing::Repeat: return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+            case SamplerAddressing::Mirrored: return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
         }
     };
 
@@ -833,7 +833,7 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
             .minLod                  = 0.0f,
             .maxLod                  = VK_LOD_CLAMP_NONE,
             .borderColor             = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
-            .unnormalizedCoordinates = sampler_desc.coord == SamplerDesc::Coord::PIXEL,
+            .unnormalizedCoordinates = sampler_desc.coord == SamplerCoords::Pixel,
         };
 
         VkSampler sampler;
@@ -980,7 +980,7 @@ SurfaceCapabilities Device::Impl::get_surface_capabilities() {
         .usages  = bridge_usage_flags(vk_capabilities.supportedUsageFlags),
         .formats = Span<const Format>(m_surface.supported_formats, m_surface.num_supported_formats),
         .present_modes = Span<const PresentMode>(m_surface.supported_present_modes,
-                                                  m_surface.num_supported_present_modes),
+                                                 m_surface.num_supported_present_modes),
     };
 }
 
@@ -1965,9 +1965,11 @@ bool Device::Impl::chk(VkResult result) {
             break;
         case VK_ERROR_FRAGMENTED_POOL: log(LogLevel::Error, "VK_ERROR_FRAGMENTED_POOL"); break;
         case VK_ERROR_UNKNOWN: log(LogLevel::Error, "VK_ERROR_UNKNOWN"); break;
-        // case VK_ERROR_VALIDATION_FAILED: log(LogLevel::LogLevel_Error, "VK_ERROR_VALIDATION_FAILED");
-        // break;
-        case VK_ERROR_OUT_OF_POOL_MEMORY: log(LogLevel::Error, "VK_ERROR_OUT_OF_POOL_MEMORY"); break;
+        // case VK_ERROR_VALIDATION_FAILED: log(LogLevel::LogLevel_Error,
+        // "VK_ERROR_VALIDATION_FAILED"); break;
+        case VK_ERROR_OUT_OF_POOL_MEMORY:
+            log(LogLevel::Error, "VK_ERROR_OUT_OF_POOL_MEMORY");
+            break;
         case VK_ERROR_INVALID_EXTERNAL_HANDLE:
             log(LogLevel::Error, "VK_ERROR_INVALID_EXTERNAL_HANDLE");
             break;
@@ -1978,7 +1980,8 @@ bool Device::Impl::chk(VkResult result) {
         case VK_PIPELINE_COMPILE_REQUIRED:
             log(LogLevel::Error, "VK_PIPELINE_COMPILE_REQUIRED");
             break;
-        // case VK_ERROR_NOT_PERMITTED: log(LogLevel::LogLevel_Error, "VK_ERROR_NOT_PERMITTED"); break;
+        // case VK_ERROR_NOT_PERMITTED: log(LogLevel::LogLevel_Error, "VK_ERROR_NOT_PERMITTED");
+        // break;
         case VK_ERROR_SURFACE_LOST_KHR: log(LogLevel::Error, "VK_ERROR_SURFACE_LOST_KHR"); break;
         case VK_ERROR_NATIVE_WINDOW_IN_USE_KHR:
             log(LogLevel::Error, "VK_ERROR_NATIVE_WINDOW_IN_USE_KHR");
@@ -2262,12 +2265,12 @@ void CommandBuffer::set_texture_heap(Handle<TextureHeap> heap) {
                                         nullptr);
 }
 
-void CommandBuffer::barrier(STAGE_FLAGS                   before,
-                            STAGE_FLAGS                   after,
+void CommandBuffer::barrier(StageFlags                   before,
+                            StageFlags                   after,
                             Span<const TextureTransition> image_transitions,
-                            HAZARD_FLAGS                  hazards) {
+                            HazardFlags                  hazards) {
     auto impl = reinterpret_cast<Device::Impl*>(device);
-    // TODO: Use HAZARD_FLAGS to reduce the stage/access_masks unless necessary.
+    // TODO: Use HazardFlags to reduce the stage/access_masks unless necessary.
     const auto     src_stage = bridge_pipeline_stage(before);
     const auto     dst_stage = bridge_pipeline_stage(after);
     constexpr auto access    = VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT;
@@ -2344,8 +2347,8 @@ void CommandBuffer::set_depth_stencil_State(Handle<DepthStencilState> state) {
 
     auto& desc = impl->m_depth_stencil_pool[state];
 
-    impl->m_api.vkCmdSetDepthWriteEnable(cmd, (desc.depth_mode & DEPTH_WRITE) != 0);
-    impl->m_api.vkCmdSetDepthTestEnable(cmd, (desc.depth_mode & DEPTH_READ) != 0);
+    impl->m_api.vkCmdSetDepthWriteEnable(cmd, bool(desc.depth_mode & DepthFlags::Write));
+    impl->m_api.vkCmdSetDepthTestEnable(cmd, bool(desc.depth_mode & DepthFlags::Read));
     impl->m_api.vkCmdSetDepthCompareOp(cmd, bridge(desc.depth_test));
     // TODO: More stuff here.
     impl->m_api.vkCmdSetStencilTestEnable(cmd, false);

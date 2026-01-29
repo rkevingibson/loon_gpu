@@ -63,7 +63,7 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
     m_queue = m_device.get_queue();
 
     m_depth_stencil_state = m_device.create_depth_stencil_state(DepthStencilDesc{
-        .depth_mode = DEPTH_FLAGS(loon::gpu::DEPTH_WRITE | loon::gpu::DEPTH_READ),
+        .depth_mode = loon::gpu::DepthFlags::Write | loon::gpu::DepthFlags::Read,
         .depth_test = Op::Greater,
     });
 }
@@ -75,7 +75,7 @@ void ParticleEmitter::recreate_swapchain(uint32_t width, uint32_t height) {
     m_device.unconfigure_surface();
     m_device.configure_surface({
         .format       = m_swapchain_format,
-        .usages       = loon::gpu::USAGE_FLAGS::COLOR_ATTACHMENT,
+        .usages       = loon::gpu::UsageFlags::ColorAttachment,
         .width        = width,
         .height       = height,
         .present_mode = PresentMode::Fifo,
@@ -92,7 +92,7 @@ void ParticleEmitter::recreate_swapchain(uint32_t width, uint32_t height) {
         .type       = TextureType::Tex2D,
         .dimensions = {.x = width, .y = height, .z = 1},
         .format     = loon::gpu::Format::Depth32Float,
-        .usage      = loon::gpu::USAGE_FLAGS::DEPTH_STENCIL_ATTACHMENT,
+        .usage      = loon::gpu::UsageFlags::DepthStencilAttachment,
     });
 
     m_depth_view = m_device.create_texture_view(m_depth_texture,
@@ -122,8 +122,8 @@ void ParticleEmitter::Update(const WindowState& window) {
 
     // Rendering here.
     auto cmd = m_device.start_command_recording(m_queue);
-    cmd.barrier(STAGE_FLAGS(STAGE_HOST | STAGE_RASTER_COLOR_OUT),
-                STAGE_FLAGS(STAGE_COMPUTE | STAGE_PIXEL_SHADER | STAGE_RASTER_COLOR_OUT),
+    cmd.barrier(StageFlags(Host | RasterColorOut),
+                StageFlags(Compute | PixelShader | RasterColorOut),
                 {TextureTransition{
                      .texture    = surface_texture.texture,
                      .old_layout = Layout::DontCare,
@@ -137,7 +137,7 @@ void ParticleEmitter::Update(const WindowState& window) {
 
     cmd.set_pipeline(m_update_sim_pipeline);
     cmd.dispatch(0, Dimension3D{.x = 1, .y = 1, .z = 1});
-    cmd.barrier(STAGE_COMPUTE, STAGE_VERTEX_SHADER);
+    cmd.barrier(Compute, VertexShader);
 
     // Render particles
     cmd.begin_render_pass({
@@ -160,8 +160,8 @@ void ParticleEmitter::Update(const WindowState& window) {
 
     cmd.end_render_pass();
 
-    cmd.barrier(STAGE_RASTER_COLOR_OUT,
-                STAGE_RASTER_COLOR_OUT,
+    cmd.barrier(RasterColorOut,
+                RasterColorOut,
                 TextureTransition{
                     .texture    = surface_texture.texture,
                     .old_layout = Layout::Attachment,
@@ -171,7 +171,7 @@ void ParticleEmitter::Update(const WindowState& window) {
                     cmd,
                     SemaphoreInfo{
                         .semaphore = surface_texture.acquire_semaphore,
-                        .stage     = STAGE_PIXEL_SHADER,
+                        .stage     = PixelShader,
                     });
 
     const auto status = m_device.present(m_queue);

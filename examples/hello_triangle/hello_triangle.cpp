@@ -45,7 +45,7 @@ HelloTriangle::HelloTriangle(const WindowState& window_state) {
 
     m_device.configure_surface({
         .format       = m_swapchain_format,
-        .usages       = loon::gpu::USAGE_FLAGS::COLOR_ATTACHMENT,
+        .usages       = loon::gpu::UsageFlags::ColorAttachment,
         .width        = window_state.width,
         .height       = window_state.height,
         .present_mode = PresentMode::Fifo,
@@ -80,7 +80,7 @@ void HelloTriangle::recreate_swapchain(uint32_t width, uint32_t height) {
     m_device.unconfigure_surface();
     m_device.configure_surface({
         .format       = m_swapchain_format,
-        .usages       = loon::gpu::USAGE_FLAGS::COLOR_ATTACHMENT,
+        .usages       = loon::gpu::UsageFlags::ColorAttachment,
         .width        = width,
         .height       = height,
         .present_mode = PresentMode::Fifo,
@@ -110,8 +110,8 @@ void HelloTriangle::Update(const WindowState& window) {
 
     auto command_buffer = m_device.start_command_recording(m_queue);
 
-    command_buffer.barrier(loon::gpu::STAGE_RASTER_COLOR_OUT,
-                           loon::gpu::STAGE_RASTER_COLOR_OUT,
+    command_buffer.barrier(loon::gpu::RasterColorOut,
+                           loon::gpu::RasterColorOut,
                            TextureTransition{
                                .texture    = surface_texture.texture,
                                .old_layout = loon::gpu::Layout::DontCare,
@@ -129,8 +129,8 @@ void HelloTriangle::Update(const WindowState& window) {
     command_buffer.draw(0, 0, 3, 1);
 
     command_buffer.end_render_pass();
-    command_buffer.barrier(STAGE_RASTER_COLOR_OUT,
-                           STAGE_RASTER_COLOR_OUT,
+    command_buffer.barrier(RasterColorOut,
+                           RasterColorOut,
                            TextureTransition{
                                .texture    = surface_texture.texture,
                                .old_layout = Layout::Attachment,
@@ -141,7 +141,7 @@ void HelloTriangle::Update(const WindowState& window) {
                     command_buffer,
                     SemaphoreInfo{
                         .semaphore = surface_texture.acquire_semaphore,
-                        .stage     = loon::gpu::STAGE_RASTER_COLOR_OUT,
+                        .stage     = loon::gpu::RasterColorOut,
                     });
 
     const auto status = m_device.present(m_queue);

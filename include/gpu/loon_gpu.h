@@ -11,16 +11,32 @@
 #    define REQUIRES(x)
 #endif
 
+// Helpers for flags - can use enum class for type safety while still allowing binary ops.
+#define LOON_BITWISE_BINARY_OP(name, op)                                                           \
+    inline constexpr name operator op(name lhs, name rhs) {                                        \
+        using U = std::underlying_type_t<name>;                                                    \
+        return name(static_cast<U>(lhs) op static_cast<U>(rhs));                                   \
+    }
+
+#define LOON_BITWISE_ASSIGNMENT_OP(name, op)                                                       \
+    inline constexpr name operator op##=(name lhs, name rhs) {                                     \
+        lhs = lhs op rhs;                                                                          \
+        return lhs;                                                                                \
+    }
+
+#define LOON_DEFINE_BITWISE_OPS(name)                                                              \
+    LOON_BITWISE_BINARY_OP(name, |);                                                               \
+    LOON_BITWISE_BINARY_OP(name, &);                                                               \
+    LOON_BITWISE_BINARY_OP(name, ^);                                                               \
+    LOON_BITWISE_ASSIGNMENT_OP(name, |);                                                           \
+    LOON_BITWISE_ASSIGNMENT_OP(name, &);                                                           \
+    LOON_BITWISE_ASSIGNMENT_OP(name, ^);
+
 
 namespace loon::gpu {
 
-constexpr size_t kMaxColorAttachments      = 16;
-constexpr size_t kMaxNumBuffers            = 32ull * 1024;
-constexpr size_t kMaxNumTextures           = 64ull * 1024;
-constexpr size_t kMaxNumTextureViews       = 128ull * 1024;
-constexpr size_t kMaxTextureHeapSize       = 32ull * 1024;
-constexpr size_t kMaxNumTextureHeaps       = 1024;
-constexpr size_t kMaxNumDepthStencilStates = 32ull * 1024;
+constexpr size_t kMaxTextureHeapSize = 32ull * 1024;
+constexpr size_t kMaxNumTextureHeaps = 1024;
 
 template <class T>
 class Span {
@@ -104,8 +120,6 @@ class Span {
     T*     m_ptr{nullptr};
     size_t m_len{0};
 };
-
-using ByteSpan = Span<uint8_t>;
 
 inline constexpr Span<const char> operator""_sv(const char* val, size_t len) {
     return Span<const char>(val, len);
@@ -212,6 +226,7 @@ struct Semaphore;
 using GpuPtr = uint64_t;
 
 // MARK: Enums
+
 enum class LogLevel : uint8_t {
     Off,
     Error,
@@ -238,11 +253,12 @@ enum class Cull : uint8_t {
     None,
 };
 
-enum DEPTH_FLAGS {
-    DEPTH_NONE  = 0,
-    DEPTH_READ  = 0x1,
-    DEPTH_WRITE = 0x2,
+enum class DepthFlags : uint8_t {
+    None  = 0,
+    Read  = 0x1,
+    Write = 0x2,
 };
+LOON_DEFINE_BITWISE_OPS(DepthFlags);
 
 enum class Op : uint8_t {
     Never,
@@ -278,17 +294,17 @@ enum class Topology : uint8_t {
     TriangleFan,
 };
 
-enum class TextureType {
+enum class TextureType : uint8_t {
     Tex1D,
     Tex2D,
     Tex3D,
     TexCube,
     Tex2DArray,
-    TexCubeArray
+    TexCubeArray,
 };
 
 enum class Format : uint32_t {
-    NONE                 = 0x00000000,
+    None                 = 0x00000000,
     R8Unorm              = 0x00000001,
     R8Snorm              = 0x00000002,
     R8Uint               = 0x00000003,
@@ -394,58 +410,55 @@ enum class Format : uint32_t {
     ValidCount,
 };
 
-enum USAGE_FLAGS {
-    NONE                     = 0,
-    SAMPLED                  = 0x01,
-    STORAGE                  = 0x02,
-    COLOR_ATTACHMENT         = 0x04,
-    DEPTH_STENCIL_ATTACHMENT = 0x08,
-    TRANSFER_SRC             = 0x10,
-    TRANSFER_DST             = 0x20,
+enum class UsageFlags : uint16_t {
+    None                   = 0,
+    Sampled                = 0x01,
+    Storage                = 0x02,
+    ColorAttachment        = 0x04,
+    DepthStencilAttachment = 0x08,
+    TransferSrc            = 0x10,
+    TransferDst            = 0x20,
 };
+LOON_DEFINE_BITWISE_OPS(UsageFlags);
 
-enum STAGE_FLAGS {
-    STAGE_NONE             = 0,
-    STAGE_TRANSFER         = 0x01,
-    STAGE_COMPUTE          = 0x02,
-    STAGE_RASTER_COLOR_OUT = 0x04,
-    STAGE_PIXEL_SHADER     = 0x08,
-    STAGE_VERTEX_SHADER    = 0x10,
-    STAGE_HOST             = 0x20,
+enum StageFlags : uint16_t {
+    None           = 0,
+    Transfer       = 0x01,
+    Compute        = 0x02,
+    RasterColorOut = 0x04,
+    PixelShader    = 0x08,
+    VertexShader   = 0x10,
+    Host           = 0x20,
 };
+LOON_DEFINE_BITWISE_OPS(StageFlags);
 
-enum class Layout {
+enum class Layout : uint8_t {
     DontCare = 0,
     General,
     Attachment,
     Present,
 };
 
-enum ACCESS_FLAGS {
-    ACCESS_READ       = 0x1,
-    ACCESS_WRITE      = 0x2,
-    ACCESS_READ_WRITE = ACCESS_READ | ACCESS_WRITE,
+enum class HazardFlags : uint8_t {
+    DrawArguments = 0x1,
+    Descriptors   = 0x2,
+    DepthStencil  = 0x4,
 };
+LOON_DEFINE_BITWISE_OPS(HazardFlags);
 
-enum HAZARD_FLAGS {
-    HAZARD_DRAW_ARGUMENTS = 0x1,
-    HAZARD_DESCRIPTORS    = 0x2,
-    HAZARD_DEPTH_STENCIL  = 0x4
-};
-
-enum class LoadOp {
+enum class LoadOp : uint8_t {
     Undefined,
     Load,
     Clear,
 };
 
-enum class StoreOp {
+enum class StoreOp : uint8_t {
     Undefined,
     Store,
     Discard,
 };
 
-enum class QueueType {
+enum class QueueType : uint8_t {
     Default,
     Compute,
     Transfer,
@@ -453,7 +466,7 @@ enum class QueueType {
     ValidCount,
 };
 
-enum class PresentMode {
+enum class PresentMode : uint8_t {
     Immediate,
     Mailbox,
     Fifo,
@@ -462,11 +475,27 @@ enum class PresentMode {
     ValidCount,
 };
 
-enum class SurfaceStatus {
+enum class SurfaceStatus : uint8_t {
     Success,
     Suboptimal,
     OutOfDate,
     Error,
+};
+
+enum class SamplerCoords : uint8_t {
+    Normalized,
+    Pixel,
+};
+
+enum class SamplerFilter : uint8_t {
+    Nearest,
+    Linear,
+};
+
+enum class SamplerAddressing : uint8_t {
+    ClampToEdge,
+    Repeat,
+    Mirrored,
 };
 
 // Custom allocation callback - essentially a realloc function but not exactly
@@ -515,19 +544,15 @@ struct Stencil {
 };
 
 struct SamplerDesc {
-    enum class Coord { NORMALIZED, PIXEL };
-    enum class Filter { NEAREST, LINEAR };
-    enum class Address { CLAMP_TO_EDGE, REPEAT, MIRRORED };
-
-    Coord   coord   = Coord::NORMALIZED;
-    Filter  filter  = Filter::NEAREST;
-    Address address = Address::CLAMP_TO_EDGE;
+    SamplerCoords     coord   = SamplerCoords::Normalized;
+    SamplerFilter     filter  = SamplerFilter::Nearest;
+    SamplerAddressing address = SamplerAddressing::ClampToEdge;
 };
 
 static constexpr SamplerDesc kDefaultSamplers[] = {SamplerDesc{
-    .coord   = SamplerDesc::Coord::NORMALIZED,
-    .filter  = SamplerDesc::Filter::LINEAR,
-    .address = SamplerDesc::Address::CLAMP_TO_EDGE,
+    .coord   = SamplerCoords::Normalized,
+    .filter  = SamplerFilter::Linear,
+    .address = SamplerAddressing::ClampToEdge,
 }};
 
 struct DeviceDesc {
@@ -546,15 +571,15 @@ struct DeviceDesc {
 };
 
 struct DepthStencilDesc {
-    DEPTH_FLAGS depth_mode              = DEPTH_NONE;
-    Op          depth_test              = Op::Always;
-    float       depth_bias              = 0.0f;
-    float       depth_bias_slope_factor = 0.0f;
-    float       depth_bias_clamp        = 0.0f;
-    uint8_t     stencil_read_mask       = 0xff;
-    uint8_t     stencil_write_mask      = 0xff;
-    Stencil     stencil_front;
-    Stencil     stencil_bsack;
+    DepthFlags depth_mode              = DepthFlags::None;
+    Op         depth_test              = Op::Always;
+    float      depth_bias              = 0.0f;
+    float      depth_bias_slope_factor = 0.0f;
+    float      depth_bias_clamp        = 0.0f;
+    uint8_t    stencil_read_mask       = 0xff;
+    uint8_t    stencil_write_mask      = 0xff;
+    Stencil    stencil_front;
+    Stencil    stencil_bsack;
 };
 
 struct BlendDesc {
@@ -568,7 +593,7 @@ struct BlendDesc {
 };
 
 struct ColorTarget {
-    Format  format     = Format::NONE;
+    Format  format     = Format::None;
     uint8_t write_mask = 0xf;
 };
 
@@ -578,16 +603,16 @@ struct RasterDesc {
     bool                    alpha_to_coverage            = false;
     bool                    support_dual_source_blending = false;
     uint8_t                 sample_count                 = 1;
-    Format                  depth_format                 = Format::NONE;
-    Format                  stencil_format               = Format::NONE;
+    Format                  depth_format                 = Format::None;
+    Format                  stencil_format               = Format::None;
     Span<const ColorTarget> color_targets                = {};
     BlendDesc               blendstate                   = {};
 };
 
 struct RenderAttachment {
     Handle<TextureView> texture_view = {0};
-    LoadOp             load_op;
-    StoreOp            store_op;
+    LoadOp              load_op;
+    StoreOp             store_op;
     Color               clear_color;
 };
 
@@ -598,17 +623,17 @@ struct RenderPassDesc {
 };
 
 struct TextureDesc {
-    TextureType     type = TextureType::Tex2D;
+    TextureType type = TextureType::Tex2D;
     Dimension3D dimensions;
     uint32_t    mip_count    = 1;
     uint32_t    layer_count  = 1;
     uint32_t    sample_count = 1;
-    Format      format       = Format::NONE;
-    USAGE_FLAGS usage        = USAGE_FLAGS::NONE;
+    Format      format       = Format::None;
+    UsageFlags  usage        = UsageFlags::None;
 };
 
 struct TextureViewDesc {
-    Format   format      = Format::NONE;
+    Format   format      = Format::None;
     uint8_t  base_mip    = 0;
     uint8_t  mip_count   = 1;
     uint16_t base_layer  = 0;
@@ -621,19 +646,19 @@ struct TextureSizeAlign {
 };
 
 struct ShaderSource {
-    ByteSpan         spirv;
+    Span<uint8_t>    spirv;
     Span<const char> entry_point;
 };
 
 struct SurfaceCapabilities {
-    USAGE_FLAGS             usages;
+    UsageFlags              usages;
     Span<const Format>      formats;
     Span<const PresentMode> present_modes;
 };
 
 struct SurfaceConfiguration {
     Format      format;
-    USAGE_FLAGS usages;
+    UsageFlags  usages;
     uint32_t    width;
     uint32_t    height;
     PresentMode present_mode;
@@ -650,7 +675,7 @@ struct SurfaceTextureInfo {
 struct SemaphoreInfo {
     Handle<Semaphore> semaphore;
     uint64_t          value;
-    STAGE_FLAGS stage = STAGE_NONE;  // Ignored on signal operations, what stage must be blocked on
+    StageFlags        stage = None;  // Ignored on signal operations, what stage must be blocked on
                                      // the wait operation
 };
 
@@ -714,9 +739,6 @@ class Device {
     Handle<Pipeline> create_graphics_pipeline(ShaderSource      vertex,
                                               ShaderSource      fragment,
                                               const RasterDesc& desc);
-    Handle<Pipeline> create_graphics_meshlet_pipeline(ByteSpan   meshletIR,
-                                                      ByteSpan   pixelIR,
-                                                      RasterDesc desc);
     void             free(Handle<Pipeline> pipeline);
 
     // State objects
@@ -761,10 +783,10 @@ class CommandBuffer {
 
     void set_texture_heap(Handle<TextureHeap> heap);
 
-    void barrier(STAGE_FLAGS                   before,
-                 STAGE_FLAGS                   after,
+    void barrier(StageFlags                    before,
+                 StageFlags                    after,
                  Span<const TextureTransition> image_transitions = {},
-                 HAZARD_FLAGS                  hazards           = HAZARD_FLAGS(0));
+                 HazardFlags                   hazards           = HazardFlags(0));
 
     void set_pipeline(Handle<Pipeline> pipeline);
     void set_depth_stencil_State(Handle<DepthStencilState> state);
@@ -794,9 +816,6 @@ class CommandBuffer {
                                                GpuPtr   argsGpu,
                                                GpuPtr   drawCountGpu,
                                                uint32_t maxDraws);
-
-    void draw_meshlets(GpuPtr meshletDataGpu, GpuPtr pixelDataGpu, const Dimension3D& dim);
-    void draw_meshlets_indirect(GpuPtr meshletDataGpu, GpuPtr pixelDataGpu, GpuPtr dimGpu);
 
    private:
     void set_compute_ptr(GpuPtr dataGpu);
