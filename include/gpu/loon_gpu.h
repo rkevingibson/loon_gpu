@@ -544,15 +544,17 @@ struct Stencil {
 };
 
 struct SamplerDesc {
-    SamplerCoords     coord   = SamplerCoords::Normalized;
-    SamplerFilter     filter  = SamplerFilter::Nearest;
-    SamplerAddressing address = SamplerAddressing::ClampToEdge;
+    SamplerCoords     coord          = SamplerCoords::Normalized;
+    SamplerFilter     filter         = SamplerFilter::Nearest;
+    SamplerAddressing address        = SamplerAddressing::ClampToEdge;
+    float             max_anisotropy = 0.0f;
 };
 
 static constexpr SamplerDesc kDefaultSamplers[] = {SamplerDesc{
-    .coord   = SamplerCoords::Normalized,
-    .filter  = SamplerFilter::Linear,
-    .address = SamplerAddressing::ClampToEdge,
+    .coord          = SamplerCoords::Normalized,
+    .filter         = SamplerFilter::Linear,
+    .address        = SamplerAddressing::ClampToEdge,
+    .max_anisotropy = 8.0f,
 }};
 
 struct DeviceDesc {
@@ -755,11 +757,8 @@ class Device {
                 Span<const SemaphoreInfo> wait_semaphores,
                 Span<const SemaphoreInfo> signal_semaphores = {});
     void cancel(Handle<Queue> queue, Span<const Handle<CommandBuffer>> commandBuffers);
-
-
     void on_submitted_work_completed(Handle<Queue> queue, Function<void>&& fn);
     void process_events(Handle<Queue> queue);
-
 
     // Semaphores
     Handle<Semaphore> create_semaphore(uint64_t initValue);
@@ -821,12 +820,10 @@ class CommandBuffer {
     void set_compute_ptr(GpuPtr dataGpu);
     void set_graphics_ptrs(GpuPtr vertexDataGpu, GpuPtr fragmentDataGpu);
 
-    // Internally, we don't bother keeping these as an indirect handle, and instead store the small
-    // amount of data we need inline.
     friend class Device::Impl;
-    CommandBuffer(uint64_t buffer, uint64_t device) : buffer{buffer}, device(device) {};
-    uint64_t buffer;
-    uint64_t device;
+    CommandBuffer(void* buffer, void* device) : buffer{buffer}, device(device) {};
+    void* buffer;
+    void* device;
 };
 
 }  // namespace loon::gpu

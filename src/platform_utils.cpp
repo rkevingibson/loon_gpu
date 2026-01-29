@@ -1,11 +1,21 @@
 #include "platform_utils.h"
 
+
 #if _WIN32
-// TODO: Since we have such a small subset of needed instructions, could just manually declare them
-// here instead of including the header.
-#    define WIN32_LEAN_AND_MEAN
-#    include <Windows.h>
-#    include <synchapi.h>
+
+// We avoid including Windows.h by just defining the handful of functions we care about.
+// We still need intrin.h for the atomic intrinsics.
+#    include <intrin.h>
+extern "C" {
+typedef void(__stdcall* PFLS_CALLBACK_FUNCTION)(void* lpFlsData);
+__declspec(dllimport) unsigned long __stdcall FlsAlloc(PFLS_CALLBACK_FUNCTION lpCallback);
+__declspec(dllimport) void* __stdcall FlsGetValue(unsigned long dwFlsIndex);
+__declspec(dllimport) int __stdcall FlsSetValue(unsigned long dwFlsIndex, void* lpFlsData);
+__declspec(dllimport) int __stdcall FlsFree(unsigned long dwFlsIndex);
+__declspec(dllimport) void __stdcall AcquireSRWLockExclusive(void* SRWLock);
+__declspec(dllimport) void __stdcall ReleaseSRWLockExclusive(void* SRWLock);
+}
+
 #elif __linux__ || __APPLE__
 #    include <pthread.h>
 #else
@@ -31,7 +41,7 @@ void* tls_get_data(tls_key key) {
 }
 
 int64_t atomic_exchange(int64_t* x, int64_t val) {
-    return InterlockedExchange64(x, val);
+    return _InterlockedExchange64(x, val);
 }
 
 int64_t atomic_load(int64_t* x) {
@@ -39,21 +49,21 @@ int64_t atomic_load(int64_t* x) {
 }
 
 int64_t atomic_fetch_add(int64_t* x, int64_t val) {
-    return InterlockedExchangeAdd64(x, val);
+    return _InterlockedExchangeAdd64(x, val);
 }
 
 bool atomic_compare_exchange(int64_t* dst, int64_t* expected, int64_t desired) {
     int64_t original = *expected;
-    *expected        = InterlockedCompareExchange64(dst, desired, *expected);
+    *expected        = _InterlockedCompareExchange64(dst, desired, *expected);
     return original == *expected;
 }
 
 void mutex_lock(mutex* mtx) {
-    AcquireSRWLockExclusive((PSRWLOCK)mtx);
+    AcquireSRWLockExclusive(mtx);
 }
 
 void mutex_unlock(mutex* mtx) {
-    ReleaseSRWLockExclusive((PSRWLOCK)mtx);
+    ReleaseSRWLockExclusive(mtx);
 }
 
 #elif __linux__ || __APPLE__

@@ -736,7 +736,9 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
     VkPhysicalDeviceFeatures2 device_features{
         .sType    = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
         .pNext    = &vulkan_11_features,
-        .features = {},
+        .features = {
+            .samplerAnisotropy = true,
+        },
     };
 
     VkDeviceCreateInfo create_info{
@@ -827,8 +829,8 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
             .addressModeU            = bridge_address(sampler_desc.address),
             .addressModeV            = bridge_address(sampler_desc.address),
             .addressModeW            = bridge_address(sampler_desc.address),
-            .anisotropyEnable        = VK_FALSE,  // TODO: Probably want this on :P
-            .maxAnisotropy           = 8.0,
+            .anisotropyEnable        = (sampler_desc.max_anisotropy != 0.0f),
+            .maxAnisotropy           = sampler_desc.max_anisotropy,
             .compareEnable           = VK_FALSE,
             .minLod                  = 0.0f,
             .maxLod                  = VK_LOD_CLAMP_NONE,
@@ -1363,8 +1365,7 @@ uint32_t Device::Impl::add_texture_view_to_heap(Handle<TextureHeap> heap,
                                                 Handle<TextureView> view) {
     auto&       texture_heap = m_texture_heap_pool[heap];
     const auto& texture_view = m_texture_view_pool[view];
-    // TODO: Use some data structure to find an empty slot in the heap.
-    uint32_t free_slot = texture_heap.bitset.set_leading_zero();
+    uint32_t    free_slot    = texture_heap.bitset.set_leading_zero();
 
     const VkDescriptorImageInfo image_info{
         .sampler     = VK_NULL_HANDLE,
@@ -1736,7 +1737,7 @@ CommandBuffer Device::Impl::start_command_recording(Handle<Queue> queue) {
     };
     m_api.vkBeginCommandBuffer(cmd, &begin_info);
 
-    return CommandBuffer(reinterpret_cast<uint64_t>(cmd), reinterpret_cast<uint64_t>(this));
+    return CommandBuffer(cmd, this);
 }
 
 void Device::Impl::submit(Handle<Queue>             queue,
@@ -2265,10 +2266,10 @@ void CommandBuffer::set_texture_heap(Handle<TextureHeap> heap) {
                                         nullptr);
 }
 
-void CommandBuffer::barrier(StageFlags                   before,
-                            StageFlags                   after,
+void CommandBuffer::barrier(StageFlags                    before,
+                            StageFlags                    after,
                             Span<const TextureTransition> image_transitions,
-                            HazardFlags                  hazards) {
+                            HazardFlags                   hazards) {
     auto impl = reinterpret_cast<Device::Impl*>(device);
     // TODO: Use HazardFlags to reduce the stage/access_masks unless necessary.
     const auto     src_stage = bridge_pipeline_stage(before);

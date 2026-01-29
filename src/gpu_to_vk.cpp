@@ -113,7 +113,7 @@ VkFormat bridge(Format format) {
 VkImageAspectFlags aspects_for_format(Format format) {
     switch (format) {
         case Format::Stencil8: return VK_IMAGE_ASPECT_STENCIL_BIT;
-        case Format::Depth16Unorm: return VK_IMAGE_ASPECT_DEPTH_BIT;
+        case Format::Depth16Unorm: [[fallthrough]];
         case Format::Depth24Plus: return VK_IMAGE_ASPECT_DEPTH_BIT;
         case Format::Depth24PlusStencil8:
             return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
@@ -261,9 +261,9 @@ VkPipelineStageFlags2 bridge_pipeline_stage(StageFlags stage) {
     out |= (stage & Compute) ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT : 0;
     out |= (stage & RasterColorOut) ? VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT : 0;
     out |= (stage & PixelShader) ? VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
-                                              | VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT
-                                              | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT
-                                        : 0;
+                                       | VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT
+                                       | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT
+                                 : 0;
     out |= (stage & VertexShader)
                ? VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT
                : 0;
@@ -273,10 +273,8 @@ VkPipelineStageFlags2 bridge_pipeline_stage(StageFlags stage) {
 
 UsageFlags bridge_usage_flags(VkImageUsageFlags flags) {
     UsageFlags usage = UsageFlags::None;
-    usage |= (flags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ? UsageFlags::TransferSrc
-                                                       : UsageFlags::None;
-    usage |= (flags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) ? UsageFlags::TransferDst
-                                                       : UsageFlags::None;
+    usage |= (flags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ? UsageFlags::TransferSrc : UsageFlags::None;
+    usage |= (flags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) ? UsageFlags::TransferDst : UsageFlags::None;
     usage |= (flags & VK_IMAGE_USAGE_SAMPLED_BIT) ? UsageFlags::Sampled : UsageFlags::None;
     usage |= (flags & VK_IMAGE_USAGE_STORAGE_BIT) ? UsageFlags::Storage : UsageFlags::None;
     usage |= (flags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) ? UsageFlags::ColorAttachment
