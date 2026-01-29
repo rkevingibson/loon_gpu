@@ -801,6 +801,7 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
             case SamplerFilter::Nearest: return VK_FILTER_NEAREST;
             case SamplerFilter::Linear: return VK_FILTER_LINEAR;
         }
+        return VK_FILTER_MAX_ENUM;
     };
 
     constexpr auto bridge_mip_mode = [](SamplerFilter f) {
@@ -808,6 +809,7 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
             case SamplerFilter::Nearest: return VK_SAMPLER_MIPMAP_MODE_NEAREST;
             case SamplerFilter::Linear: return VK_SAMPLER_MIPMAP_MODE_LINEAR;
         }
+        return VK_SAMPLER_MIPMAP_MODE_MAX_ENUM;
     };
 
     constexpr auto bridge_address = [](SamplerAddressing a) {
@@ -816,6 +818,7 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
             case SamplerAddressing::Repeat: return VK_SAMPLER_ADDRESS_MODE_REPEAT;
             case SamplerAddressing::Mirrored: return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
         }
+        return VK_SAMPLER_ADDRESS_MODE_MAX_ENUM;
     };
 
     for (const auto& sampler_desc : desc.samplers) {

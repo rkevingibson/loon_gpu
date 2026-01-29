@@ -5,8 +5,9 @@
 #if __APPLE__
 #    include <mach-o/dyld.h>
 #elif _WIN32
-#    include <Windows.h>
-//__declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void*, char*, unsigned long);
+
+extern "C"
+    __declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void*, char*, unsigned long);
 
 #endif
 

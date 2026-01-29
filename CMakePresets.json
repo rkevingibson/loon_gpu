@@ -1,101 +1,139 @@
 {
     "version": 3,
-    "configurePresets": [
-        {
-            "name": "Development-Base",
-            "hidden": true,
-            "generator": "Ninja Multi-Config",
-            "binaryDir": "${sourceDir}/build/",
-            "cacheVariables": {
-                "FETCHCONTENT_BASE_DIR": "${sourceDir}/build/external",
-                "CMAKE_OPTIMIZE_DEPENDENCIES": "YES",
-                "CMAKE_CONFIGURATION_TYPES": "Debug;RelWithDebInfo",
-                "LOON_GPU_BUILD_EXAMPLES": "YES",
-                "LOON_GPU_BUILD_TESTS": "YES",
-                "LOON_GPU_WERROR": "YES",
-                "LOON_GPU_INSTALL": "YES",
-                "CMAKE_INSTALL_PREFIX": "${sourceDir}/install"
-            }
-        },
-        {
-            "name": "Development Windows",
-            "displayName": "Development",
-            "inherits": [
-                "Development-Base"
-            ],
-            "hidden": false,
-            "description": "Sets Ninja generator, Clang compilers, x64 architecture, Multiple Configurations",
-            "condition": {
-                "type": "inList",
-                "string": "${hostSystemName}",
-                "list": [
-                    "Windows"
-                ]
-            },
-            "architecture": {
-                "value": "x64",
-                "strategy": "external"
-            },
-            "cacheVariables": {
-                "CMAKE_C_COMPILER": "clang-cl.exe",
-                "CMAKE_CXX_COMPILER": "clang-cl.exe"
-            }
-        },
-        {
-            "name": "Development MacOS",
-            "displayName": "Development",
-            "inherits": [
-                "Development-Base"
-            ],
-            "hidden": false,
-            "description": "Sets Ninja generator, Clang compilers, arm64 architecture, Multiple Configurations",
-            "condition": {
-                "type": "inList",
-                "string": "${hostSystemName}",
-                "list": [
-                    "Darwin"
-                ]
-            },
-            "architecture": {
-                "value": "arm64",
-                "strategy": "external"
-            },
-            "cacheVariables": {
-                "CMAKE_C_COMPILER": "clang",
-                "CMAKE_CXX_COMPILER": "clang++"
-            }
-        }
-    ],
-    "buildPresets": [
-        {
-            "name": "Debug Windows",
-            "displayName": "Debug",
-            "hidden": false,
-            "configuration": "Debug",
-            "configurePreset": "Development Windows"
-        },
-        {
-            "name": "RelWithDebInfo Windows",
-            "displayName": "RelWithDebInfo",
-            "hidden": false,
-            "configuration": "RelWithDebInfo",
-            "configurePreset": "Development Windows"
-        },
-        {
-            "name": "Debug MacOS",
-            "displayName": "Debug",
-            "hidden": false,
-            "configuration": "Debug",
-            "configurePreset": "Development MacOS"
-        },
-        {
-            "name": "RelWithDebInfo MacOS",
-            "displayName": "RelWithDebInfo",
-            "hidden": false,
-            "configuration": "RelWithDebInfo",
-            "configurePreset": "Development MacOS"
-        }
-    ],
+  "configurePresets": [
+    {
+      "name": "Development-Base",
+      "hidden": true,
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/",
+      "cacheVariables": {
+        "FETCHCONTENT_BASE_DIR": "${sourceDir}/build/external",
+        "CMAKE_OPTIMIZE_DEPENDENCIES": "YES",
+        "CMAKE_CONFIGURATION_TYPES": "Debug;RelWithDebInfo",
+        "LOON_GPU_BUILD_EXAMPLES": "YES",
+        "LOON_GPU_BUILD_TESTS": "YES",
+        "LOON_GPU_WERROR": "YES",
+        "LOON_GPU_INSTALL": "YES",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/install"
+      }
+    },
+    {
+      "name": "Development Windows Clang",
+      "displayName": "Development",
+      "inherits": [
+        "Development-Base"
+      ],
+      "hidden": false,
+      "description": "Sets Ninja generator, Clang compilers, x64 architecture, Multiple Configurations",
+      "condition": {
+        "type": "inList",
+        "string": "${hostSystemName}",
+        "list": [
+          "Windows"
+        ]
+      },
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang-cl.exe",
+        "CMAKE_CXX_COMPILER": "clang-cl.exe"
+      }
+    },
+    {
+      "name": "Development Windows MSVC",
+      "displayName": "Development MSVC",
+      "inherits": [
+        "Development-Base"
+      ],
+      "hidden": false,
+      "description": "Sets Ninja generator, MSVC compilers, x64 architecture, Multiple Configurations",
+      "condition": {
+        "type": "inList",
+        "string": "${hostSystemName}",
+        "list": [
+          "Windows"
+        ]
+      },
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl.exe",
+        "CMAKE_CXX_COMPILER": "cl.exe"
+      }
+    },
+    {
+      "name": "Development MacOS",
+      "displayName": "Development",
+      "inherits": [
+        "Development-Base"
+      ],
+      "hidden": false,
+      "description": "Sets Ninja generator, Clang compilers, arm64 architecture, Multiple Configurations",
+      "condition": {
+        "type": "inList",
+        "string": "${hostSystemName}",
+        "list": [
+          "Darwin"
+        ]
+      },
+      "architecture": {
+        "value": "arm64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "Debug Windows Clang",
+      "displayName": "Debug",
+      "hidden": false,
+      "configuration": "Debug",
+      "configurePreset": "Development Windows Clang"
+    },
+    {
+      "name": "RelWithDebInfo Windows Clang",
+      "displayName": "RelWithDebInfo",
+      "hidden": false,
+      "configuration": "RelWithDebInfo",
+      "configurePreset": "Development Windows Clang"
+    },
+    {
+      "name": "Debug Windows MSVC",
+      "displayName": "MSVC Debug",
+      "hidden": false,
+      "configuration": "Debug",
+      "configurePreset": "Development Windows MSVC"
+    },
+    {
+      "name": "RelWithDebInfo Windows MSVC",
+      "displayName": "MSVC RelWithDebInfo",
+      "hidden": false,
+      "configuration": "RelWithDebInfo",
+      "configurePreset": "Development Windows MSVC"
+    },
+    {
+      "name": "Debug MacOS",
+      "displayName": "Debug",
+      "hidden": false,
+      "configuration": "Debug",
+      "configurePreset": "Development MacOS"
+    },
+    {
+      "name": "RelWithDebInfo MacOS",
+      "displayName": "RelWithDebInfo",
+      "hidden": false,
+      "configuration": "RelWithDebInfo",
+      "configurePreset": "Development MacOS"
+    }
+  ],
     "cmakeMinimumRequired": {
         "major": 3,
         "minor": 23

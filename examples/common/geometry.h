@@ -58,7 +58,7 @@ inline constexpr float radians_from_degrees(float degrees) {
 }
 
 // Computes a*b - c*d, avoiding catastrophic cancellations via Karan's algorithm
-inline constexpr float differenceOfProducts(float a, float b, float c, float d) {
+inline float differenceOfProducts(float a, float b, float c, float d) {
     float cd  = c * d;
     float err = std::fmaf(-c, d, cd);
     float dop = std::fmaf(a, b, -cd);
@@ -66,7 +66,7 @@ inline constexpr float differenceOfProducts(float a, float b, float c, float d) 
 }
 
 // Computes a*b + c*d, avoiding catastrophic cancellations via Karan's algorithm
-inline constexpr float sumOfProducts(float a, float b, float c, float d) {
+inline float sumOfProducts(float a, float b, float c, float d) {
     float cd  = c * d;
     float err = std::fmaf(-c, d, cd);
     float sop = std::fmaf(a, b, cd);
@@ -83,7 +83,7 @@ inline constexpr float dot(const float3& a, const float3& b) {
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
-inline constexpr float3 cross(const float3& a, const float3& b) {
+inline float3 cross(const float3& a, const float3& b) {
     return {
         .x = differenceOfProducts(a.y, b.z, a.z, b.y),
         .y = differenceOfProducts(a.z, b.x, a.x, b.z),
@@ -111,11 +111,11 @@ inline constexpr float squaredLength(const float3& a) {
     return a.x * a.x + a.y * a.y + a.z * a.z;
 }
 
-inline constexpr float length(const float3& a) {
+inline float length(const float3& a) {
     return std::sqrtf(squaredLength(a));
 }
 
-inline constexpr float3 normalized(const float3& a) {
+inline float3 normalized(const float3& a) {
     const float invLen = 1.f / length(a);
     return {a.x * invLen, a.y * invLen, a.z * invLen};
 }

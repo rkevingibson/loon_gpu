@@ -1,5 +1,3 @@
-#include <format>
-
 #include "geometry.h"
 #include "utest.h"
 

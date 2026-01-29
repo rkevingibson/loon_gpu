@@ -331,6 +331,7 @@ VkBlendFactor bridge(Factor factor) {
         case Factor::DstColor: return VK_BLEND_FACTOR_DST_COLOR;
         case Factor::SrcAlpha: return VK_BLEND_FACTOR_SRC_ALPHA;
     }
+    return VK_BLEND_FACTOR_MAX_ENUM;
 }
 
 VkBlendOp bridge(Blend op) {
@@ -341,6 +342,7 @@ VkBlendOp bridge(Blend op) {
         case Blend::Min: return VK_BLEND_OP_MIN;
         case Blend::Max: return VK_BLEND_OP_MAX;
     }
+    return VK_BLEND_OP_MAX_ENUM;
 }
 
 VkPipelineColorBlendAttachmentState bridge(const BlendDesc& state) {
@@ -362,6 +364,7 @@ VkAttachmentLoadOp bridge(LoadOp op) {
         case LoadOp::Load: return VK_ATTACHMENT_LOAD_OP_LOAD;
         case LoadOp::Clear: return VK_ATTACHMENT_LOAD_OP_CLEAR;
     }
+    return VK_ATTACHMENT_LOAD_OP_MAX_ENUM;
 }
 
 VkAttachmentStoreOp bridge(StoreOp op) {
@@ -370,6 +373,7 @@ VkAttachmentStoreOp bridge(StoreOp op) {
         case StoreOp::Store: return VK_ATTACHMENT_STORE_OP_STORE;
         case StoreOp::Discard: return VK_ATTACHMENT_STORE_OP_DONT_CARE;
     }
+    return VK_ATTACHMENT_STORE_OP_MAX_ENUM;
 }
 
 VkCompareOp bridge(Op op) {
@@ -393,6 +397,7 @@ VkImageLayout bridge(Layout layout) {
         case Layout::Attachment: return VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
         case Layout::Present: return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     }
+    return VK_IMAGE_LAYOUT_MAX_ENUM;
 }
 
 }  // namespace loon::gpu
