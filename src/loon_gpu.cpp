@@ -1,6 +1,5 @@
 #include "gpu/loon_gpu.h"
 
-#include <algorithm>  // TODO: Work out replacements for this for faster compilation.
 #include <cassert>
 #include <cstddef>
 
@@ -257,6 +256,25 @@ struct Device::Impl {
     };
     static constexpr auto kPtrMapCompare
         = [](const GpuPtrMap& a, const GpuPtrMap& b) -> bool { return a.ptr > b.ptr; };
+
+    static constexpr auto lower_bound
+        = [](GpuPtrMap* first, GpuPtrMap* last, const GpuPtrMap& value) {
+              GpuPtrMap* it;
+              size_t     count = last - first;
+              while (count > 0) {
+                  const size_t step = count / 2;
+                  it                = first + step;
+                  if (kPtrMapCompare(*it, value)) {
+                      first = ++it;
+                      count -= step + 1;
+                  } else {
+                      count = step;
+                  }
+              }
+
+              return first;
+          };
+
     Vector<GpuPtrMap> m_ptr_map;
 
     Queue m_queues[static_cast<size_t>(QueueType::ValidCount)];
@@ -531,16 +549,15 @@ Device::Impl::Impl(const DeviceDesc& desc) :
         auto state = reinterpret_cast<ThreadLocalState*>(data);
         state->~ThreadLocalState();
     })},
-    m_buffer_pool{m_allocator,
-                  [this](Buffer* b) {
-                      vmaDestroyBuffer(m_vma, b->vk_buffer, b->vk_allocation);
-                      auto it = std::lower_bound(m_ptr_map.begin(),
-                                                 m_ptr_map.end(),
-                                                 GpuPtrMap{.ptr = b->device_ptr},
-                                                 kPtrMapCompare);
-                      m_ptr_map.erase(it, it + 1);
-                      b->~Buffer();
-                  }},
+    m_buffer_pool{
+        m_allocator,
+        [this](Buffer* b) {
+            vmaDestroyBuffer(m_vma, b->vk_buffer, b->vk_allocation);
+            auto it
+                = lower_bound(m_ptr_map.begin(), m_ptr_map.end(), GpuPtrMap{.ptr = b->device_ptr});
+            m_ptr_map.erase(it, it + 1);
+            b->~Buffer();
+        }},
     m_texture_pool{m_allocator,
                    [this](Texture* t) {
                        if (t->vk_allocation != VK_NULL_HANDLE) {
@@ -1229,10 +1246,9 @@ Handle<Buffer> Device::Impl::malloc(size_t bytes, size_t align, Memory memory) {
         .device_ptr    = device_ptr,
     });
 
-
     // TODO: Don't re-sort the whole thing, insert in the right spot.
-    m_ptr_map.push_back({.ptr = device_ptr, .buffer = handle});
-    std::sort(m_ptr_map.begin(), m_ptr_map.end(), kPtrMapCompare);
+    const auto insertion_pos = lower_bound(m_ptr_map.begin(), m_ptr_map.end(), {.ptr = device_ptr});
+    m_ptr_map.insert(insertion_pos, {.ptr = device_ptr, .buffer = handle});
 
     return handle;
 }
@@ -1250,10 +1266,7 @@ void* Device::Impl::get_host_pointer(Handle<Buffer> buffer) {
 }
 
 BufferAndOffset Device::Impl::buffer_and_offset_from_ptr(GpuPtr ptr) {
-    const auto  it = std::lower_bound(m_ptr_map.begin(),
-                                     m_ptr_map.end(),
-                                     GpuPtrMap{.ptr = ptr},
-                                     kPtrMapCompare);
+    const auto  it = lower_bound(m_ptr_map.begin(), m_ptr_map.end(), GpuPtrMap{.ptr = ptr});
     const auto& b  = m_buffer_pool[it->buffer];
     return {
         .buffer = b.vk_buffer,

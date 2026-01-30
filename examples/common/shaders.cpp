@@ -6,7 +6,6 @@
 #include "slang-com-ptr.h"
 #include "slang.h"
 
-
 using namespace slang;
 
 

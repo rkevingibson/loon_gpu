@@ -1,4 +1,8 @@
+
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <Windows.h>
+#include <shellapi.h>
 
 #include <cstdint>
 #include <memory>
@@ -8,6 +12,7 @@
 
 #include "common/example.h"
 #include "common/shaders.h"
+
 
 
 enum ButtonState : uint8_t {

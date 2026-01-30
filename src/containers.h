@@ -176,6 +176,22 @@ class Vector {
         for (auto it = end(); it != old_end; ++it) { it->~T(); }
     }
 
+    T* insert(T* pos, const T& value) {
+        if (m_count == m_capacity) {
+            // NOTE: This is suboptimal - does 2 moves of elements after the insertion.
+            const auto idx = pos - m_data;
+            reserve(grow_capacity(m_count + 1));
+            pos = m_data + idx;
+        }
+
+        // Move from pos, end to pos + 1, end+1
+        ::new (end()) T(std::move(*(end() - 1)));
+        for (auto it = end() - 1; it > pos; --it) { *it = std::move(*(it - 1)); }
+        *pos = value;
+        m_count++;
+        return pos;
+    }
+
     const T&           operator[](uint32_t idx) const { return m_data[idx]; }
     T&                 operator[](uint32_t idx) { return m_data[idx]; }
     T*                 data() { return m_data; }
