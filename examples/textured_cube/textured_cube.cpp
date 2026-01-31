@@ -127,7 +127,7 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
     // Load the texture
     int            x = 0, y = 0, n = 0;
     unsigned char* image_data
-        = stbi_load((window_state.file_paths.asset_directory / "uv-texture.png").string().c_str(),
+        = stbi_load((window_state.file_paths.asset_directory + "uv-texture.png").c_str(),
                     &x,
                     &y,
                     &n,
@@ -172,11 +172,10 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
     //  A little excessive, but wait for the copy to be done before returning.
     cmd.barrier(loon::gpu::Transfer, loon::gpu::VertexShader);
     auto copy_semaphore = m_device.create_semaphore(0);
-    m_device.submit(
-        m_queue,
-        cmd,
-        {},
-        SemaphoreInfo{.semaphore = copy_semaphore, .value = 1, .stage = Transfer});
+    m_device.submit(m_queue,
+                    cmd,
+                    {},
+                    SemaphoreInfo{.semaphore = copy_semaphore, .value = 1, .stage = Transfer});
     m_device.wait_semaphore(copy_semaphore, 1);
     m_device.free(copy_semaphore);
 

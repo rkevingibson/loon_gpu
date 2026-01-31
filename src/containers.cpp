@@ -1,5 +1,6 @@
 #include "containers.h"
 
+#include <cstdlib>
 #include <cstring>
 
 #include "platform_utils.h"

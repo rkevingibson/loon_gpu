@@ -1,7 +1,7 @@
 #pragma once
 #ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wnullability-completeness"
+#    pragma clang diagnostic push
+#    pragma clang diagnostic ignored "-Wnullability-completeness"
 #endif
 #include "volk.h"
 #define WIN32_LEAN_AND_MEAN
@@ -12,5 +12,5 @@
 #include "vk_mem_alloc.h"
 
 #ifdef __clang__
-#pragma clang diagnostic pop
+#    pragma clang diagnostic pop
 #endif

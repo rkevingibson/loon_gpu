@@ -2,14 +2,15 @@
 
 #include <gpu/loon_gpu.h>
 
-#include <filesystem>
 #include <memory>
+#include <string>
+
 
 class ShaderLoader;
 
 struct FilePaths {
-    std::filesystem::path shader_directory;
-    std::filesystem::path asset_directory;
+    std::string shader_directory;
+    std::string asset_directory;
 };
 
 struct WindowState {

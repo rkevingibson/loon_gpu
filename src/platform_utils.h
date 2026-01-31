@@ -50,7 +50,7 @@ inline constexpr uint64_t count_leading_zeros(uint64_t x) {
 #if __clang__
     return __builtin_clzll(x);
 #elif _MSC_VER
-    unsigned long         index;
+    unsigned long index;
     _BitScanReverse64(&index, x);
     return 63 - index;
 #else

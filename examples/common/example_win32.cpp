@@ -96,13 +96,12 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
                                 (int)bytes.size(),
                                 NULL,
                                 NULL);
-            window_state.file_paths.shader_directory
-                = std::filesystem::path(bytes.begin(), bytes.end());
+            window_state.file_paths.shader_directory = std::string(bytes.begin(), bytes.end());
         }
     }
 
     window_state.shader_loader
-        = std::make_unique<ShaderLoader>(window_state.file_paths.shader_directory.string().c_str());
+        = std::make_unique<ShaderLoader>(window_state.file_paths.shader_directory.c_str());
 
     const char  CLASS_NAME[] = "LoonWebGPU Examples";
     WNDCLASSEXA wc           = {.cbSize        = sizeof(WNDCLASSEXA),

@@ -1,7 +1,12 @@
+#include "filesystem.h"
 #include "geometry.h"
 #include "utest.h"
 
+void utest_type_printer(const loon::StringView& v) {
+    UTEST_PRINTF("%.*s", (int)v.size(), v.data());
+}
 
+using namespace loon;
 using namespace geometry;
 
 void assert_float3_eq(int* utest_result, const float3& a, const float3& b) {
@@ -35,4 +40,21 @@ UTEST(geometry_tests, rotations) {
         // When transform is identity, rotated and rotated local should be identical
         assert_transform_eq(utest_result, t1, t2);
     }
+}
+
+UTEST(filesystem_tests, root_path) {
+    ASSERT_EQ(loon::filesystem::root_name("C:/testA"), StringView("C:"));
+    ASSERT_EQ(loon::filesystem::root_name("C:testARelativePath/test"), StringView("C:"));
+    ASSERT_EQ(loon::filesystem::root_name("\\\\test_server\\path_to_file\\hello.txt"),
+              StringView("\\\\test_server"));
+    ASSERT_EQ(loon::filesystem::root_name("/home/linux/test_path"), StringView(""));
+}
+
+UTEST(filesystem_tests, normalize_path) {
+    constexpr size_t kBufferSize = 2 * 1024ull;
+    char             buffer[kBufferSize];
+    Arena            arena(buffer, kBufferSize);
+    ASSERT_EQ(filesystem::normalize_path(&arena, "C:", '/'), StringView("C:"));
+    ASSERT_EQ(filesystem::normalize_path(&arena, "C:\\foo\\..\\bar", '/'), StringView("C:/bar"));
+    ASSERT_EQ(filesystem::normalize_path(&arena, "a/.///b/../", '/'), StringView("a/"));
 }

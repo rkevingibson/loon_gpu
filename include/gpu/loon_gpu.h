@@ -81,15 +81,8 @@ class Span {
     constexpr Span(const Span<U>& src) noexcept REQUIRES((is_const_of<U, T>)) :
         Span(src.data(), src.size()) {}
 
-
-    constexpr Span(const Span<T>& src) noexcept : Span(src.data(), src.size()) {}
-    Span& operator=(const Span<T>& src) {
-        if (&src != this) {
-            m_ptr = src.m_ptr;
-            m_len = src.m_len;
-        }
-        return *this;
-    }
+    constexpr Span(const Span<T>& src) noexcept = default;
+    Span& operator=(const Span<T>& src)         = default;
 
     // Accessors
 

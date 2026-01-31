@@ -78,7 +78,7 @@ class Arena {
         if (p + size == m_ptr && p >= m_begin) { m_ptr = p; }
     }
 
-    bool owns(const void* ptr) {
+    [[nodiscard]] bool owns(const void* ptr) const {
         const uintptr_t p = reinterpret_cast<uintptr_t>(ptr);
         return p >= m_begin && p < m_begin + m_size;
     }

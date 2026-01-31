@@ -65,6 +65,7 @@ endif()
 # Split some of these into a separate library so we can write some unit tests for them
 add_library(example_utilities OBJECT
     common/geometry.cpp
+    common/filesystem.cpp
 )
 
 target_include_directories(example_utilities PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/common)
@@ -76,7 +77,7 @@ set(EXAMPLE_SOURCES
     hello_cube/hello_cube.cpp
     textured_cube/textured_cube.cpp
     particle_emitter/particle_emitter.cpp
-)
+ )
 
 if (WIN32)
     list(APPEND EXAMPLE_SOURCES common/example_win32.cpp)
