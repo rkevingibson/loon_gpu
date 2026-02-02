@@ -13,6 +13,7 @@ __declspec(dllimport) void* __stdcall FlsGetValue(unsigned long dwFlsIndex);
 __declspec(dllimport) int __stdcall FlsSetValue(unsigned long dwFlsIndex, void* lpFlsData);
 __declspec(dllimport) int __stdcall FlsFree(unsigned long dwFlsIndex);
 __declspec(dllimport) void __stdcall AcquireSRWLockExclusive(void* SRWLock);
+__declspec(dllimport) int __stdcall TryAcquireSRWLockExclusive(void* SRWLock);
 __declspec(dllimport) void __stdcall ReleaseSRWLockExclusive(void* SRWLock);
 }
 
@@ -65,6 +66,9 @@ void mutex_lock(mutex* mtx) {
 void mutex_unlock(mutex* mtx) {
     ReleaseSRWLockExclusive(mtx);
 }
+bool mutex_try_lock(mutex* mtx) {
+    return TryAcquireSRWLockExclusive(mtx) != 0;
+}
 
 #elif __linux__ || __APPLE__
 tls_key tls_alloc(tls_destructor d) {
@@ -112,6 +116,10 @@ void mutex_lock(mutex* mtx) {
 
 void mutex_unlock(mutex* mtx) {
     pthread_mutex_unlock(mtx);
+}
+
+bool mutex_try_lock(mutex* mtx) {
+    return pthread_mutex_trylock(mtx) == 0;
 }
 
 #endif

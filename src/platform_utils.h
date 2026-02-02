@@ -42,6 +42,7 @@ using mutex = pthread_mutex_t;
 
 void mutex_lock(mutex* mtx);
 void mutex_unlock(mutex* mtx);
+bool mutex_try_lock(mutex* mtx);
 
 // Bit manipulation
 

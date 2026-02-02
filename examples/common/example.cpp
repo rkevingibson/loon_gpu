@@ -7,9 +7,8 @@
 #if __APPLE__
 #    include <mach-o/dyld.h>
 #elif _WIN32
-extern "C" __declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void*,
-                                                                            char*,
-                                                                            unsigned long);
+extern "C"
+    __declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void*, char*, unsigned long);
 #endif
 
 #include <memory>
@@ -42,7 +41,8 @@ FilePaths default_file_paths() {
     char        arena_buf[2048];
     loon::Arena arena(arena_buf, 2048);
     auto        default_shader_dir
-        = loon::filesystem::normalize_path(&arena, (exec_dir + "/../../../examples/").c_str());
+        = loon::filesystem::normalize_path(&arena,
+                                           (exec_dir + "/../../../examples/shaders/").c_str());
     auto default_asset_dir
         = loon::filesystem::normalize_path(&arena, (exec_dir + "/../../../assets/").c_str());
 

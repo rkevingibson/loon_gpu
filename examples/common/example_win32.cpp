@@ -13,8 +13,6 @@
 #include "common/example.h"
 #include "common/shaders.h"
 
-
-
 enum ButtonState : uint8_t {
     kButtonStateDefault  = 0x0000,
     kButtonStatePressed  = 0x0001,

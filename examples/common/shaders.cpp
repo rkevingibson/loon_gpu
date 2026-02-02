@@ -1,6 +1,5 @@
 #include "shaders.h"
 
-#include <filesystem>
 #include <string>
 
 #include "slang-com-ptr.h"
@@ -79,21 +78,14 @@ class ShaderLoader::Impl {
     }
 
     ShaderModule load_module(std::string_view module_name) {
-        for (const auto& dir_entry : std::filesystem::recursive_directory_iterator(m_search_path)) {
-            if (dir_entry.is_regular_file() && dir_entry.path().filename() == module_name) {
-                // Found the shader file
-                Slang::ComPtr<IBlob> diagnostics;
-                auto                 module = Slang::ComPtr<IModule>(
-                    m_session->loadModule(dir_entry.path().string().c_str(),
-                                          diagnostics.writeRef()));
-                if (diagnostics) {
-                    fprintf(stderr,
-                            "Shader diagnostic: %s",
-                            (char*)diagnostics->getBufferPointer());
-                }
-                return ShaderModule(new ShaderModuleImpl{.module = module});
-            }
+        std::string          name = std::string(module_name);
+        Slang::ComPtr<IBlob> diagnostics;
+        auto                 module
+            = Slang::ComPtr<IModule>(m_session->loadModule(name.c_str(), diagnostics.writeRef()));
+        if (diagnostics) {
+            fprintf(stderr, "Shader diagnostic: %s", (char*)diagnostics->getBufferPointer());
         }
+        return ShaderModule(new ShaderModuleImpl{.module = module});
 
         return nullptr;
     }
@@ -125,8 +117,11 @@ class ShaderLoader::Impl {
         session_desc.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR;
 
         // TODO: Search paths for imports should be hooked up.
-        session_desc.searchPaths     = nullptr;
-        session_desc.searchPathCount = 0;
+        const char* searchPaths[] = {
+            m_search_path.c_str(),
+        };
+        session_desc.searchPaths     = searchPaths;
+        session_desc.searchPathCount = 1;
 
         session_desc.preprocessorMacros     = nullptr;
         session_desc.preprocessorMacroCount = 0;
