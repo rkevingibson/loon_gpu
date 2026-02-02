@@ -124,7 +124,7 @@ struct Surface {
     // We store the command buffer that recording
     // the transition to PRESENT_KHR, so we can
     // signal an extra semaphore on submission.
-    VkCommandBuffer transitioning_command[kMaxSwapchainImages];
+    VkCommandBuffer transitioning_command[kMaxSwapchainImages] = {VK_NULL_HANDLE};
 };
 
 struct Queue {
@@ -1115,6 +1115,7 @@ void Device::Impl::unconfigure_surface() {
         m_surface.current_image_idx = 0;
         for (int i = 0; i < m_surface.image_count; ++i) {
             m_semaphore_pool.erase(m_surface.present_semaphores[i]);
+            m_surface.transitioning_command[i] = VK_NULL_HANDLE;
         }
         free(m_surface.frame_semaphore);
     }
