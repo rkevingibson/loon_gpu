@@ -20,7 +20,7 @@
     }
 
 #define LOON_BITWISE_ASSIGNMENT_OP(name, op)                                                       \
-    inline constexpr name operator op##=(name lhs, name rhs) {                                     \
+    inline constexpr name operator op## = (name lhs, name rhs) {                                   \
         lhs = lhs op rhs;                                                                          \
         return lhs;                                                                                \
     }
@@ -191,8 +191,6 @@ class Function {
     VTable*                 m_vtable     = nullptr;
     uint8_t                 m_storage[kStorageSize];
 };
-
-extern template class Function<void>;
 
 typedef struct MemoryBlock {
     void*    ptr;
@@ -819,5 +817,19 @@ class CommandBuffer {
     void* buffer;
     void* device;
 };
+
+extern template class Span<const char>;
+extern template class Span<uint8_t>;
+extern template class Span<const gpu::SamplerDesc>;
+extern template class Span<const gpu::ColorTarget>;
+extern template class Span<const gpu::RenderAttachment>;
+extern template class Span<const gpu::Format>;
+extern template class Span<const gpu::PresentMode>;
+extern template class Span<const gpu::CommandBuffer>;
+extern template class Span<const gpu::SemaphoreInfo>;
+extern template class Span<const Handle<gpu::CommandBuffer>>;
+extern template class Span<const gpu::TextureTransition>;
+extern template class Function<void>;
+extern template class Function<void>;
 
 }  // namespace loon::gpu

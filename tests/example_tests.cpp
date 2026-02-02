@@ -57,4 +57,8 @@ UTEST(filesystem_tests, normalize_path) {
     ASSERT_EQ(filesystem::normalize_path(&arena, "C:", '/'), StringView("C:"));
     ASSERT_EQ(filesystem::normalize_path(&arena, "C:\\foo\\..\\bar", '/'), StringView("C:/bar"));
     ASSERT_EQ(filesystem::normalize_path(&arena, "a/.///b/../", '/'), StringView("a/"));
+    ASSERT_EQ(filesystem::normalize_path(&arena, "/Users/kgibson/../foo", '/'),
+              StringView("/Users/foo"));
+    ASSERT_EQ(filesystem::normalize_path(&arena, "/Users/kgibson/../foo/", '/'),
+              StringView("/Users/foo/"));
 }

@@ -68,6 +68,15 @@ class StringView {
         return sv.size() <= m_len && StringView(m_ptr + m_len - sv.size(), sv.size()) == sv;
     }
 
+    [[nodiscard]] constexpr size_t find_last_of(StringView v) const noexcept {
+        for (size_t i = m_len; i > 0; --i) {
+            for (size_t j = 0; j < v.m_len; ++j) {
+                if (m_ptr[i - 1] == v[j]) { return i - 1; }
+            }
+        }
+        return ~0;
+    }
+
    private:
     const char* m_ptr = nullptr;
     size_t      m_len = 0;

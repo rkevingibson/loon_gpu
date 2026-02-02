@@ -1,51 +1,54 @@
 #include "example.h"
 
+#include "filesystem.h"
+
 #define STB_IMAGE_IMPLEMENTATION
 
 #if __APPLE__
 #    include <mach-o/dyld.h>
 #elif _WIN32
-
-extern "C"
-    __declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void*, char*, unsigned long);
-
+extern "C" __declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void*,
+                                                                            char*,
+                                                                            unsigned long);
 #endif
 
-#include <filesystem>
 #include <memory>
+#include <vector>
 
 #include "hello_cube/hello_cube.h"
 #include "hello_triangle/hello_triangle.h"
 #include "particle_emitter/particle_emitter.h"
 #include "stb_image.h"
+#include "string_view.h"
 #include "textured_cube/textured_cube.h"
 
-static std::filesystem::path get_executable_directory() {
+static std::string get_executable_directory() {
 #if __APPLE__
     uint32_t bufsize = 0;
     _NSGetExecutablePath(nullptr, &bufsize);
     std::vector<char> path(bufsize);
     _NSGetExecutablePath(path.data(), &bufsize);
-    return std::filesystem::path(path.begin(), path.end()).parent_path();
-
 #elif _WIN32
-
     std::vector<char> path(256);
-    GetModuleFileNameA(nullptr, path.data(), (uint32_t)path.size());
-
-    return std::filesystem::path(path.begin(), path.end()).parent_path();
+    uint32_t          bufsize = GetModuleFileNameA(nullptr, path.data(), (uint32_t)path.size()) + 1;
 #endif
+    auto parent = loon::filesystem::parent_path(loon::StringView(path.data(), bufsize - 1));
+    return std::string(parent.begin(), parent.end());
 }
 
 FilePaths default_file_paths() {
     auto exec_dir = get_executable_directory();
 
-    auto default_shader_dir = (exec_dir / "../../../examples").lexically_normal();
-    auto default_asset_dir  = (exec_dir / "../../../assets").lexically_normal();
+    char        arena_buf[2048];
+    loon::Arena arena(arena_buf, 2048);
+    auto        default_shader_dir
+        = loon::filesystem::normalize_path(&arena, (exec_dir + "/../../../examples/").c_str());
+    auto default_asset_dir
+        = loon::filesystem::normalize_path(&arena, (exec_dir + "/../../../assets/").c_str());
 
     return {
-        .shader_directory = default_shader_dir.string(),
-        .asset_directory  = default_asset_dir.string(),
+        .shader_directory = std::string(default_shader_dir.data(), default_shader_dir.size()),
+        .asset_directory  = std::string(default_asset_dir.data(), default_asset_dir.size()),
     };
 }
 

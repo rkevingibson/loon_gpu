@@ -1,6 +1,6 @@
 
-#include "example.h"
-#include <AppKit/AppKit.h>
+#import "example.h"
+#import <AppKit/AppKit.h>
 #import <Foundation/Foundation.h>
 
 #import <Cocoa/Cocoa.h>

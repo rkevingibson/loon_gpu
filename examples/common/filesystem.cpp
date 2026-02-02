@@ -38,6 +38,11 @@ StringView root_name(StringView path) {
     return StringView();
 }
 
+StringView parent_path(StringView path) {
+    size_t sep_idx = path.find_last_of("\\/");
+    return path.substr(0, sep_idx);
+}
+
 StringView normalize_path(Arena* arena, StringView path, char preferred_separator) {
     if (path.is_empty()) { return path; }
 
@@ -49,6 +54,8 @@ StringView normalize_path(Arena* arena, StringView path, char preferred_separato
     const StringView sep(&preferred_separator, 1);
 
     StringView result = clone(arena, root);
+    if (path.front() == '/') { result = concat(arena, result, "/"); }
+
 
     const auto remove_next_path_segment = [](StringView& path) -> StringView {
         size_t start = 0;
@@ -76,7 +83,7 @@ StringView normalize_path(Arena* arena, StringView path, char preferred_separato
         } else if (segment == ".") {
             // Do nothing, just skip the next directory separator.
         } else {
-            if (!result.is_empty()) { result = concat(arena, result, sep); }
+            if (!result.is_empty() && result != "/") { result = concat(arena, result, sep); }
             result = concat(arena, result, segment);
         }
     }

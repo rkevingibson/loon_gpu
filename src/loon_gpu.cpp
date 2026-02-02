@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstring>
 
 #include "containers.h"
 #include "gpu_to_vk.h"
@@ -10,6 +11,17 @@
 #include "vulkan/vulkan_core.h"
 
 namespace loon::gpu {
+template class Span<const char>;
+template class Span<uint8_t>;
+template class Span<const gpu::SamplerDesc>;
+template class Span<const gpu::ColorTarget>;
+template class Span<const gpu::RenderAttachment>;
+template class Span<const gpu::Format>;
+template class Span<const gpu::PresentMode>;
+template class Span<const gpu::CommandBuffer>;
+template class Span<const gpu::SemaphoreInfo>;
+template class Span<const Handle<gpu::CommandBuffer>>;
+template class Span<const gpu::TextureTransition>;
 
 template class Function<void>;
 

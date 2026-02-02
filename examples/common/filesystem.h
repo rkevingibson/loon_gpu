@@ -9,6 +9,7 @@
 namespace loon::filesystem {
 
 StringView root_name(StringView path);
+StringView parent_path(StringView path);
 StringView normalize_path(Arena* arena, StringView path, char preferred_separator = '/');
 
 };  // namespace loon::filesystem
