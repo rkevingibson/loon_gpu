@@ -3,8 +3,29 @@ struct CameraData {
     float4x4 cameraFromWorld;
 };
 
+enum CurveMode {
+    Constant,
+    Lerp,
+    EaseIn,
+    EaseOut,
+    EaseInOut,
+};
+
+struct ParticleSimParam {
+    float4 curve; // x = min start, y = max start, z = min end, z = max end
+    CurveMode mode;
+};
+
+struct ParticleSimOptions {
+    ParticleSimParam particle_lifetime;
+    ParticleSimParam particle_size;
+    float3 emitter_velocity;
+
+    uint max_num_particles;
+};
+
 struct ParticleSim {
-    uint num_particles;
+    ParticleSimOptions* options;
     float3* positions;
     float3* velocities;
     float3* colors;
@@ -14,8 +35,12 @@ struct VertexStageOutput {
 };
 
 [shader("compute")]
-void update_particle_sim(uniform ParticleSim* particle_sim)
+[numthreads(64, 1, 1)]
+void update_particle_sim(
+    uniform ParticleSim* particle_sim, 
+    uint3 gid : SV_DispatchThreadID)
 {
+    const uint particle_id = gid.x;
 
 }
 

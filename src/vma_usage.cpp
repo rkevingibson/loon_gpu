@@ -2,6 +2,7 @@
 
 #define VMA_CONFIGURATION_USER_INCLUDES_H <cassert>
 #define VMA_USE_STL_SHARED_MUTEX          0
+#include <new>
 #include <utility>
 
 #include "platform_utils.h"

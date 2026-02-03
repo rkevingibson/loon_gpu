@@ -1423,7 +1423,31 @@ void Device::Impl::free(Handle<Texture> t) {
     m_texture_pool.erase(t);
 }
 
-void Device::Impl::remove_texture_view_from_heap(Handle<TextureHeap>, uint32_t) {}
+void Device::Impl::remove_texture_view_from_heap(Handle<TextureHeap> heap, uint32_t idx) {
+    auto& texture_heap = m_texture_heap_pool[heap];
+    texture_heap.bitset.clear_bit(idx);
+
+
+    const VkDescriptorImageInfo image_info{
+        .sampler     = VK_NULL_HANDLE,
+        .imageView   = VK_NULL_HANDLE,
+        .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+    };
+
+    const VkWriteDescriptorSet write{
+        .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .pNext            = nullptr,
+        .dstSet           = texture_heap.vk_descriptor_set,
+        .dstBinding       = 2,
+        .dstArrayElement  = idx,
+        .descriptorCount  = 1,
+        .descriptorType   = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+        .pImageInfo       = &image_info,
+        .pBufferInfo      = nullptr,
+        .pTexelBufferView = nullptr,
+    };
+    m_api.vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+}
 
 void Device::Impl::free(Handle<TextureHeap> heap) {
     m_texture_heap_pool.erase(heap);
@@ -2159,6 +2183,11 @@ Handle<TextureView> Device::create_texture_view(Handle<Texture> texture, Texture
 uint32_t Device::add_texture_view_to_heap(Handle<TextureHeap> heap, Handle<TextureView> view) {
     return impl->add_texture_view_to_heap(heap, view);
 }
+
+void Device::remove_texture_view_from_heap(Handle<TextureHeap> heap, uint32_t idx) {
+    return impl->remove_texture_view_from_heap(heap, idx);
+}
+
 
 void Device::free(Handle<Texture>) {}
 void Device::free(Handle<TextureHeap>) {}

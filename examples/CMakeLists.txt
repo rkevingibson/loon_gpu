@@ -77,6 +77,13 @@ set(EXAMPLE_SOURCES
     hello_cube/hello_cube.cpp
     textured_cube/textured_cube.cpp
     particle_emitter/particle_emitter.cpp
+
+    imgui/imgui_draw.cpp
+    imgui/imgui_demo.cpp
+    imgui/imgui_tables.cpp
+    imgui/imgui_widgets.cpp
+    imgui/imgui.cpp
+    imgui/imgui_impl_loon.cpp
  )
 
 if (WIN32)

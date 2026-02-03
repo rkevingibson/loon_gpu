@@ -20,7 +20,7 @@
     }
 
 #define LOON_BITWISE_ASSIGNMENT_OP(name, op)                                                       \
-    inline constexpr name operator op## = (name lhs, name rhs) {                                   \
+    inline constexpr name operator op##=(name lhs, name rhs) {                                     \
         lhs = lhs op rhs;                                                                          \
         return lhs;                                                                                \
     }
@@ -201,7 +201,8 @@ typedef struct MemoryBlock {
 
 template <class T>
 struct Handle {
-    uint64_t h = 0;
+    uint64_t  h = 0;
+    constexpr operator bool() const noexcept { return h != 0; }
 };
 
 struct Device;
@@ -767,6 +768,10 @@ class Device {
 
 class CommandBuffer {
    public:
+    CommandBuffer()                                = default;
+    CommandBuffer(const CommandBuffer&)            = default;
+    CommandBuffer& operator=(const CommandBuffer&) = default;
+
     // Commands
     void memcpy(GpuPtr destGpu, GpuPtr srcGpu, size_t size);
     void copy_to_texture(GpuPtr src, Handle<Texture> texture, const BufferToTextureCopyInfo& info);
