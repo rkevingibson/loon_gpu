@@ -12,6 +12,10 @@
 
 #include "common/example.h"
 #include "common/shaders.h"
+#include "imgui/imgui_impl_loon.h"
+#include "imgui/imgui_impl_win32.h"
+
+
 
 enum ButtonState : uint8_t {
     kButtonStateDefault  = 0x0000,
@@ -24,8 +28,7 @@ struct RawInput {
     ButtonState keys[256] = {kButtonStateDefault};  //
 
     void update() {
-        GetModuleFileNameA(nullptr, nullptr, 0);
-        BYTE keyboard_state[256];
+        BYTE keyboard_state[256] = {0};
         GetKeyboardState(keyboard_state);
 
         // Remove pressed/released states
@@ -33,18 +36,30 @@ struct RawInput {
             k = static_cast<ButtonState>(k & ~(kButtonStatePressed | kButtonStateReleased));
         }
 
-        for (int i = 0; i < 256; ++i) {
-            if ((keys[i] & kButtonStateDown) && (keyboard_state[i] & 0x80) == 0) {
-                // Was down last frame, no longer down
-                keys[i] = kButtonStateReleased;
-            } else if ((keys[i] & kButtonStateDown) == 0 && (keyboard_state[i] & 0x80)) {
-                keys[i] = static_cast<ButtonState>(kButtonStateDown | kButtonStatePressed);
+        auto& io = ImGui::GetIO();
+        if (io.WantCaptureKeyboard) {
+            for (int i = 0; i < 256; ++i) { keys[i] = kButtonStateDefault; }
+        } else {
+            for (int i = 0; i < 256; ++i) {
+                if ((keys[i] & kButtonStateDown) && (keyboard_state[i] & 0x80) == 0) {
+                    // Was down last frame, no longer down
+                    keys[i] = kButtonStateReleased;
+                } else if ((keys[i] & kButtonStateDown) == 0 && (keyboard_state[i] & 0x80)) {
+                    keys[i] = static_cast<ButtonState>(kButtonStateDown | kButtonStatePressed);
+                }
             }
         }
     }
 };
 
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND   hWnd,
+                                                             UINT   msg,
+                                                             WPARAM wParam,
+                                                             LPARAM lParam);
+
 LRESULT WINAPI window_proc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (ImGui_ImplWin32_WndProcHandler(wnd, msg, wParam, lParam)) { return true; }
+
     switch (msg) {
         case WM_CREATE: {
             CREATESTRUCT* pCreate = (CREATESTRUCT*)(lParam);
@@ -71,6 +86,11 @@ LRESULT WINAPI window_proc(HWND wnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 }
 
 int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
+    ImGui_ImplWin32_EnableDpiAwareness();
+    float main_scale = ImGui_ImplWin32_GetDpiScaleForMonitor(
+        ::MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY));
+
+
     WindowState window_state = {
         .file_paths = default_file_paths(),
     };
@@ -136,6 +156,19 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     ShowWindow(window, SW_NORMAL);
     UpdateWindow(window);
 
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+
+    ImGui::StyleColorsDark();
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.ScaleAllSizes(main_scale);
+    style.FontScaleDpi = main_scale;
+
+    ImGui_ImplWin32_Init(window);
+
     ExampleName selected_example = ExampleName::TexturedCube;
 
     std::unique_ptr<Example> current_example = create_example(selected_example, window_state);
@@ -157,6 +190,8 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
             Sleep(10);
             continue;
         }
+
+        ImGui_ImplWin32_NewFrame();
 
         input.update();
 
@@ -183,6 +218,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
         current_example->Update(window_state);
     }
 
+    ImGui_ImplWin32_Shutdown();
 
     return 0;
 }

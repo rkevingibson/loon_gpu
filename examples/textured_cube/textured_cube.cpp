@@ -15,7 +15,10 @@
 
 #include "common/geometry.h"
 #include "common/shaders.h"
+#include "imgui/imgui_impl_loon.h"
 #include "stb_image.h"
+
+
 
 using namespace geometry;
 namespace {
@@ -183,9 +186,22 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
         .depth_mode = loon::gpu::DepthFlags::Write | loon::gpu::DepthFlags::Read,
         .depth_test = loon::gpu::Op::Greater,
     });
+
+
+    loon::imgui::Init({
+        .device                    = &m_device,
+        .queue                     = m_queue,
+        .texture_heap              = m_texture_heap,
+        .num_frames_in_flight      = kMaxFramesInFlight,
+        .render_target_format      = m_swapchain_format,
+        .depth_stencil_view_format = loon::gpu::Format::Depth32Float,
+        .shader_loader             = window_state.shader_loader.get(),
+    });
 }
 
-TexturedCube::~TexturedCube() {}
+TexturedCube::~TexturedCube() {
+    loon::imgui::Shutdown();
+}
 
 void TexturedCube::recreate_swapchain(uint32_t width, uint32_t height) {
     m_device.wait_for_device_idle();
@@ -219,6 +235,8 @@ void TexturedCube::recreate_swapchain(uint32_t width, uint32_t height) {
 }
 
 void TexturedCube::Update(const WindowState& window) {
+    loon::imgui::NewFrame();
+
     auto surface_texture = m_device.get_current_texture();
     if (surface_texture.status == SurfaceStatus::OutOfDate
         || surface_texture.status == SurfaceStatus::Suboptimal) {
@@ -303,7 +321,14 @@ void TexturedCube::Update(const WindowState& window) {
         Cube::kNumIndices,
         1);
 
+
+    ImGui::ShowDemoWindow();
+    // Render must happen within a render pass.
+    loon::imgui::Render(command_buffer);
+
     command_buffer.end_render_pass();
+
+
     command_buffer.barrier(RasterColorOut,
                            RasterColorOut,
                            TextureTransition{
@@ -311,6 +336,7 @@ void TexturedCube::Update(const WindowState& window) {
                                .old_layout = Layout::Attachment,
                                .new_layout = Layout::Present,
                            });
+
     m_device.submit(m_queue,
                     command_buffer,
                     SemaphoreInfo{

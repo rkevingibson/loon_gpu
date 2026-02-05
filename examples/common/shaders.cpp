@@ -98,16 +98,25 @@ class ShaderLoader::Impl {
         target_description.profile       = m_global_session->findProfile("spirv_1_6");
         target_description.flags         = 0;
 
-        CompilerOptionEntry options[] = {
-            {
-                .name  = slang::CompilerOptionName::VulkanUseEntryPointName,
-                .value = {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr},
-            },
-            {
-                .name  = slang::CompilerOptionName::EmitSpirvDirectly,
-                .value = {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr},
-            },
-        };
+        CompilerOptionEntry options[]
+            = {{
+                   .name  = slang::CompilerOptionName::VulkanUseEntryPointName,
+                   .value = {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr},
+               },
+               {
+                   .name  = slang::CompilerOptionName::EmitSpirvDirectly,
+                   .value = {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr},
+               },
+               {
+                   .name  = slang::CompilerOptionName::GLSLForceScalarLayout,
+                   .value = {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr},
+               },
+               {.name  = slang::CompilerOptionName::DebugInformation,
+                .value = {slang::CompilerOptionValueKind::Int,
+                          SlangDebugInfoLevel::SLANG_DEBUG_INFO_LEVEL_STANDARD,
+                          0,
+                          nullptr,
+                          nullptr}}};
         target_description.compilerOptionEntries    = options;
         target_description.compilerOptionEntryCount = sizeof(options) / sizeof(options[0]);
 

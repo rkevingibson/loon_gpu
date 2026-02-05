@@ -87,7 +87,10 @@ set(EXAMPLE_SOURCES
  )
 
 if (WIN32)
-    list(APPEND EXAMPLE_SOURCES common/example_win32.cpp)
+    list(APPEND EXAMPLE_SOURCES 
+        common/example_win32.cpp
+        imgui/imgui_impl_win32.cpp
+        )
 elseif(APPLE)
     enable_language(OBJCXX)
     list(APPEND EXAMPLE_SOURCES common/example_macos.mm)

@@ -746,11 +746,13 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
     vulkan_13_features.synchronization2 = true;
 
     VkPhysicalDeviceVulkan12Features vulkan_12_features{};
-    vulkan_12_features.sType               = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-    vulkan_12_features.pNext               = &vulkan_13_features;
-    vulkan_12_features.timelineSemaphore   = true;
-    vulkan_12_features.bufferDeviceAddress = true;
-    vulkan_12_features.descriptorIndexing  = true;
+    vulkan_12_features.sType                = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    vulkan_12_features.pNext                = &vulkan_13_features;
+    vulkan_12_features.timelineSemaphore    = true;
+    vulkan_12_features.bufferDeviceAddress  = true;
+    vulkan_12_features.descriptorIndexing   = true;
+    vulkan_12_features.shaderInt8           = true;
+    vulkan_12_features.storagePushConstant8 = true;
     vulkan_12_features.runtimeDescriptorArray                       = true;
     vulkan_12_features.descriptorBindingSampledImageUpdateAfterBind = true;
     vulkan_12_features.descriptorBindingPartiallyBound              = true;

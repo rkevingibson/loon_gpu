@@ -19,7 +19,6 @@ struct ImGui_ImplLoon_Texture {
 };
 
 struct ImGui_ImplLoon_Data {
-    ImGui_ImplLoon_InitInfo    InitInfo;
     gpu::Device*               device;
     gpu::Handle<gpu::Pipeline> pipelineState;
 
@@ -27,15 +26,8 @@ struct ImGui_ImplLoon_Data {
     gpu::Format                   RTVFormat;
     gpu::Format                   DSVFormat;
     gpu::Handle<gpu::TextureHeap> texture_heap;
-    // ID3D12Fence*                  Fence;
-    // UINT64                        FenceLastSignaledValue;
-    // HANDLE                        FenceEvent;
-    uint32_t numFramesInFlight;
-
-    // ID3D12GraphicsCommandList* pTexCmdList;
-    // ID3D12Resource*            pTexUploadBuffer;
-    uint32_t pTexUploadBufferSize;
-    void*    pTexUploadBufferMapped;
+    uint32_t                      num_frames_in_flight;
+    ShaderLoader*                 shader_loader;
 
     ImGui_ImplLoon_RenderBuffers* pFrameResources;
     uint64_t                      frameIndex;
@@ -46,45 +38,25 @@ struct ImGui_ImplLoon_Data {
 // Backend data stored in io.BackendRendererUserData to allow support for multiple Dear ImGui
 // contexts It is STRONGLY preferred that you use docking branch with multi-viewports (== single
 // Dear ImGui context + multiple windows) instead of multiple Dear ImGui contexts.
-static ImGui_ImplLoon_Data* ImGui_ImplLoon_GetBackendData() {
+static ImGui_ImplLoon_Data* GetBackendData() {
     return ImGui::GetCurrentContext() ? (ImGui_ImplLoon_Data*)ImGui::GetIO().BackendRendererUserData
                                       : nullptr;
 }
 
 // Buffers used during the rendering of a frame
 struct ImGui_ImplLoon_RenderBuffers {
-    gpu::Handle<gpu::Buffer> IndexBuffer;
-    gpu::Handle<gpu::Buffer> VertexBuffer;
-    int                      IndexBufferSize;
-    int                      VertexBufferSize;
+    gpu::Handle<gpu::Buffer> buffer;
+    size_t                   buffer_size;
 };
 
-struct VERTEX_CONSTANT_BUFFER_DX12 {
-    float mvp[4][4];
-};
+static void SetupRenderState(ImDrawData*                   draw_data,
+                             gpu::CommandBuffer            command_list,
+                             ImGui_ImplLoon_RenderBuffers* fr) {
+    // Setup transforms
 
-static void ImGui_ImplLoon_SetupRenderState(ImDrawData*                   draw_data,
-                                            gpu::CommandBuffer            command_list,
-                                            ImGui_ImplLoon_RenderBuffers* fr) {
-    // Setup orthographic projection matrix into our constant buffer
-    // Our visible imgui space lies from draw_data->DisplayPos (top left) to
-    // draw_data->DisplayPos+data_data->DisplaySize (bottom right).
-    VERTEX_CONSTANT_BUFFER_DX12 vertex_constant_buffer;
-    {
-        float L         = draw_data->DisplayPos.x;
-        float R         = draw_data->DisplayPos.x + draw_data->DisplaySize.x;
-        float T         = draw_data->DisplayPos.y;
-        float B         = draw_data->DisplayPos.y + draw_data->DisplaySize.y;
-        float mvp[4][4] = {
-            {2.0f / (R - L), 0.0f, 0.0f, 0.0f},
-            {0.0f, 2.0f / (T - B), 0.0f, 0.0f},
-            {0.0f, 0.0f, 0.5f, 0.0f},
-            {(R + L) / (L - R), (T + B) / (B - T), 0.5f, 1.0f},
-        };
-        memcpy(&vertex_constant_buffer.mvp, mvp, sizeof(mvp));
-    }
-    ImGui_ImplLoon_Data* bd = ImGui_ImplLoon_GetBackendData();
-    // Setup viewport
+
+    ImGui_ImplLoon_Data* bd = GetBackendData();
+    // TODO: Setup viewport
 
 
     // Bind shader
@@ -97,8 +69,229 @@ static inline void SafeRelease(T*& res) {
     res = nullptr;
 }
 
-// Render function
-void ImGui_ImplLoon_RenderDrawData(ImDrawData* draw_data, gpu::CommandBuffer cmd) {
+static void DestroyTexture(ImTextureData* tex) {
+    if (ImGui_ImplLoon_Texture* backend_tex = (ImGui_ImplLoon_Texture*)tex->BackendUserData) {
+        IM_ASSERT(backend_tex->tex_heap_idx == (uint32_t)tex->TexID);
+        ImGui_ImplLoon_Data* bd = GetBackendData();
+
+        // Free the texture and remove it from the heap.
+        bd->device->remove_texture_view_from_heap(bd->texture_heap, backend_tex->tex_heap_idx);
+        bd->device->free(backend_tex->texture_view);
+        bd->device->free(backend_tex->texture);
+        IM_DELETE(backend_tex);
+
+        // Clear identifiers and mark as destroyed (in order to allow e.g. calling
+        // InvalidateDeviceObjects while running)
+        tex->SetTexID(ImTextureID_Invalid);
+        tex->BackendUserData = nullptr;
+    }
+    tex->SetStatus(ImTextureStatus_Destroyed);
+}
+
+static void UpdateTexture(ImTextureData* tex) {
+    ImGui_ImplLoon_Data* bd = GetBackendData();
+    bool                 need_barrier_before_copy
+        = false;  // Do we need a resource barrier before we copy new data in?
+
+    if (tex->Status == ImTextureStatus_WantCreate) {
+        // Create and upload new texture to graphics system
+        // IMGUI_DEBUG_LOG("UpdateTexture #%03d: WantCreate %dx%d\n", tex->UniqueID, tex->Width,
+        // tex->Height);
+        IM_ASSERT(tex->TexID == ImTextureID_Invalid && tex->BackendUserData == nullptr);
+        IM_ASSERT(tex->Format == ImTextureFormat_RGBA32);
+        ImGui_ImplLoon_Texture* backend_tex = IM_NEW(ImGui_ImplLoon_Texture)();
+
+        // Create a texture, texture view and add it to the texture heap. Use the texture heap index
+        // as the tex id.
+        backend_tex->texture = bd->device->create_texture({
+            .dimensions = {.x = static_cast<uint32_t>(tex->Width),
+                           .y = static_cast<uint32_t>(tex->Height),
+                           .z = 1},
+            .format     = loon::gpu::Format::RGBA8Unorm,
+            .usage      = loon::gpu::UsageFlags::Sampled | loon::gpu::UsageFlags::TransferDst,
+        });
+
+        backend_tex->texture_view
+            = bd->device->create_texture_view(backend_tex->texture,
+                                              {
+                                                  .format = loon::gpu::Format::RGBA8Unorm,
+
+                                              });
+        backend_tex->tex_heap_idx
+            = bd->device->add_texture_view_to_heap(bd->texture_heap, backend_tex->texture_view);
+
+        // Store identifiers
+        tex->SetTexID((ImTextureID)backend_tex->tex_heap_idx);
+        tex->BackendUserData     = backend_tex;
+        need_barrier_before_copy = true;
+    }
+
+    if (tex->Status == ImTextureStatus_WantCreate || tex->Status == ImTextureStatus_WantUpdates) {
+        ImGui_ImplLoon_Texture* backend_tex = (ImGui_ImplLoon_Texture*)tex->BackendUserData;
+        IM_ASSERT(tex->Format == ImTextureFormat_RGBA32);
+
+        // Use the staging buffer to upload the texture data to the GPU.
+        // Check the need_barrier_before_copy to decide on synchronization, and insert a barrier
+        // after.
+
+        // For simplicity, use a semamphore to make this update a blocking function, not async.
+
+
+        tex->SetStatus(ImTextureStatus_OK);
+    }
+
+    if (tex->Status == ImTextureStatus_WantDestroy
+        && tex->UnusedFrames >= (int)bd->num_frames_in_flight)
+        DestroyTexture(tex);
+}
+
+static void InvalidateDeviceObjects();
+
+static bool CreateDeviceObjects() {
+    ImGui_ImplLoon_Data* bd = GetBackendData();
+    if (bd->pipelineState) InvalidateDeviceObjects();
+
+    // Create pipelines
+    using namespace gpu;
+    ShaderModule shader         = bd->shader_loader->load_module("imgui.slang");
+    const auto   vertex_spirv   = get_spirv(shader.get(), "vertex_main");
+    const auto   fragment_spirv = get_spirv(shader.get(), "fragment_main");
+    bd->pipelineState           = bd->device->create_graphics_pipeline(
+        {
+                      .spirv       = Span(vertex_spirv.data(), vertex_spirv.size()).as_bytes(),
+                      .entry_point = "vertex_main"_sv,
+        },
+        {
+                      .spirv       = Span(fragment_spirv.data(), fragment_spirv.size()).as_bytes(),
+                      .entry_point = "fragment_main"_sv,
+        },
+        RasterDesc{
+                      .cull          = Cull::CW,
+                      .depth_format  = bd->DSVFormat,
+                      .color_targets = {{.format = bd->RTVFormat}},
+        });
+
+
+    // Create depth-stencil State?
+
+
+    // Create CPU-mapped ring buffer for vertex, index, and texture upload data.
+    return true;
+}
+
+void InvalidateDeviceObjects() {
+    ImGui_ImplLoon_Data* bd = GetBackendData();
+    if (!bd) return;
+
+    // Destroy GPU resources, pipelines, etc.
+    bd->device->free(bd->pipelineState);
+    bd->pipelineState.h = 0;
+
+    // Destroy all textures
+    for (ImTextureData* tex : ImGui::GetPlatformIO().Textures)
+        if (tex->RefCount == 1) DestroyTexture(tex);
+
+    for (uint32_t i = 0; i < bd->num_frames_in_flight; i++) {
+        ImGui_ImplLoon_RenderBuffers* fr = &bd->pFrameResources[i];
+        bd->device->free(fr->buffer);
+    }
+}
+
+namespace loon::imgui {
+
+bool Init(const InitInfo& info) {
+    ImGuiIO& io = ImGui::GetIO();
+    IMGUI_CHECKVERSION();
+    IM_ASSERT(io.BackendRendererUserData == nullptr && "Already initialized a renderer backend!");
+
+    // Setup backend capabilities flags
+    ImGui_ImplLoon_Data* bd = IM_NEW(ImGui_ImplLoon_Data)();
+
+    bd->device = info.device;
+    // IM_ASSERT(init_info->queue);
+    bd->queue                = info.queue;
+    bd->RTVFormat            = info.render_target_format;
+    bd->DSVFormat            = info.depth_stencil_view_format;
+    bd->num_frames_in_flight = info.num_frames_in_flight;
+    bd->texture_heap         = info.texture_heap;
+    bd->shader_loader        = info.shader_loader;
+
+    io.BackendRendererUserData = (void*)bd;
+    io.BackendRendererName     = "imgui_impl_loon";
+    io.BackendFlags
+        |= ImGuiBackendFlags_RendererHasVtxOffset;  // We can honor the ImDrawCmd::VtxOffset field,
+                                                    // allowing for large meshes.
+    io.BackendFlags
+        |= ImGuiBackendFlags_RendererHasTextures;  // We can honor ImGuiPlatformIO::Textures[]
+                                                   // requests during render.
+
+    // Create buffers with a default size (they will later be grown as needed)
+    bd->frameIndex      = 0;
+    bd->pFrameResources = new ImGui_ImplLoon_RenderBuffers[bd->num_frames_in_flight];
+    for (int i = 0; i < (int)bd->num_frames_in_flight; i++) {
+        ImGui_ImplLoon_RenderBuffers* fr = &bd->pFrameResources[i];
+        fr->buffer                       = {0};
+        fr->buffer_size                  = 0;
+    }
+
+    return true;
+}
+
+void Shutdown() {
+    ImGui_ImplLoon_Data* bd = GetBackendData();
+    IM_ASSERT(bd != nullptr && "No renderer backend to shutdown, or already shutdown?");
+    ImGuiIO&         io          = ImGui::GetIO();
+    ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
+
+    InvalidateDeviceObjects();
+    delete[] bd->pFrameResources;
+
+    io.BackendRendererName     = nullptr;
+    io.BackendRendererUserData = nullptr;
+    io.BackendFlags
+        &= ~(ImGuiBackendFlags_RendererHasVtxOffset | ImGuiBackendFlags_RendererHasTextures);
+    platform_io.ClearRendererHandlers();
+    IM_DELETE(bd);
+}
+
+void NewFrame() {
+    ImGui_ImplLoon_Data* bd = GetBackendData();
+    IM_ASSERT(bd != nullptr
+              && "Context or backend not initialized! Did you call ImGui_ImplLoon_Init()?");
+
+    if (!bd->pipelineState)
+        if (!CreateDeviceObjects()) IM_ASSERT(0 && "ImGui_ImplLoon_CreateDeviceObjects() failed!");
+
+    ImGui::NewFrame();
+}
+
+struct alignas(64) VertexInput {
+    ImVec2      scale;
+    ImVec2      translate;
+    ImVec2      padding;
+    gpu::GpuPtr vertex_buffer;
+};
+
+struct alignas(64) FragmentInput {
+    uint64_t texture;
+    uint64_t sampler = 0;
+};
+
+
+struct alignas(64) DrawArgs {
+    VertexInput   vert;
+    FragmentInput frag;
+};
+
+static gpu::GpuPtr AlignAddress(gpu::GpuPtr size, gpu::GpuPtr alignment) {
+    return (size + alignment - 1) & ~(alignment - 1);
+}
+
+void Render(gpu::CommandBuffer cmd) {
+    ImGui::Render();
+
+    auto draw_data = ImGui::GetDrawData();
+
     // Avoid rendering when minimized
     if (draw_data->DisplaySize.x <= 0.0f || draw_data->DisplaySize.y <= 0.0f) return;
 
@@ -107,29 +300,39 @@ void ImGui_ImplLoon_RenderDrawData(ImDrawData* draw_data, gpu::CommandBuffer cmd
     // but is part of ImDrawData to allow overriding or disabling texture updates).
     if (draw_data->Textures != nullptr)
         for (ImTextureData* tex : *draw_data->Textures)
-            if (tex->Status != ImTextureStatus_OK) ImGui_ImplLoon_UpdateTexture(tex);
+            if (tex->Status != ImTextureStatus_OK) UpdateTexture(tex);
 
     // FIXME: We are assuming that this only gets called once per frame!
-    ImGui_ImplLoon_Data* bd          = ImGui_ImplLoon_GetBackendData();
-    bd->frameIndex                   = bd->frameIndex + 1;
-    ImGui_ImplLoon_RenderBuffers* fr = &bd->pFrameResources[bd->frameIndex % bd->numFramesInFlight];
+    ImGui_ImplLoon_Data* bd = GetBackendData();
+    bd->frameIndex          = bd->frameIndex + 1;
+    ImGui_ImplLoon_RenderBuffers* fr
+        = &bd->pFrameResources[bd->frameIndex % bd->num_frames_in_flight];
 
-    // Create and grow vertex/index buffers if needed
-    if (fr->VertexBuffer || fr->VertexBufferSize < draw_data->TotalVtxCount) {
-        // TODO:
+    // Create and grow buffers if needed
+    const size_t vertex_data_size = AlignAddress(draw_data->TotalVtxCount * sizeof(ImDrawVert), 64);
+    const size_t index_data_size  = AlignAddress(draw_data->TotalIdxCount * sizeof(ImDrawIdx), 64);
+
+    size_t num_draws = 0;
+    for (const ImDrawList* draw_list : draw_data->CmdLists) {
+        num_draws += draw_list->CmdBuffer.size();
     }
-    if (fr->IndexBuffer || fr->IndexBufferSize < draw_data->TotalIdxCount) {
-        // TODO:
+    const size_t args_size            = AlignAddress(sizeof(DrawArgs) * num_draws, 64);
+    const size_t required_buffer_size = vertex_data_size + index_data_size + args_size;
+
+    if (required_buffer_size == 0) { return; }
+
+    if (!fr->buffer || fr->buffer_size < required_buffer_size) {
+        // Round up to some nice multiple to avoid reallocs frequently.
+        const size_t buffer_size = ((required_buffer_size + 1023) / 1024) * 1024;
+
+        if (fr->buffer) { bd->device->free(fr->buffer); }
+        fr->buffer      = bd->device->malloc(required_buffer_size, gpu::Memory::Default);
+        fr->buffer_size = required_buffer_size;
     }
 
-    // Upload vertex/index data into a single contiguous GPU buffer
-    // During Map() we specify a null read range (as per DX12 API, this is informational and for
-    // tooling only)
-    void *vtx_resource, *idx_resource;
-    vtx_resource        = bd->device->get_host_pointer(fr->VertexBuffer);
-    idx_resource        = bd->device->get_host_pointer(fr->IndexBuffer);
-    ImDrawVert* vtx_dst = (ImDrawVert*)vtx_resource;
-    ImDrawIdx*  idx_dst = (ImDrawIdx*)idx_resource;
+    char*       buffer_host = (char*)bd->device->get_host_pointer(fr->buffer);
+    ImDrawVert* vtx_dst     = (ImDrawVert*)buffer_host;
+    ImDrawIdx*  idx_dst     = (ImDrawIdx*)(buffer_host + vertex_data_size);
     for (const ImDrawList* draw_list : draw_data->CmdLists) {
         memcpy(vtx_dst, draw_list->VtxBuffer.Data, draw_list->VtxBuffer.Size * sizeof(ImDrawVert));
         memcpy(idx_dst, draw_list->IdxBuffer.Data, draw_list->IdxBuffer.Size * sizeof(ImDrawIdx));
@@ -137,21 +340,37 @@ void ImGui_ImplLoon_RenderDrawData(ImDrawData* draw_data, gpu::CommandBuffer cmd
         idx_dst += draw_list->IdxBuffer.Size;
     }
 
+    DrawArgs* draw_args = (DrawArgs*)(buffer_host + vertex_data_size + index_data_size);
+
+    const auto device_ptr = bd->device->get_device_pointer(fr->buffer);
+
     // Setup desired state
-    ImGui_ImplLoon_SetupRenderState(draw_data, cmd, fr);
+    SetupRenderState(draw_data, cmd, fr);
 
     // Setup render state structure (for callbacks and custom texture bindings)
-    ImGuiPlatformIO&           platform_io = ImGui::GetPlatformIO();
-    ImGui_ImplLoon_RenderState render_state;
-    render_state.CmdBuffer           = cmd;
-    platform_io.Renderer_RenderState = &render_state;
+    ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
+    // TODO: Support UserCallback render state if we want to.
+    // ImGui_ImplLoon_RenderState render_state;
+    // render_state.CmdBuffer           = cmd;
+    // platform_io.Renderer_RenderState = &render_state;
 
     // Render command lists
     // (Because we merged all buffers into a single one, we maintain our own offset into them)
-    int    global_vtx_offset = 0;
-    int    global_idx_offset = 0;
-    ImVec2 clip_off          = draw_data->DisplayPos;
-    ImVec2 clip_scale        = draw_data->FramebufferScale;
+    gpu::GpuPtr global_vtx_ptr = device_ptr;
+    gpu::GpuPtr global_idx_ptr = global_vtx_ptr + vertex_data_size;
+    gpu::GpuPtr args_ptr       = global_idx_ptr + index_data_size;
+    fprintf(stderr, "VtxAddr: %llx, IdxAddr: %llx\n", global_vtx_ptr, global_idx_ptr);
+
+    ImVec2 scale;
+    scale[0] = 2.0f / draw_data->DisplaySize.x;
+    scale[1] = 2.0f / draw_data->DisplaySize.y;
+    ImVec2 translate;
+    translate[0] = -1.0f - draw_data->DisplayPos.x * scale[0];
+    translate[1] = -1.0f - draw_data->DisplayPos.y * scale[1];
+
+    ImVec2 clip_off   = draw_data->DisplayPos;
+    ImVec2 clip_scale = draw_data->FramebufferScale;
+
     for (const ImDrawList* draw_list : draw_data->CmdLists) {
         for (int cmd_i = 0; cmd_i < draw_list->CmdBuffer.Size; cmd_i++) {
             const ImDrawCmd* pcmd = &draw_list->CmdBuffer[cmd_i];
@@ -160,7 +379,7 @@ void ImGui_ImplLoon_RenderDrawData(ImDrawData* draw_data, gpu::CommandBuffer cmd
                 // (ImDrawCallback_ResetRenderState is a special callback value used by the user to
                 // request the renderer to reset render state.)
                 if (pcmd->UserCallback == ImDrawCallback_ResetRenderState)
-                    ImGui_ImplLoon_SetupRenderState(draw_data, cmd, fr);
+                    SetupRenderState(draw_data, cmd, fr);
                 else
                     pcmd->UserCallback(draw_list, pcmd);
             } else {
@@ -178,184 +397,44 @@ void ImGui_ImplLoon_RenderDrawData(ImDrawData* draw_data, gpu::CommandBuffer cmd
                 // command_list->RSSetScissorRects(1, &r);
 
                 // Bind texture, Draw
-                auto tex_id = (uint64_t)pcmd->GetTexID();
+                auto        tex_id     = (uint64_t)pcmd->GetTexID();
+                gpu::GpuPtr vertex_buf = global_vtx_ptr + (pcmd->VtxOffset * sizeof(ImDrawVert));
+                gpu::GpuPtr index_buf  = global_idx_ptr + (pcmd->IdxOffset * sizeof(ImDrawIdx));
 
-                // pcmd->IdxOffset + global_idx_offset;
-                // pcmd->VtxOffset + global_vtx_offset;
-                gpu::GpuPtr draw_args_gpu;
-                gpu::GpuPtr index_buf;
-                cmd.draw_indexed_instanced(draw_args_gpu,
-                                           draw_args_gpu,
+                *draw_args = DrawArgs{
+                    .vert = {
+                        .scale = scale,
+                        .translate = translate,
+                        .padding = {0,0},
+                        .vertex_buffer = vertex_buf,
+                    },
+                    .frag = {
+                        .texture = tex_id,
+                        .sampler = 0,
+                    }
+                };
+                // TODO: Would be better to loop twice, first just setting the arguments buffer,
+                // then a single barrier, then draws. Even better we could use an indirect draw to
+                // dispatch all of them in one call.
+                // cmd.barrier(gpu::StageFlags::Host, gpu::StageFlags::VertexShader);
+
+                cmd.draw_indexed_instanced(args_ptr,
+                                           args_ptr + offsetof(DrawArgs, frag),
                                            index_buf,
                                            pcmd->ElemCount,
                                            1);
+
+                args_ptr += sizeof(DrawArgs);
+                draw_args++;
             }
         }
-        global_idx_offset += draw_list->IdxBuffer.Size;
-        global_vtx_offset += draw_list->VtxBuffer.Size;
+        global_idx_ptr += draw_list->IdxBuffer.Size * sizeof(ImDrawIdx);
+        global_vtx_ptr += draw_list->VtxBuffer.Size * sizeof(ImDrawVert);
     }
     platform_io.Renderer_RenderState = nullptr;
 }
 
-static void ImGui_ImplLoon_DestroyTexture(ImTextureData* tex) {
-    if (ImGui_ImplLoon_Texture* backend_tex = (ImGui_ImplLoon_Texture*)tex->BackendUserData) {
-        IM_ASSERT(backend_tex->tex_heap_idx == (uint32_t)tex->TexID);
-        ImGui_ImplLoon_Data* bd = ImGui_ImplLoon_GetBackendData();
-
-        // TODO: Free the texture and remove it from the heap.
-        bd->device->remove_texture_view_from_heap(bd->texture_heap, backend_tex->tex_heap_idx);
-        bd->device->free(backend_tex->texture_view);
-        bd->device->free(backend_tex->texture);
-        IM_DELETE(backend_tex);
-
-        // Clear identifiers and mark as destroyed (in order to allow e.g. calling
-        // InvalidateDeviceObjects while running)
-        tex->SetTexID(ImTextureID_Invalid);
-        tex->BackendUserData = nullptr;
-    }
-    tex->SetStatus(ImTextureStatus_Destroyed);
-}
-
-void ImGui_ImplLoon_UpdateTexture(ImTextureData* tex) {
-    ImGui_ImplLoon_Data* bd = ImGui_ImplLoon_GetBackendData();
-    bool                 need_barrier_before_copy
-        = true;  // Do we need a resource barrier before we copy new data in?
-
-    if (tex->Status == ImTextureStatus_WantCreate) {
-        // Create and upload new texture to graphics system
-        // IMGUI_DEBUG_LOG("UpdateTexture #%03d: WantCreate %dx%d\n", tex->UniqueID, tex->Width,
-        // tex->Height);
-        IM_ASSERT(tex->TexID == ImTextureID_Invalid && tex->BackendUserData == nullptr);
-        IM_ASSERT(tex->Format == ImTextureFormat_RGBA32);
-        ImGui_ImplLoon_Texture* backend_tex = IM_NEW(ImGui_ImplLoon_Texture)();
-
-        // Create a texture, texture view and add it to the texture heap. Use the texture heap index
-        // as the tex id.
-
-        // Store identifiers
-        tex->SetTexID((ImTextureID)backend_tex->tex_heap_idx);
-        tex->BackendUserData = backend_tex;
-        need_barrier_before_copy
-            = false;  // Because this is a newly-created texture it will be in
-                      // D3D12_RESOURCE_STATE_COMMON and thus we don't need a barrier
-        // We don't set tex->Status to ImTextureStatus_OK to let the code fallthrough below.
-    }
-
-    if (tex->Status == ImTextureStatus_WantCreate || tex->Status == ImTextureStatus_WantUpdates) {
-        ImGui_ImplLoon_Texture* backend_tex = (ImGui_ImplLoon_Texture*)tex->BackendUserData;
-        IM_ASSERT(tex->Format == ImTextureFormat_RGBA32);
-
-        // Use the staging buffer to upload the texture data to the GPU.
-        // Check the need_barrier_before_copy to decide on synchronization, and insert a barrier
-        // after.
-
-        // For simplicity, use a semamphore to make this update a blocking function, not async.
-
-        tex->SetStatus(ImTextureStatus_OK);
-    }
-
-    if (tex->Status == ImTextureStatus_WantDestroy
-        && tex->UnusedFrames >= (int)bd->numFramesInFlight)
-        ImGui_ImplLoon_DestroyTexture(tex);
-}
-
-bool ImGui_ImplLoon_CreateDeviceObjects() {
-    ImGui_ImplLoon_Data* bd = ImGui_ImplLoon_GetBackendData();
-    if (bd->pipelineState) ImGui_ImplLoon_InvalidateDeviceObjects();
-
-    // Create pipelines
-
-    // Create depth-stencil State
-
-    // Create CPU-mapped ring buffer for vertex, index, and texture upload data.
-    return true;
-}
-
-void ImGui_ImplLoon_InvalidateDeviceObjects() {
-    ImGui_ImplLoon_Data* bd = ImGui_ImplLoon_GetBackendData();
-    if (!bd) return;
-
-    // Destroy GPU resources, pipelines, etc.
-
-
-    // Destroy all textures
-    for (ImTextureData* tex : ImGui::GetPlatformIO().Textures)
-        if (tex->RefCount == 1) ImGui_ImplLoon_DestroyTexture(tex);
-
-    for (uint32_t i = 0; i < bd->numFramesInFlight; i++) {
-        ImGui_ImplLoon_RenderBuffers* fr = &bd->pFrameResources[i];
-    }
-}
-
-bool ImGui_ImplLoon_Init(ImGui_ImplLoon_InitInfo* init_info) {
-    ImGuiIO& io = ImGui::GetIO();
-    IMGUI_CHECKVERSION();
-    IM_ASSERT(io.BackendRendererUserData == nullptr && "Already initialized a renderer backend!");
-
-    // Setup backend capabilities flags
-    ImGui_ImplLoon_Data* bd = IM_NEW(ImGui_ImplLoon_Data)();
-    bd->InitInfo            = *init_info;  // Deep copy
-    init_info               = &bd->InitInfo;
-
-    bd->device = init_info->device;
-    IM_ASSERT(init_info->queue);
-    bd->queue             = init_info->queue;
-    bd->RTVFormat         = init_info->RTVFormat;
-    bd->DSVFormat         = init_info->DSVFormat;
-    bd->numFramesInFlight = init_info->NumFramesInFlight;
-    bd->texture_heap      = init_info->TextureHeap;
-
-    io.BackendRendererUserData = (void*)bd;
-    io.BackendRendererName     = "imgui_impl_loon";
-    io.BackendFlags
-        |= ImGuiBackendFlags_RendererHasVtxOffset;  // We can honor the ImDrawCmd::VtxOffset field,
-                                                    // allowing for large meshes.
-    io.BackendFlags
-        |= ImGuiBackendFlags_RendererHasTextures;  // We can honor ImGuiPlatformIO::Textures[]
-                                                   // requests during render.
-
-    // Create buffers with a default size (they will later be grown as needed)
-    bd->frameIndex      = 0;
-    bd->pFrameResources = new ImGui_ImplLoon_RenderBuffers[bd->numFramesInFlight];
-    for (int i = 0; i < (int)bd->numFramesInFlight; i++) {
-        // TODO: Initialize these buffers
-        ImGui_ImplLoon_RenderBuffers* fr = &bd->pFrameResources[i];
-        fr->IndexBuffer                  = {0};
-        fr->VertexBuffer                 = {0};
-        fr->IndexBufferSize              = 10000;
-        fr->VertexBufferSize             = 5000;
-    }
-
-    return true;
-}
-
-void ImGui_ImplLoon_Shutdown() {
-    ImGui_ImplLoon_Data* bd = ImGui_ImplLoon_GetBackendData();
-    IM_ASSERT(bd != nullptr && "No renderer backend to shutdown, or already shutdown?");
-    ImGuiIO&         io          = ImGui::GetIO();
-    ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
-
-    ImGui_ImplLoon_InvalidateDeviceObjects();
-    delete[] bd->pFrameResources;
-
-    io.BackendRendererName     = nullptr;
-    io.BackendRendererUserData = nullptr;
-    io.BackendFlags
-        &= ~(ImGuiBackendFlags_RendererHasVtxOffset | ImGuiBackendFlags_RendererHasTextures);
-    platform_io.ClearRendererHandlers();
-    IM_DELETE(bd);
-}
-
-void ImGui_ImplLoon_NewFrame() {
-    ImGui_ImplLoon_Data* bd = ImGui_ImplLoon_GetBackendData();
-    IM_ASSERT(bd != nullptr
-              && "Context or backend not initialized! Did you call ImGui_ImplLoon_Init()?");
-
-    if (!bd->pipelineState)
-        if (!ImGui_ImplLoon_CreateDeviceObjects())
-            IM_ASSERT(0 && "ImGui_ImplLoon_CreateDeviceObjects() failed!");
-}
-
 //-----------------------------------------------------------------------------
 
+}  // namespace loon::imgui
 #endif  // #ifndef IMGUI_DISABLE
