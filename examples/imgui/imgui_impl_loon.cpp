@@ -22,12 +22,13 @@ struct ImGui_ImplLoon_Data {
     gpu::Device*               device;
     gpu::Handle<gpu::Pipeline> pipelineState;
 
-    gpu::Handle<gpu::Queue>       queue;
-    gpu::Format                   RTVFormat;
-    gpu::Format                   DSVFormat;
-    gpu::Handle<gpu::TextureHeap> texture_heap;
-    uint32_t                      num_frames_in_flight;
-    ShaderLoader*                 shader_loader;
+    gpu::Handle<gpu::Queue>             queue;
+    gpu::Format                         color_format;
+    gpu::Format                         depth_format;
+    gpu::Handle<gpu::TextureHeap>       texture_heap;
+    gpu::Handle<gpu::DepthStencilState> depth_stencil_state;
+    uint32_t                            num_frames_in_flight;
+    ShaderLoader*                       shader_loader;
 
     ImGui_ImplLoon_RenderBuffers* pFrameResources;
     uint64_t                      frameIndex;
@@ -35,9 +36,10 @@ struct ImGui_ImplLoon_Data {
     ImGui_ImplLoon_Data() { memset((void*)this, 0, sizeof(*this)); }
 };
 
-// Backend data stored in io.BackendRendererUserData to allow support for multiple Dear ImGui
-// contexts It is STRONGLY preferred that you use docking branch with multi-viewports (== single
-// Dear ImGui context + multiple windows) instead of multiple Dear ImGui contexts.
+// Backend data stored in io.BackendRendererUserData to allow support for
+// multiple Dear ImGui contexts It is STRONGLY preferred that you use docking
+// branch with multi-viewports (== single Dear ImGui context + multiple windows)
+// instead of multiple Dear ImGui contexts.
 static ImGui_ImplLoon_Data* GetBackendData() {
     return ImGui::GetCurrentContext() ? (ImGui_ImplLoon_Data*)ImGui::GetIO().BackendRendererUserData
                                       : nullptr;
@@ -54,12 +56,10 @@ static void SetupRenderState(ImDrawData*                   draw_data,
                              ImGui_ImplLoon_RenderBuffers* fr) {
     // Setup transforms
 
-
     ImGui_ImplLoon_Data* bd = GetBackendData();
-    // TODO: Setup viewport
-
 
     // Bind shader
+    command_list.set_depth_stencil_State(bd->depth_stencil_state);
     command_list.set_pipeline(bd->pipelineState);
 }
 
@@ -88,21 +88,21 @@ static void DestroyTexture(ImTextureData* tex) {
     tex->SetStatus(ImTextureStatus_Destroyed);
 }
 
-static void UpdateTexture(ImTextureData* tex) {
+static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) {
     ImGui_ImplLoon_Data* bd = GetBackendData();
     bool                 need_barrier_before_copy
         = false;  // Do we need a resource barrier before we copy new data in?
 
     if (tex->Status == ImTextureStatus_WantCreate) {
         // Create and upload new texture to graphics system
-        // IMGUI_DEBUG_LOG("UpdateTexture #%03d: WantCreate %dx%d\n", tex->UniqueID, tex->Width,
-        // tex->Height);
+        // IMGUI_DEBUG_LOG("UpdateTexture #%03d: WantCreate %dx%d\n", tex->UniqueID,
+        // tex->Width, tex->Height);
         IM_ASSERT(tex->TexID == ImTextureID_Invalid && tex->BackendUserData == nullptr);
         IM_ASSERT(tex->Format == ImTextureFormat_RGBA32);
         ImGui_ImplLoon_Texture* backend_tex = IM_NEW(ImGui_ImplLoon_Texture)();
 
-        // Create a texture, texture view and add it to the texture heap. Use the texture heap index
-        // as the tex id.
+        // Create a texture, texture view and add it to the texture heap. Use the
+        // texture heap index as the tex id.
         backend_tex->texture = bd->device->create_texture({
             .dimensions = {.x = static_cast<uint32_t>(tex->Width),
                            .y = static_cast<uint32_t>(tex->Height),
@@ -131,11 +131,51 @@ static void UpdateTexture(ImTextureData* tex) {
         IM_ASSERT(tex->Format == ImTextureFormat_RGBA32);
 
         // Use the staging buffer to upload the texture data to the GPU.
-        // Check the need_barrier_before_copy to decide on synchronization, and insert a barrier
-        // after.
+        // Check the need_barrier_before_copy to decide on synchronization, and
+        // insert a barrier after.
 
-        // For simplicity, use a semamphore to make this update a blocking function, not async.
+        // For simplicity, use a semamphore to make this update a blocking function,
+        // not async.
+        if (fb->buffer_size < tex->GetSizeInBytes()) {
+            if (fb->buffer) bd->device->free(fb->buffer);
+            fb->buffer      = bd->device->malloc(tex->GetSizeInBytes());
+            fb->buffer_size = tex->GetSizeInBytes();
+        }
 
+        void* dst = bd->device->get_host_pointer(fb->buffer);
+        memcpy(dst, tex->GetPixels(), tex->GetSizeInBytes());
+
+        auto cmd = bd->device->start_command_recording(bd->queue);
+
+        if (need_barrier_before_copy) {
+            cmd.barrier(gpu::None,
+                        gpu::StageFlags::Transfer,
+                        gpu::TextureTransition{
+                            .texture    = backend_tex->texture,
+                            .old_layout = loon::gpu::Layout::DontCare,
+                            .new_layout = loon::gpu::Layout::General,
+                        });
+        }
+
+        cmd.copy_to_texture(
+            bd->device->get_device_pointer(fb->buffer),
+            backend_tex->texture,
+            gpu::BufferToTextureCopyInfo{
+                .buffer_image_size
+                = {static_cast<uint32_t>(tex->Width), static_cast<uint32_t>(tex->Height)},
+                .image_extent
+                = {static_cast<uint32_t>(tex->Width), static_cast<uint32_t>(tex->Height), 1},
+            });
+        cmd.barrier(loon::gpu::Transfer, loon::gpu::PixelShader);
+
+        auto copy_semaphore = bd->device->create_semaphore(0);
+        bd->device->submit(
+            bd->queue,
+            cmd,
+            {},
+            gpu::SemaphoreInfo{.semaphore = copy_semaphore, .value = 1, .stage = gpu::Transfer});
+        bd->device->wait_semaphore(copy_semaphore, 1);
+        bd->device->free(copy_semaphore);
 
         tex->SetStatus(ImTextureStatus_OK);
     }
@@ -156,26 +196,36 @@ static bool CreateDeviceObjects() {
     ShaderModule shader         = bd->shader_loader->load_module("imgui.slang");
     const auto   vertex_spirv   = get_spirv(shader.get(), "vertex_main");
     const auto   fragment_spirv = get_spirv(shader.get(), "fragment_main");
-    bd->pipelineState           = bd->device->create_graphics_pipeline(
-        {
-                      .spirv       = Span(vertex_spirv.data(), vertex_spirv.size()).as_bytes(),
-                      .entry_point = "vertex_main"_sv,
-        },
-        {
-                      .spirv       = Span(fragment_spirv.data(), fragment_spirv.size()).as_bytes(),
-                      .entry_point = "fragment_main"_sv,
-        },
-        RasterDesc{
-                      .cull          = Cull::CW,
-                      .depth_format  = bd->DSVFormat,
-                      .color_targets = {{.format = bd->RTVFormat}},
-        });
-
+    bd->pipelineState = bd->device->create_graphics_pipeline(
+      {
+          .spirv = Span(vertex_spirv.data(), vertex_spirv.size()).as_bytes(),
+          .entry_point = "vertex_main"_sv,
+      },
+      {
+          .spirv =
+              Span(fragment_spirv.data(), fragment_spirv.size()).as_bytes(),
+          .entry_point = "fragment_main"_sv,
+      },
+      RasterDesc{
+          .cull = Cull::None,
+          .depth_format = bd->depth_format,
+          .color_targets = {{.format = bd->color_format}},
+          .blendstate =
+              {
+                  .color_op = Blend::Add,
+                  .src_color_factor = Factor::SrcAlpha,
+                  .dst_color_factor = Factor::OneMinusSrcAlpha,
+                  .src_alpha_factor = Factor::One,
+                  .dst_alpha_factor = Factor::OneMinusSrcAlpha,
+              },
+      });
 
     // Create depth-stencil State?
+    bd->depth_stencil_state = bd->device->create_depth_stencil_state(DepthStencilDesc{
+        .depth_mode = loon::gpu::DepthFlags::None,
+        .depth_test = loon::gpu::Op::Always,
+    });
 
-
-    // Create CPU-mapped ring buffer for vertex, index, and texture upload data.
     return true;
 }
 
@@ -207,23 +257,22 @@ bool Init(const InitInfo& info) {
     // Setup backend capabilities flags
     ImGui_ImplLoon_Data* bd = IM_NEW(ImGui_ImplLoon_Data)();
 
-    bd->device = info.device;
-    // IM_ASSERT(init_info->queue);
+    bd->device               = info.device;
     bd->queue                = info.queue;
-    bd->RTVFormat            = info.render_target_format;
-    bd->DSVFormat            = info.depth_stencil_view_format;
+    bd->color_format         = info.render_target_format;
+    bd->depth_format         = info.depth_stencil_view_format;
     bd->num_frames_in_flight = info.num_frames_in_flight;
     bd->texture_heap         = info.texture_heap;
     bd->shader_loader        = info.shader_loader;
 
     io.BackendRendererUserData = (void*)bd;
     io.BackendRendererName     = "imgui_impl_loon";
-    io.BackendFlags
-        |= ImGuiBackendFlags_RendererHasVtxOffset;  // We can honor the ImDrawCmd::VtxOffset field,
-                                                    // allowing for large meshes.
-    io.BackendFlags
-        |= ImGuiBackendFlags_RendererHasTextures;  // We can honor ImGuiPlatformIO::Textures[]
-                                                   // requests during render.
+    io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;  // We can honor the
+                                                                // ImDrawCmd::VtxOffset field,
+                                                                // allowing for large meshes.
+    io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;   // We can honor
+                                                                // ImGuiPlatformIO::Textures[]
+                                                                // requests during render.
 
     // Create buffers with a default size (they will later be grown as needed)
     bd->frameIndex      = 0;
@@ -256,8 +305,8 @@ void Shutdown() {
 
 void NewFrame() {
     ImGui_ImplLoon_Data* bd = GetBackendData();
-    IM_ASSERT(bd != nullptr
-              && "Context or backend not initialized! Did you call ImGui_ImplLoon_Init()?");
+    IM_ASSERT(bd != nullptr && "Context or backend not initialized! Did you call "
+                             "ImGui_ImplLoon_Init()?");
 
     if (!bd->pipelineState)
         if (!CreateDeviceObjects()) IM_ASSERT(0 && "ImGui_ImplLoon_CreateDeviceObjects() failed!");
@@ -277,7 +326,6 @@ struct alignas(64) FragmentInput {
     uint64_t sampler = 0;
 };
 
-
 struct alignas(64) DrawArgs {
     VertexInput   vert;
     FragmentInput frag;
@@ -295,18 +343,20 @@ void Render(gpu::CommandBuffer cmd) {
     // Avoid rendering when minimized
     if (draw_data->DisplaySize.x <= 0.0f || draw_data->DisplaySize.y <= 0.0f) return;
 
-    // Catch up with texture updates. Most of the times, the list will have 1 element with an OK
-    // status, aka nothing to do. (This almost always points to ImGui::GetPlatformIO().Textures[]
-    // but is part of ImDrawData to allow overriding or disabling texture updates).
-    if (draw_data->Textures != nullptr)
-        for (ImTextureData* tex : *draw_data->Textures)
-            if (tex->Status != ImTextureStatus_OK) UpdateTexture(tex);
-
-    // FIXME: We are assuming that this only gets called once per frame!
     ImGui_ImplLoon_Data* bd = GetBackendData();
     bd->frameIndex          = bd->frameIndex + 1;
     ImGui_ImplLoon_RenderBuffers* fr
         = &bd->pFrameResources[bd->frameIndex % bd->num_frames_in_flight];
+
+    // Catch up with texture updates. Most of the times, the list will have 1
+    // element with an OK status, aka nothing to do. (This almost always points to
+    // ImGui::GetPlatformIO().Textures[] but is part of ImDrawData to allow
+    // overriding or disabling texture updates).
+    if (draw_data->Textures != nullptr)
+        for (ImTextureData* tex : *draw_data->Textures)
+            if (tex->Status != ImTextureStatus_OK) UpdateTexture(tex, fr);
+
+    // FIXME: We are assuming that this only gets called once per frame!
 
     // Create and grow buffers if needed
     const size_t vertex_data_size = AlignAddress(draw_data->TotalVtxCount * sizeof(ImDrawVert), 64);
@@ -345,6 +395,7 @@ void Render(gpu::CommandBuffer cmd) {
     const auto device_ptr = bd->device->get_device_pointer(fr->buffer);
 
     // Setup desired state
+
     SetupRenderState(draw_data, cmd, fr);
 
     // Setup render state structure (for callbacks and custom texture bindings)
@@ -355,11 +406,11 @@ void Render(gpu::CommandBuffer cmd) {
     // platform_io.Renderer_RenderState = &render_state;
 
     // Render command lists
-    // (Because we merged all buffers into a single one, we maintain our own offset into them)
+    // (Because we merged all buffers into a single one, we maintain our own
+    // offset into them)
     gpu::GpuPtr global_vtx_ptr = device_ptr;
     gpu::GpuPtr global_idx_ptr = global_vtx_ptr + vertex_data_size;
     gpu::GpuPtr args_ptr       = global_idx_ptr + index_data_size;
-    fprintf(stderr, "VtxAddr: %llx, IdxAddr: %llx\n", global_vtx_ptr, global_idx_ptr);
 
     ImVec2 scale;
     scale[0] = 2.0f / draw_data->DisplaySize.x;
@@ -376,8 +427,8 @@ void Render(gpu::CommandBuffer cmd) {
             const ImDrawCmd* pcmd = &draw_list->CmdBuffer[cmd_i];
             if (pcmd->UserCallback != nullptr) {
                 // User callback, registered via ImDrawList::AddCallback()
-                // (ImDrawCallback_ResetRenderState is a special callback value used by the user to
-                // request the renderer to reset render state.)
+                // (ImDrawCallback_ResetRenderState is a special callback value used by
+                // the user to request the renderer to reset render state.)
                 if (pcmd->UserCallback == ImDrawCallback_ResetRenderState)
                     SetupRenderState(draw_data, cmd, fr);
                 else
@@ -391,32 +442,29 @@ void Render(gpu::CommandBuffer cmd) {
                 if (clip_max.x <= clip_min.x || clip_max.y <= clip_min.y) continue;
 
                 // Apply scissor/clipping rectangle
-                // TODO: Add scissor support to loon_gpu.
-                // const D3D12_RECT r
-                //     = {(LONG)clip_min.x, (LONG)clip_min.y, (LONG)clip_max.x, (LONG)clip_max.y};
-                // command_list->RSSetScissorRects(1, &r);
+                cmd.set_scissor_rect({
+                    .offset_x = (uint32_t)clip_min.x,
+                    .offset_y = (uint32_t)clip_min.y,
+                    .width    = (uint32_t)(clip_max.x - clip_min.x),
+                    .height   = (uint32_t)(clip_max.y - clip_min.y),
+                });
 
                 // Bind texture, Draw
                 auto        tex_id     = (uint64_t)pcmd->GetTexID();
                 gpu::GpuPtr vertex_buf = global_vtx_ptr + (pcmd->VtxOffset * sizeof(ImDrawVert));
                 gpu::GpuPtr index_buf  = global_idx_ptr + (pcmd->IdxOffset * sizeof(ImDrawIdx));
 
-                *draw_args = DrawArgs{
-                    .vert = {
-                        .scale = scale,
-                        .translate = translate,
-                        .padding = {0,0},
-                        .vertex_buffer = vertex_buf,
-                    },
-                    .frag = {
-                        .texture = tex_id,
-                        .sampler = 0,
-                    }
-                };
-                // TODO: Would be better to loop twice, first just setting the arguments buffer,
-                // then a single barrier, then draws. Even better we could use an indirect draw to
-                // dispatch all of them in one call.
-                // cmd.barrier(gpu::StageFlags::Host, gpu::StageFlags::VertexShader);
+                *draw_args = DrawArgs{.vert =
+                                  {
+                                      .scale = scale,
+                                      .translate = translate,
+                                      .padding = {0, 0},
+                                      .vertex_buffer = vertex_buf,
+                                  },
+                              .frag = {
+                                  .texture = tex_id,
+                                  .sampler = 0,
+                              }};
 
                 cmd.draw_indexed_instanced(args_ptr,
                                            args_ptr + offsetof(DrawArgs, frag),

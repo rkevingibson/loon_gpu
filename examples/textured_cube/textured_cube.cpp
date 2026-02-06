@@ -200,6 +200,7 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
 }
 
 TexturedCube::~TexturedCube() {
+    m_device.wait_for_device_idle();
     loon::imgui::Shutdown();
 }
 
@@ -321,12 +322,13 @@ void TexturedCube::Update(const WindowState& window) {
         Cube::kNumIndices,
         1);
 
-
     ImGui::ShowDemoWindow();
-    // Render must happen within a render pass.
+
+
     loon::imgui::Render(command_buffer);
 
     command_buffer.end_render_pass();
+
 
 
     command_buffer.barrier(RasterColorOut,

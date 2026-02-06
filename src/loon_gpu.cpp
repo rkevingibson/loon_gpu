@@ -866,7 +866,7 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
             .anisotropyEnable        = (sampler_desc.max_anisotropy != 0.0f),
             .maxAnisotropy           = sampler_desc.max_anisotropy,
             .compareEnable           = VK_FALSE,
-            .minLod                  = 0.0f,
+            .minLod                  = -1000.0f,
             .maxLod                  = VK_LOD_CLAMP_NONE,
             .borderColor             = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
             .unnormalizedCoordinates = sampler_desc.coord == SamplerCoords::Pixel,
@@ -1429,26 +1429,27 @@ void Device::Impl::remove_texture_view_from_heap(Handle<TextureHeap> heap, uint3
     auto& texture_heap = m_texture_heap_pool[heap];
     texture_heap.bitset.clear_bit(idx);
 
+    // This isn't strictly valid without an extension feature from VK_KHR_robustness2.
+    // What's a better option?
+    // const VkDescriptorImageInfo image_info{
+    //     .sampler     = VK_NULL_HANDLE,
+    //     .imageView   = VK_NULL_HANDLE,
+    //     .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+    // };
 
-    const VkDescriptorImageInfo image_info{
-        .sampler     = VK_NULL_HANDLE,
-        .imageView   = VK_NULL_HANDLE,
-        .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
-    };
-
-    const VkWriteDescriptorSet write{
-        .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .pNext            = nullptr,
-        .dstSet           = texture_heap.vk_descriptor_set,
-        .dstBinding       = 2,
-        .dstArrayElement  = idx,
-        .descriptorCount  = 1,
-        .descriptorType   = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-        .pImageInfo       = &image_info,
-        .pBufferInfo      = nullptr,
-        .pTexelBufferView = nullptr,
-    };
-    m_api.vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+    // const VkWriteDescriptorSet write{
+    //     .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+    //     .pNext            = nullptr,
+    //     .dstSet           = texture_heap.vk_descriptor_set,
+    //     .dstBinding       = 2,
+    //     .dstArrayElement  = idx,
+    //     .descriptorCount  = 1,
+    //     .descriptorType   = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+    //     .pImageInfo       = &image_info,
+    //     .pBufferInfo      = nullptr,
+    //     .pTexelBufferView = nullptr,
+    // };
+    // m_api.vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
 }
 
 void Device::Impl::free(Handle<TextureHeap> heap) {
@@ -2419,6 +2420,16 @@ void CommandBuffer::set_depth_stencil_State(Handle<DepthStencilState> state) {
                                   VK_STENCIL_OP_KEEP,
                                   VK_STENCIL_OP_KEEP,
                                   VK_COMPARE_OP_ALWAYS);
+}
+
+void CommandBuffer::set_scissor_rect(const Rect2D& rect) {
+    auto impl = reinterpret_cast<Device::Impl*>(device);
+    auto cmd  = reinterpret_cast<VkCommandBuffer>(buffer);
+    const VkRect2D vk_rect{
+        .offset = {.x = (int32_t)rect.offset_x, .y = (int32_t)rect.offset_y,},
+        .extent = {.width = rect.width, .height = rect.height},
+    };
+    impl->m_api.vkCmdSetScissorWithCount(cmd, 1, &vk_rect);
 }
 
 void CommandBuffer::set_compute_ptr(GpuPtr dataGpu) {

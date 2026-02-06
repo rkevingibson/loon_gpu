@@ -37,7 +37,7 @@ VertexStageOutput vertex_main(uint32_t vertexIdx : SV_VertexID)
     Vertex vert = vertices[vertexIdx];
     VertexStageOutput out;
     out.position = float4(vert.pos * args.vert->scale + args.vert->translate, 0.5, 1);
-    out.color = vert.color;
+    out.color = float4(vert.color) / 255.0;
     out.uv = vert.uv;
     return out;
 }
@@ -47,5 +47,6 @@ VertexStageOutput vertex_main(uint32_t vertexIdx : SV_VertexID)
 float4 fragment_main(VertexStageOutput vertex) : SV_Target
 {
     let sampler = args.frag->sampler;
-    return vertex.color * args.frag->texture.Sample(sampler, vertex.uv);
+    let sample = args.frag->texture.Sample(sampler, vertex.uv);
+    return vertex.color * sample;
 }

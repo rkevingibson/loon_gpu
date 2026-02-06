@@ -279,6 +279,7 @@ enum class Factor : uint8_t {
     SrcColor,
     DstColor,
     SrcAlpha,
+    OneMinusSrcAlpha,
 };
 
 enum class Topology : uint8_t {
@@ -547,7 +548,7 @@ static constexpr SamplerDesc kDefaultSamplers[] = {SamplerDesc{
     .coord          = SamplerCoords::Normalized,
     .filter         = SamplerFilter::Linear,
     .address        = SamplerAddressing::ClampToEdge,
-    .max_anisotropy = 8.0f,
+    .max_anisotropy = 1.0f,
 }};
 
 struct DeviceDesc {
@@ -786,6 +787,7 @@ class CommandBuffer {
 
     void set_pipeline(Handle<Pipeline> pipeline);
     void set_depth_stencil_State(Handle<DepthStencilState> state);
+    void set_scissor_rect(const Rect2D& rect);
 
     void dispatch(GpuPtr dataGpu, const Dimension3D& gridDimensions);
     void dispatch_indirect(GpuPtr dataGpu, GpuPtr gridDimensionsGpu);

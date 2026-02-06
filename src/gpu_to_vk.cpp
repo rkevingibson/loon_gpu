@@ -330,6 +330,7 @@ VkBlendFactor bridge(Factor factor) {
         case Factor::SrcColor: return VK_BLEND_FACTOR_SRC_COLOR;
         case Factor::DstColor: return VK_BLEND_FACTOR_DST_COLOR;
         case Factor::SrcAlpha: return VK_BLEND_FACTOR_SRC_ALPHA;
+        case Factor::OneMinusSrcAlpha: return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     }
     return VK_BLEND_FACTOR_MAX_ENUM;
 }
