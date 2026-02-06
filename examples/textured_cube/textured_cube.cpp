@@ -67,8 +67,6 @@ struct CameraInfo {
 struct ShaderArgs {
     CameraInfo camera;
     MeshGpu    mesh;
-    uint64_t   texture;
-    uint64_t   sampler;
 };
 
 static Format select_surface_format(const loon::gpu::SurfaceCapabilities& surface_capabilities) {
@@ -237,6 +235,9 @@ void TexturedCube::recreate_swapchain(uint32_t width, uint32_t height) {
 
 void TexturedCube::Update(const WindowState& window) {
     loon::imgui::NewFrame();
+    ImGui::DockSpaceOverViewport(0,
+                                 ImGui::GetMainViewport(),
+                                 ImGuiDockNodeFlags_PassthruCentralNode);
 
     auto surface_texture = m_device.get_current_texture();
     if (surface_texture.status == SurfaceStatus::OutOfDate
@@ -265,9 +266,7 @@ void TexturedCube::Update(const WindowState& window) {
                                 .rotated_local(normalized({1, 0.5, 0}),
                                                 radians_from_degrees((float)(m_frame_idx % 360)))
                                 .to_matrix(),
-        },
-        .texture = m_texture_id,
-        .sampler = 0,
+        }
     };
 
     auto swapchain_view = m_device.create_texture_view(surface_texture.texture,
@@ -317,7 +316,7 @@ void TexturedCube::Update(const WindowState& window) {
 
     command_buffer.draw_indexed_instanced(
         argsGpu,
-        argsGpu + offsetof(ShaderArgs, texture),
+        m_texture_id,
         m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
         Cube::kNumIndices,
         1);

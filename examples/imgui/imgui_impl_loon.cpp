@@ -321,16 +321,6 @@ struct alignas(64) VertexInput {
     gpu::GpuPtr vertex_buffer;
 };
 
-struct alignas(64) FragmentInput {
-    uint64_t texture;
-    uint64_t sampler = 0;
-};
-
-struct alignas(64) DrawArgs {
-    VertexInput   vert;
-    FragmentInput frag;
-};
-
 static gpu::GpuPtr AlignAddress(gpu::GpuPtr size, gpu::GpuPtr alignment) {
     return (size + alignment - 1) & ~(alignment - 1);
 }
@@ -366,7 +356,7 @@ void Render(gpu::CommandBuffer cmd) {
     for (const ImDrawList* draw_list : draw_data->CmdLists) {
         num_draws += draw_list->CmdBuffer.size();
     }
-    const size_t args_size            = AlignAddress(sizeof(DrawArgs) * num_draws, 64);
+    const size_t args_size            = AlignAddress(sizeof(VertexInput) * num_draws, 64);
     const size_t required_buffer_size = vertex_data_size + index_data_size + args_size;
 
     if (required_buffer_size == 0) { return; }
@@ -390,7 +380,7 @@ void Render(gpu::CommandBuffer cmd) {
         idx_dst += draw_list->IdxBuffer.Size;
     }
 
-    DrawArgs* draw_args = (DrawArgs*)(buffer_host + vertex_data_size + index_data_size);
+    VertexInput* draw_args = (VertexInput*)(buffer_host + vertex_data_size + index_data_size);
 
     const auto device_ptr = bd->device->get_device_pointer(fr->buffer);
 
@@ -454,25 +444,16 @@ void Render(gpu::CommandBuffer cmd) {
                 gpu::GpuPtr vertex_buf = global_vtx_ptr + (pcmd->VtxOffset * sizeof(ImDrawVert));
                 gpu::GpuPtr index_buf  = global_idx_ptr + (pcmd->IdxOffset * sizeof(ImDrawIdx));
 
-                *draw_args = DrawArgs{.vert =
-                                  {
-                                      .scale = scale,
-                                      .translate = translate,
-                                      .padding = {0, 0},
-                                      .vertex_buffer = vertex_buf,
-                                  },
-                              .frag = {
-                                  .texture = tex_id,
-                                  .sampler = 0,
-                              }};
+                *draw_args = {
+                    .scale         = scale,
+                    .translate     = translate,
+                    .padding       = {0, 0},
+                    .vertex_buffer = vertex_buf,
+                };
 
-                cmd.draw_indexed_instanced(args_ptr,
-                                           args_ptr + offsetof(DrawArgs, frag),
-                                           index_buf,
-                                           pcmd->ElemCount,
-                                           1);
+                cmd.draw_indexed_instanced(args_ptr, tex_id, index_buf, pcmd->ElemCount, 1);
 
-                args_ptr += sizeof(DrawArgs);
+                args_ptr += sizeof(VertexInput);
                 draw_args++;
             }
         }

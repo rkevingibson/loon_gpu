@@ -49,13 +49,12 @@
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO();
+    ImGuiIO &io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
     ImGui::StyleColorsDark();
-
-
 
     self->selected_example = ExampleName::TexturedCube;
   }
@@ -87,10 +86,11 @@
   window_state.width = static_cast<uint16_t>(size.width);
   window_state.height = static_cast<uint16_t>(size.height);
 
-  ImGuiIO& io = ImGui::GetIO();
+  ImGuiIO &io = ImGui::GetIO();
   io.DisplaySize.x = view.bounds.size.width;
   io.DisplaySize.y = view.bounds.size.height;
-  io.DisplayFramebufferScale = ImVec2(view.window.screen.backingScaleFactor, view.window.screen.backingScaleFactor);
+  io.DisplayFramebufferScale = ImVec2(view.window.screen.backingScaleFactor,
+                                      view.window.screen.backingScaleFactor);
 
   if (!current_example) {
     current_example = create_example(selected_example, self->window_state);
