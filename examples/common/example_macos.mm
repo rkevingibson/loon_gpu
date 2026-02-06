@@ -1,5 +1,6 @@
 
 #import "example.h"
+#include "imgui/imgui.h"
 #import <AppKit/AppKit.h>
 #import <Foundation/Foundation.h>
 
@@ -9,6 +10,7 @@
 
 #import "common/example.h"
 #import "common/shaders.h"
+#import "imgui/imgui_impl_osx.h"
 #import <memory>
 #import <string>
 
@@ -45,6 +47,16 @@
         .file_paths = file_paths,
     };
 
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+
+    ImGui::StyleColorsDark();
+
+
+
     self->selected_example = ExampleName::TexturedCube;
   }
 
@@ -63,6 +75,7 @@
   [super viewDidLoad];
   self.mtkView.device = self.device;
   self.mtkView.delegate = self;
+  ImGui_ImplOSX_Init(self.view);
   [NSApp activateIgnoringOtherApps:YES];
 }
 
@@ -73,9 +86,17 @@
   auto size = layer.drawableSize;
   window_state.width = static_cast<uint16_t>(size.width);
   window_state.height = static_cast<uint16_t>(size.height);
+
+  ImGuiIO& io = ImGui::GetIO();
+  io.DisplaySize.x = view.bounds.size.width;
+  io.DisplaySize.y = view.bounds.size.height;
+  io.DisplayFramebufferScale = ImVec2(view.window.screen.backingScaleFactor, view.window.screen.backingScaleFactor);
+
   if (!current_example) {
     current_example = create_example(selected_example, self->window_state);
   }
+
+  ImGui_ImplOSX_NewFrame(self.view);
   current_example->Update(self->window_state);
 }
 

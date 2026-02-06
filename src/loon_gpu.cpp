@@ -1839,18 +1839,21 @@ void Device::Impl::submit(Handle<Queue>             queue,
                               });
 
         if (buf == m_surface.transitioning_command[m_surface.current_image_idx]) {
-            signal_info = concat(
+            // Immediately clear this so we don't accidentally signal it twice (can happen due to
+            // cmd buffer reuse,e.g.)
+            m_surface.transitioning_command[m_surface.current_image_idx] = 0;
+            signal_info                                                  = concat(
                 &arena,
                 signal_info,
                 VkSemaphoreSubmitInfo{
-                    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-                    .pNext = nullptr,
-                    .semaphore
+                                                                     .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+                                                                     .pNext = nullptr,
+                                                                     .semaphore
                     = m_semaphore_pool[m_surface.present_semaphores[m_surface.current_image_idx]]
                           .vk_semaphore,
-                    .value       = 0,
-                    .stageMask   = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                    .deviceIndex = 0,
+                                                                     .value       = 0,
+                                                                     .stageMask   = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                                                     .deviceIndex = 0,
                 });
             signal_info
                 = concat(&arena,

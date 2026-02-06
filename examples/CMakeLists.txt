@@ -93,7 +93,10 @@ if (WIN32)
         )
 elseif(APPLE)
     enable_language(OBJCXX)
-    list(APPEND EXAMPLE_SOURCES common/example_macos.mm)
+    list(APPEND EXAMPLE_SOURCES 
+        common/example_macos.mm 
+        imgui/imgui_impl_osx.mm
+        )
 endif()
 
 add_executable(
@@ -121,6 +124,7 @@ if (APPLE)
     "-framework Metal"
     "-framework MetalKit"
     "-framework QuartzCore"
+    "-framework GameController"
     )
 endif()
 
