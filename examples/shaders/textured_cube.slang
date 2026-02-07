@@ -44,7 +44,8 @@ VertexStageOutput vertexMain(uint32_t vertexIdx : SV_VertexID)
 [shader("fragment")]
 float4 fragmentMain(VertexStageOutput vertex ) : SV_Target
 {
-    let sampler = DescriptorHandle<SamplerState>(uint2(0, 0));
-    float4 out_color = args.texture.Sample(sampler, vertex.uv);
+    // Declaring a sampler locally works:
+    let kSampler = DescriptorHandle<SamplerState>(uint2(0, 0));
+    float4 out_color = args.texture.Sample(kSampler, vertex.uv);
     return out_color;
 }

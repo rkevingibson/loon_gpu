@@ -3,6 +3,40 @@ struct CameraData {
     float4x4 cameraFromWorld;
 };
 
+struct DeadList {
+    Atomic<int> size;
+    int capacity;
+    uint* indices;
+
+    // Since we're either only ever decrementing (in the emitter stage) or incrementing (in the sim stage when particles age out), we can simplify a bit.
+    [mutating]
+    uint pop() {
+        
+        int index = size.decrement() - 1;
+        if (index >= 0) {
+            return indices[index];
+        } else {
+            // Probably a better way to do this, going to be a bunch of memory traffic.
+            size = 0;
+            return -1;
+        }
+    }
+
+    [mutating]
+    void push(uint i) {
+        uint prev_size = size.increment();
+        indices[prev_size] = i;
+    }
+};
+
+// Adapted from https://www.reedbeta.com/blog/hash-functions-for-gpu-rendering/
+uint rand_pcg(inout uint state)
+{
+    state = state * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
 enum CurveMode {
     Constant,
     Lerp,
@@ -11,28 +45,48 @@ enum CurveMode {
     EaseInOut,
 };
 
-struct ParticleSimParam {
-    float4 curve; // x = min start, y = max start, z = min end, z = max end
-    CurveMode mode;
-};
 
 struct ParticleSimOptions {
-    ParticleSimParam particle_lifetime;
-    ParticleSimParam particle_size;
-    float3 emitter_velocity;
+    float lifetime;
+    float spawn_pos;
+    float spawn_radius;
+    float spawn_size;
+};
 
-    uint max_num_particles;
+struct Particle {
+    float3 position;
+    float life;
+    float3 velocity;
+    float3 color;    
 };
 
 struct ParticleSim {
-    ParticleSimOptions* options;
-    float3* positions;
-    float3* velocities;
-    float3* colors;
+    ParticleSimOptions options;
+    DeadList dead_list;
+    uint max_num_particles;
+    uint particles_to_emit;
+    Particle* particles;    
 };
 
 struct VertexStageOutput {
 };
+
+    
+
+[shader("compute")]
+[numthreads(64, 1, 1)]
+void emitter(uniform ParticleSim* sim, uint3 gid : SV_DispatchThreadID)
+{
+    if (gid.x >= sim->particles_to_emit) {
+        return;
+    }
+
+    let particle_index = sim->dead_list.pop();
+
+    ParticleSimOptions options = sim->options;
+    // Spawn the particle based on 
+    
+}
 
 [shader("compute")]
 [numthreads(64, 1, 1)]

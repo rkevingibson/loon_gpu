@@ -184,23 +184,9 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
         .depth_mode = loon::gpu::DepthFlags::Write | loon::gpu::DepthFlags::Read,
         .depth_test = loon::gpu::Op::Greater,
     });
-
-
-    loon::imgui::Init({
-        .device                    = &m_device,
-        .queue                     = m_queue,
-        .texture_heap              = m_texture_heap,
-        .num_frames_in_flight      = kMaxFramesInFlight,
-        .render_target_format      = m_swapchain_format,
-        .depth_stencil_view_format = loon::gpu::Format::Depth32Float,
-        .shader_loader             = window_state.shader_loader.get(),
-    });
 }
 
-TexturedCube::~TexturedCube() {
-    m_device.wait_for_device_idle();
-    loon::imgui::Shutdown();
-}
+TexturedCube::~TexturedCube() {}
 
 void TexturedCube::recreate_swapchain(uint32_t width, uint32_t height) {
     m_device.wait_for_device_idle();
@@ -234,11 +220,6 @@ void TexturedCube::recreate_swapchain(uint32_t width, uint32_t height) {
 }
 
 void TexturedCube::Update(const WindowState& window) {
-    loon::imgui::NewFrame();
-    ImGui::DockSpaceOverViewport(0,
-                                 ImGui::GetMainViewport(),
-                                 ImGuiDockNodeFlags_PassthruCentralNode);
-
     auto surface_texture = m_device.get_current_texture();
     if (surface_texture.status == SurfaceStatus::OutOfDate
         || surface_texture.status == SurfaceStatus::Suboptimal) {
@@ -320,11 +301,6 @@ void TexturedCube::Update(const WindowState& window) {
         m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
         Cube::kNumIndices,
         1);
-
-    ImGui::ShowDemoWindow();
-
-
-    loon::imgui::Render(command_buffer);
 
     command_buffer.end_render_pass();
 

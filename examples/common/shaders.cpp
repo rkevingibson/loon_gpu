@@ -39,27 +39,30 @@ std::vector<uint32_t> get_spirv(ShaderModuleImpl* module, const char* entry_poin
                                                            diagnostics.writeRef());
     if (SLANG_FAILED(result)) {
         fprintf(stderr,
-                "Failed to create composite component: 0x%x 0x%x",
+                "Failed to create composite component: 0x%x 0x%x\n",
                 SLANG_GET_RESULT_FACILITY(result),
                 SLANG_GET_RESULT_CODE(result));
+        fprintf(stderr, "Shader diagnostic: %s\n", (char*)diagnostics->getBufferPointer());
         return {};
     }
     Slang::ComPtr<slang::IComponentType> component{};
     result = program->link(component.writeRef(), diagnostics.writeRef());
     if (SLANG_FAILED(result)) {
         fprintf(stderr,
-                "Failed to retrieve entry point code: 0x%x 0x%x",
+                "Failed to link program: 0x%x 0x%x\n",
                 SLANG_GET_RESULT_FACILITY(result),
                 SLANG_GET_RESULT_CODE(result));
+        fprintf(stderr, "Shader diagnostic: %s\n", (char*)diagnostics->getBufferPointer());
         return {};
     }
     Slang::ComPtr<ISlangBlob> code{};
     result = component->getEntryPointCode(0, 0, code.writeRef(), diagnostics.writeRef());
     if (SLANG_FAILED(result)) {
         fprintf(stderr,
-                "Failed to retrieve entry point code: 0x%x 0x%x",
+                "Failed to retrieve entry point code: 0x%x 0x%x\n",
                 SLANG_GET_RESULT_FACILITY(result),
                 SLANG_GET_RESULT_CODE(result));
+        fprintf(stderr, "Shader diagnostic: %s\n", (char*)diagnostics->getBufferPointer());
         return {};
     }
 

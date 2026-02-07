@@ -130,7 +130,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
                                 .hInstance     = hInstance,
                                 .hIcon         = NULL,
                                 .hCursor       = NULL,
-                                .hbrBackground = NULL,
+                                .hbrBackground = CreateSolidBrush(RGB(30, 30, 30)),
                                 .lpszMenuName  = NULL,
                                 .lpszClassName = CLASS_NAME,
                                 .hIconSm       = NULL};
