@@ -121,7 +121,8 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
             = bd->device->add_texture_view_to_heap(bd->texture_heap, backend_tex->texture_view);
 
         // Store identifiers
-        tex->SetTexID((ImTextureID)backend_tex->tex_heap_idx);
+        // Because invalid tex id == 0, we add one here and subtract on retrieval.
+        tex->SetTexID((ImTextureID)backend_tex->tex_heap_idx + 1);
         tex->BackendUserData     = backend_tex;
         need_barrier_before_copy = true;
     }
@@ -440,7 +441,7 @@ void Render(gpu::CommandBuffer cmd) {
                 });
 
                 // Bind texture, Draw
-                auto        tex_id     = (uint64_t)pcmd->GetTexID();
+                auto        tex_id     = (uint64_t)pcmd->GetTexID() - 1;
                 gpu::GpuPtr vertex_buf = global_vtx_ptr + (pcmd->VtxOffset * sizeof(ImDrawVert));
                 gpu::GpuPtr index_buf  = global_idx_ptr + (pcmd->IdxOffset * sizeof(ImDrawIdx));
 

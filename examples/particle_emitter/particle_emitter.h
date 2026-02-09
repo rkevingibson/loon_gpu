@@ -3,8 +3,26 @@
 #include <gpu/loon_gpu.h>
 
 #include "common/example.h"
+#include "common/geometry.h"
 
 using namespace loon::gpu;
+
+struct ParticleSimOptions {
+    geometry::float3 spawn_pos;
+    float            spawn_radius;
+    float            lifetime;
+    float            particle_size;
+    float            delta_t;
+    uint32_t         max_num_particles;
+    uint32_t         particles_to_emit;
+};
+
+struct ParticleSim {
+    Handle<Buffer> particle_buffer;
+    Handle<Buffer> dead_list;
+
+    ParticleSimOptions options;
+};
 
 class ParticleEmitter : public Example {
    public:
@@ -25,8 +43,11 @@ class ParticleEmitter : public Example {
     Handle<DepthStencilState> m_depth_stencil_state;
     Handle<Texture>           m_depth_texture{0};
     Handle<TextureView>       m_depth_view{0};
+    Handle<TextureHeap>       m_texture_heap;
 
-
+    Handle<Pipeline> m_reset_sim_pipeline;
+    Handle<Pipeline> m_emitter_pipeline;
     Handle<Pipeline> m_update_sim_pipeline;
     Handle<Pipeline> m_render_particle_pipeline;
+    ParticleSim      m_sim;
 };

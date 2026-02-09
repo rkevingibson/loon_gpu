@@ -753,6 +753,7 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
     vulkan_12_features.descriptorIndexing   = true;
     vulkan_12_features.shaderInt8           = true;
     vulkan_12_features.storagePushConstant8 = true;
+    vulkan_12_features.scalarBlockLayout    = true;
     vulkan_12_features.runtimeDescriptorArray                       = true;
     vulkan_12_features.descriptorBindingSampledImageUpdateAfterBind = true;
     vulkan_12_features.descriptorBindingPartiallyBound              = true;

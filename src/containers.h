@@ -467,14 +467,14 @@ SlotMap<T>::Entry* SlotMap<T>::get(uint32_t idx) {
 
 template <class T>
 Handle<T> SlotMap<T>::create_handle(uint32_t idx, uint32_t gen) {
-    return {.h = ((uint64_t)gen) << 32ull | idx};
+    return {.h = (0x8000'0000'0000'0000 | (uint64_t)gen) << 32ull | idx};
 }
 
 template <class T>
 SlotMap<T>::DecomposedHandle SlotMap<T>::decompose_handle(Handle<T> h) {
     return {
         .idx = static_cast<uint32_t>(h.h & 0xFFFF'FFFFull),
-        .gen = static_cast<uint32_t>((h.h >> 32) & 0xFFFF'FFFFull),
+        .gen = static_cast<uint32_t>((h.h >> 32) & 0x7FFF'FFFFull),
     };
 }
 
