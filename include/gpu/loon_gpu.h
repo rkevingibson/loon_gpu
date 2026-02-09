@@ -687,15 +687,18 @@ struct BufferToTextureCopyInfo {
     Dimension3D image_extent;
 };
 
-// Initialization
+///
+// The main GPU logical device.
+// This is a reference-counted object,
+///
 class Device {
    public:
     static Device create(const DeviceDesc& desc);
     Device() = default;
     ~Device();
-    Device(const Device&) = delete;
+    Device(const Device&);
     Device(Device&& other) : impl(std::exchange(other.impl, nullptr)) {}
-    Device& operator=(const Device&) = delete;
+    Device& operator=(const Device&);
     Device& operator=(Device&& other) {
         impl = std::exchange(other.impl, impl);
         return *this;

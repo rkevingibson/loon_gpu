@@ -19,7 +19,7 @@ struct ImGui_ImplLoon_Texture {
 };
 
 struct ImGui_ImplLoon_Data {
-    gpu::Device*               device;
+    gpu::Device                device;
     gpu::Handle<gpu::Pipeline> pipelineState;
 
     gpu::Handle<gpu::Queue>             queue;
@@ -71,13 +71,13 @@ static inline void SafeRelease(T*& res) {
 
 static void DestroyTexture(ImTextureData* tex) {
     if (ImGui_ImplLoon_Texture* backend_tex = (ImGui_ImplLoon_Texture*)tex->BackendUserData) {
-        IM_ASSERT(backend_tex->tex_heap_idx == (uint32_t)tex->TexID);
+        IM_ASSERT(backend_tex->tex_heap_idx == (uint32_t)tex->TexID - 1);
         ImGui_ImplLoon_Data* bd = GetBackendData();
 
         // Free the texture and remove it from the heap.
-        bd->device->remove_texture_view_from_heap(bd->texture_heap, backend_tex->tex_heap_idx);
-        bd->device->free(backend_tex->texture_view);
-        bd->device->free(backend_tex->texture);
+        bd->device.remove_texture_view_from_heap(bd->texture_heap, backend_tex->tex_heap_idx);
+        bd->device.free(backend_tex->texture_view);
+        bd->device.free(backend_tex->texture);
         IM_DELETE(backend_tex);
 
         // Clear identifiers and mark as destroyed (in order to allow e.g. calling
@@ -103,7 +103,7 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
 
         // Create a texture, texture view and add it to the texture heap. Use the
         // texture heap index as the tex id.
-        backend_tex->texture = bd->device->create_texture({
+        backend_tex->texture = bd->device.create_texture({
             .dimensions = {.x = static_cast<uint32_t>(tex->Width),
                            .y = static_cast<uint32_t>(tex->Height),
                            .z = 1},
@@ -112,13 +112,13 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
         });
 
         backend_tex->texture_view
-            = bd->device->create_texture_view(backend_tex->texture,
-                                              {
-                                                  .format = loon::gpu::Format::RGBA8Unorm,
+            = bd->device.create_texture_view(backend_tex->texture,
+                                             {
+                                                 .format = loon::gpu::Format::RGBA8Unorm,
 
-                                              });
+                                             });
         backend_tex->tex_heap_idx
-            = bd->device->add_texture_view_to_heap(bd->texture_heap, backend_tex->texture_view);
+            = bd->device.add_texture_view_to_heap(bd->texture_heap, backend_tex->texture_view);
 
         // Store identifiers
         // Because invalid tex id == 0, we add one here and subtract on retrieval.
@@ -138,15 +138,15 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
         // For simplicity, use a semamphore to make this update a blocking function,
         // not async.
         if (fb->buffer_size < tex->GetSizeInBytes()) {
-            if (fb->buffer) bd->device->free(fb->buffer);
-            fb->buffer      = bd->device->malloc(tex->GetSizeInBytes());
+            if (fb->buffer) bd->device.free(fb->buffer);
+            fb->buffer      = bd->device.malloc(tex->GetSizeInBytes());
             fb->buffer_size = tex->GetSizeInBytes();
         }
 
-        void* dst = bd->device->get_host_pointer(fb->buffer);
+        void* dst = bd->device.get_host_pointer(fb->buffer);
         memcpy(dst, tex->GetPixels(), tex->GetSizeInBytes());
 
-        auto cmd = bd->device->start_command_recording(bd->queue);
+        auto cmd = bd->device.start_command_recording(bd->queue);
 
         if (need_barrier_before_copy) {
             cmd.barrier(gpu::None,
@@ -159,7 +159,7 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
         }
 
         cmd.copy_to_texture(
-            bd->device->get_device_pointer(fb->buffer),
+            bd->device.get_device_pointer(fb->buffer),
             backend_tex->texture,
             gpu::BufferToTextureCopyInfo{
                 .buffer_image_size
@@ -169,14 +169,14 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
             });
         cmd.barrier(loon::gpu::Transfer, loon::gpu::PixelShader);
 
-        auto copy_semaphore = bd->device->create_semaphore(0);
-        bd->device->submit(
+        auto copy_semaphore = bd->device.create_semaphore(0);
+        bd->device.submit(
             bd->queue,
             cmd,
             {},
             gpu::SemaphoreInfo{.semaphore = copy_semaphore, .value = 1, .stage = gpu::Transfer});
-        bd->device->wait_semaphore(copy_semaphore, 1);
-        bd->device->free(copy_semaphore);
+        bd->device.wait_semaphore(copy_semaphore, 1);
+        bd->device.free(copy_semaphore);
 
         tex->SetStatus(ImTextureStatus_OK);
     }
@@ -197,7 +197,7 @@ static bool CreateDeviceObjects() {
     ShaderModule shader         = bd->shader_loader->load_module("imgui.slang");
     const auto   vertex_spirv   = get_spirv(shader.get(), "vertex_main");
     const auto   fragment_spirv = get_spirv(shader.get(), "fragment_main");
-    bd->pipelineState = bd->device->create_graphics_pipeline(
+    bd->pipelineState = bd->device.create_graphics_pipeline(
       {
           .spirv = Span(vertex_spirv.data(), vertex_spirv.size()).as_bytes(),
           .entry_point = "vertex_main"_sv,
@@ -222,7 +222,7 @@ static bool CreateDeviceObjects() {
       });
 
     // Create depth-stencil State?
-    bd->depth_stencil_state = bd->device->create_depth_stencil_state(DepthStencilDesc{
+    bd->depth_stencil_state = bd->device.create_depth_stencil_state(DepthStencilDesc{
         .depth_mode = loon::gpu::DepthFlags::None,
         .depth_test = loon::gpu::Op::Always,
     });
@@ -235,7 +235,7 @@ void InvalidateDeviceObjects() {
     if (!bd) return;
 
     // Destroy GPU resources, pipelines, etc.
-    bd->device->free(bd->pipelineState);
+    bd->device.free(bd->pipelineState);
     bd->pipelineState.h = 0;
 
     // Destroy all textures
@@ -244,7 +244,7 @@ void InvalidateDeviceObjects() {
 
     for (uint32_t i = 0; i < bd->num_frames_in_flight; i++) {
         ImGui_ImplLoon_RenderBuffers* fr = &bd->pFrameResources[i];
-        bd->device->free(fr->buffer);
+        bd->device.free(fr->buffer);
     }
 }
 
@@ -366,12 +366,12 @@ void Render(gpu::CommandBuffer cmd) {
         // Round up to some nice multiple to avoid reallocs frequently.
         const size_t buffer_size = ((required_buffer_size + 1023) / 1024) * 1024;
 
-        if (fr->buffer) { bd->device->free(fr->buffer); }
-        fr->buffer      = bd->device->malloc(required_buffer_size, gpu::Memory::Default);
+        if (fr->buffer) { bd->device.free(fr->buffer); }
+        fr->buffer      = bd->device.malloc(required_buffer_size, gpu::Memory::Default);
         fr->buffer_size = required_buffer_size;
     }
 
-    char*       buffer_host = (char*)bd->device->get_host_pointer(fr->buffer);
+    char*       buffer_host = (char*)bd->device.get_host_pointer(fr->buffer);
     ImDrawVert* vtx_dst     = (ImDrawVert*)buffer_host;
     ImDrawIdx*  idx_dst     = (ImDrawIdx*)(buffer_host + vertex_data_size);
     for (const ImDrawList* draw_list : draw_data->CmdLists) {
@@ -383,7 +383,7 @@ void Render(gpu::CommandBuffer cmd) {
 
     VertexInput* draw_args = (VertexInput*)(buffer_host + vertex_data_size + index_data_size);
 
-    const auto device_ptr = bd->device->get_device_pointer(fr->buffer);
+    const auto device_ptr = bd->device.get_device_pointer(fr->buffer);
 
     // Setup desired state
 

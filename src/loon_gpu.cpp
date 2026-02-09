@@ -162,6 +162,9 @@ struct Device::Impl {
     Impl(const DeviceDesc& desc);
     ~Impl();
 
+    void add_ref() { atomic_fetch_add(&m_refcount, 1); }
+    bool release_ref() { return atomic_fetch_add(&m_refcount, -1) - 1 == 0; }
+
     bool initialize(const DeviceDesc& desc);
 
     void wait_for_device_idle();
@@ -229,6 +232,7 @@ struct Device::Impl {
    private:
     friend class CommandBuffer;
 
+    int64_t            m_refcount = 1;
     Allocator          m_allocator;
     ProcLogCallback    m_log_callback = nullptr;
     void*              m_log_userdata = nullptr;
@@ -916,6 +920,7 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
 }
 
 Device::Impl::~Impl() {
+    assert(m_refcount == 0);
     wait_for_device_idle();
     unconfigure_surface();
 
@@ -2121,6 +2126,8 @@ Arena* Device::Impl::get_thread_local_arena() {
     return &state->arena;
 }
 
+// MARK: Device wrapper
+
 Device Device::create(const DeviceDesc& desc) {
     Impl* impl = new Impl(desc);
     if (impl->initialize(desc)) { return Device(impl); }
@@ -2129,7 +2136,19 @@ Device Device::create(const DeviceDesc& desc) {
 }
 
 Device::~Device() {
-    if (impl) { delete impl; }
+    if (impl && impl->release_ref()) { delete impl; }
+}
+
+Device::Device(const Device& other) : impl{other.impl} {
+    impl->add_ref();
+}
+
+Device& Device::operator=(const Device& other) {
+    if (this == &other || other.impl == impl) return *this;
+    other.impl->add_ref();
+    if (impl && impl->release_ref()) { delete impl; }
+    impl = other.impl;
+    return *this;
 }
 
 void Device::wait_for_device_idle() {
