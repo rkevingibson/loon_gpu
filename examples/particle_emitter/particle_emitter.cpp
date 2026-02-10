@@ -24,6 +24,8 @@ struct SimGpu {
     ParticleSimOptions options;
     DeadList           dead_list;
     GpuPtr             particles;
+    GpuPtr             indirect_args;
+    GpuPtr             alive_list;
 };
 
 struct CameraDataGpu {
@@ -36,6 +38,7 @@ struct DrawSimArgs {
     geometry::float3 camera_right_worldspace;
     geometry::float3 camera_up_worldspace;
     GpuPtr           particles;
+    GpuPtr           alive_list;
 };
 
 static constexpr uint32_t kMaxNumParticles = 512;
@@ -118,15 +121,16 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
     m_sim.particle_buffer = m_device.malloc(sizeof(Particle) * kMaxNumParticles, Memory::Gpu);
     m_sim.dead_list
         = m_device.malloc(sizeof(uint32_t) * kMaxNumParticles + sizeof(int32_t), Memory::Gpu);
-    m_sim.options = {
-        .spawn_pos         = geometry::float3(0, 0, 0),
-        .spawn_radius      = 0.5f,
-        .lifetime          = 1.f,
-        .particle_size     = 0.1f,
-        .delta_t           = 1.0 / 60.f,
-        .max_num_particles = kMaxNumParticles,
-        .particles_to_emit = 10,
-        .rng_seed          = (uint32_t)rand(),
+    m_sim.alive_list = m_device.malloc(sizeof(uint32_t) * kMaxNumParticles, Memory::Gpu);
+    m_sim.options    = {
+           .spawn_pos         = geometry::float3(0, 0, 0),
+           .spawn_radius      = 0.5f,
+           .lifetime          = 1.f,
+           .particle_size     = 0.1f,
+           .delta_t           = 1.0 / 60.f,
+           .max_num_particles = kMaxNumParticles,
+           .particles_to_emit = 10,
+           .rng_seed          = (uint32_t)rand(),
     };
 
     m_ring_buffer = loon::RingBuffer(m_device, 16 * 1024 * 1024, 3);
@@ -230,14 +234,24 @@ void ParticleEmitter::Update(const WindowState& window) {
     m_frame_idx++;
 
     m_sim.options.rng_seed = rand();
+    GpuPtr indirect_args   = m_ring_buffer.append(m_frame_idx,
+                                                loon::gpu::DrawIndexedIndirectArgs{
+                                                      .index_count    = 6,
+                                                      .instance_count = 0,
+                                                      .first_index    = 0,
+                                                      .vertex_offset  = 0,
+                                                      .first_instance = 0,
+                                                });
+
     GpuPtr sim_args = m_ring_buffer.append(m_frame_idx,
                          SimGpu{.options   = m_sim.options,
                                 .dead_list = {
                                     .indices = m_device.get_device_pointer(m_sim.dead_list),
                                 },
                                 .particles = m_device.get_device_pointer(m_sim.particle_buffer),
+                                .indirect_args = indirect_args,
+                                .alive_list = m_device.get_device_pointer(m_sim.alive_list),
                             });
-
 
     GpuPtr vertex_args = m_ring_buffer.append(m_frame_idx, DrawSimArgs {
         .camera = {
@@ -250,11 +264,11 @@ void ParticleEmitter::Update(const WindowState& window) {
         .camera_right_worldspace = {1,0,0},
         .camera_up_worldspace = {0,1,0},
         .particles = m_device.get_device_pointer(m_sim.particle_buffer),
+        .alive_list = m_device.get_device_pointer(m_sim.alive_list),
     });
 
-    uint16_t indices[] = {0, 1, 2, 2, 1, 3};
-
-    GpuPtr indices_ptr = m_ring_buffer.append(m_frame_idx, indices);
+    uint16_t indices[]   = {0, 1, 2, 2, 1, 3};
+    GpuPtr   indices_ptr = m_ring_buffer.append(m_frame_idx, indices);
 
     // Rendering here.
     auto cmd = m_device.start_command_recording(m_queue);
@@ -299,8 +313,7 @@ void ParticleEmitter::Update(const WindowState& window) {
     });
     cmd.set_depth_stencil_State(m_depth_stencil_state);
     cmd.set_pipeline(m_render_particle_pipeline);
-
-    cmd.draw_indexed_instanced(vertex_args, 0, indices_ptr, 6, kMaxNumParticles);
+    cmd.draw_indexed_instanced_indirect(vertex_args, 0, indices_ptr, indirect_args);
 
     cmd.set_texture_heap(m_texture_heap);
     loon::imgui::Render(cmd);

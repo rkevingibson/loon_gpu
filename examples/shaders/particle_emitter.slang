@@ -74,10 +74,20 @@ struct Particle {
     float4 color;    
 };
 
+struct DrawIndexedIndirectArgs {
+    uint index_count;
+    uint instance_count;
+    uint first_index;
+    int  vertex_offset;
+    uint first_instance;
+};
+
 struct ParticleSim {
-    ParticleSimOptions options;
-    DeadList           dead_list;
-    Particle*          particles;    
+    ParticleSimOptions       options;
+    DeadList                 dead_list;
+    Particle*                particles;
+    DrawIndexedIndirectArgs* draw_args;
+    uint*                    alive_particle_list;
 };
 
 [shader("compute")]
@@ -159,7 +169,10 @@ void update_particle_sim(
 
 
     sim->particles[particle_id] = p;
-    // TODO: Could fill an indirect draw commmand here for more efficient rendering.
+    // Add this particle to the indirect args. Also need to append it to the list of alive particles, for a re-ordering in the vertex shader - need a map from instance_id to particle_id. 
+    uint instance_id = 0;
+    InterlockedAdd(sim->draw_args->instance_count, 1, instance_id);
+    sim->alive_particle_list[instance_id] = particle_id;
 }
 
 
@@ -174,6 +187,7 @@ struct DrawSimArgs {
     float3 camera_right_worldspace;
     float3 camera_up_worldspace;
     Particle* particles;
+    uint* particle_ids;
 };
 
 struct VertexStageOutput {
@@ -193,7 +207,8 @@ VertexStageOutput vertex_main(uniform DrawSimArgs* args, uint32_t vertexIdx : SV
     float2 quad_uv = float2(vertexIdx & 0x1, (vertexIdx >> 1) & 0x1);
     float2 quad_pos = 2.0f*quad_uv - 1.0f;
 
-    Particle p = args.particles[instance];
+    uint particle_id = args->particle_ids[instance];
+    Particle p = args.particles[particle_id];
     VertexStageOutput out;
     
     if (p.life < 0) {

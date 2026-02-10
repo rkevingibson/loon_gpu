@@ -23,6 +23,7 @@ struct ParticleSimOptions {
 struct ParticleSim {
     Handle<Buffer> particle_buffer;
     Handle<Buffer> dead_list;
+    Handle<Buffer> alive_list;
 
     ParticleSimOptions options;
 };
