@@ -257,17 +257,23 @@ VkPresentModeKHR bridge(PresentMode mode) {
 
 VkPipelineStageFlags2 bridge_pipeline_stage(StageFlags stage) {
     VkPipelineStageFlags2 out = 0;
-    out |= (stage & Transfer) ? VK_PIPELINE_STAGE_2_TRANSFER_BIT : 0;
-    out |= (stage & Compute) ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT : 0;
-    out |= (stage & RasterColorOut) ? VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT : 0;
-    out |= (stage & PixelShader) ? VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
-                                       | VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT
-                                       | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT
-                                 : 0;
-    out |= (stage & VertexShader)
+    out |= (stage & StageFlags::Transfer) != StageFlags::None ? VK_PIPELINE_STAGE_2_TRANSFER_BIT
+                                                              : 0;
+    out |= (stage & StageFlags::Compute) != StageFlags::None
+               ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
+               : 0;
+    out |= (stage & StageFlags::RasterColorOut) != StageFlags::None
+               ? VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT
+               : 0;
+    out |= (stage & StageFlags::PixelShader) != StageFlags::None
+               ? VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
+                     | VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT
+                     | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT
+               : 0;
+    out |= (stage & StageFlags::VertexShader) != StageFlags::None
                ? VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT
                : 0;
-    out |= (stage & Host) ? VK_PIPELINE_STAGE_2_HOST_BIT : 0;
+    out |= (stage & StageFlags::Host) != StageFlags::None ? VK_PIPELINE_STAGE_2_HOST_BIT : 0;
     return out;
 }
 

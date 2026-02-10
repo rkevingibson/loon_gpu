@@ -2,7 +2,6 @@
 
 #include <cassert>
 
-#include "common/gpu_args.h"
 #include "geometry.h"
 #include "gpu/loon_gpu.h"
 #include "imgui/imgui.h"
@@ -18,11 +17,28 @@ struct Particle {
 };
 
 struct DeadList {
-    int32_t size;
-    GpuPtr  indices;
+    GpuPtr indices;
 };
 
-static constexpr uint32_t kMaxNumParticles = 128;
+struct SimGpu {
+    ParticleSimOptions options;
+    DeadList           dead_list;
+    GpuPtr             particles;
+};
+
+struct CameraDataGpu {
+    geometry::float4x4 projection        = {};
+    geometry::float4x4 camera_from_world = {};
+};
+
+struct DrawSimArgs {
+    CameraDataGpu    camera;
+    geometry::float3 camera_right_worldspace;
+    geometry::float3 camera_up_worldspace;
+    GpuPtr           particles;
+};
+
+static constexpr uint32_t kMaxNumParticles = 512;
 
 static Format select_surface_format(const loon::gpu::SurfaceCapabilities& surface_capabilities) {
     for (Format f : surface_capabilities.formats) {
@@ -65,8 +81,8 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
     m_emitter_pipeline    = get_compute_pipeline("emitter"_sv);
     m_update_sim_pipeline = get_compute_pipeline("update_particle_sim"_sv);
 
-    auto vertex_spirv          = get_spirv(shader.get(), "vertex_main");
-    auto fragment_spirv        = get_spirv(shader.get(), "fragment_main");
+    auto vertex_spirv   = get_spirv(shader.get(), "vertex_main");
+    auto fragment_spirv = get_spirv(shader.get(), "fragment_main");
     m_render_particle_pipeline = m_device.create_graphics_pipeline(
         {
             .spirv       = Span(vertex_spirv.data(), vertex_spirv.size()).as_bytes(),
@@ -77,9 +93,16 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
             .entry_point = "fragment_main"_sv,
         },
         RasterDesc{
-            .cull          = Cull::CW,
+            .cull          = Cull::None,
             .depth_format  = loon::gpu::Format::Depth32Float,
             .color_targets = ColorTarget{.format = m_swapchain_format},
+            .blendstate = {
+                  .color_op = Blend::Add,
+                  .src_color_factor = Factor::SrcAlpha,
+                  .dst_color_factor = Factor::OneMinusSrcAlpha,
+                  .src_alpha_factor = Factor::One,
+                  .dst_alpha_factor = Factor::OneMinusSrcAlpha,
+              },
         });
     assert(m_update_sim_pipeline.h != 0);
     assert(m_render_particle_pipeline.h != 0);
@@ -87,22 +110,27 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
     m_queue = m_device.get_queue();
 
     m_depth_stencil_state = m_device.create_depth_stencil_state(DepthStencilDesc{
-        .depth_mode = loon::gpu::DepthFlags::Write | loon::gpu::DepthFlags::Read,
+        .depth_mode = loon::gpu::DepthFlags::Read,
         .depth_test = Op::Greater,
     });
 
     // Particle sim initialization:
     m_sim.particle_buffer = m_device.malloc(sizeof(Particle) * kMaxNumParticles, Memory::Gpu);
-    m_sim.dead_list       = m_device.malloc(sizeof(uint32_t) * kMaxNumParticles, Memory::Gpu);
-    m_sim.options         = {
-                .spawn_pos         = geometry::float3(0, 0, 0),
-                .spawn_radius      = 0.5f,
-                .lifetime          = 1.f,
-                .particle_size     = 0.1f,
-                .delta_t           = 0,
-                .max_num_particles = kMaxNumParticles,
-                .particles_to_emit = 10,
+    m_sim.dead_list
+        = m_device.malloc(sizeof(uint32_t) * kMaxNumParticles + sizeof(int32_t), Memory::Gpu);
+    m_sim.options = {
+        .spawn_pos         = geometry::float3(0, 0, 0),
+        .spawn_radius      = 0.5f,
+        .lifetime          = 1.f,
+        .particle_size     = 0.1f,
+        .delta_t           = 1.0 / 60.f,
+        .max_num_particles = kMaxNumParticles,
+        .particles_to_emit = 10,
+        .rng_seed          = (uint32_t)rand(),
     };
+
+    m_ring_buffer = loon::RingBuffer(m_device, 16 * 1024 * 1024, 3);
+    m_frame_idx   = 0;
 
     // Imgui setup
 
@@ -121,7 +149,19 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
     // Reset the particle sim
     auto cmd = m_device.start_command_recording(m_queue);
     cmd.set_pipeline(m_reset_sim_pipeline);
-    // cmd.dispatch(, );
+    GpuPtr args = m_ring_buffer.append(m_frame_idx,
+                         SimGpu{.options   = m_sim.options,
+                                .dead_list = {
+                                    .indices = m_device.get_device_pointer(m_sim.dead_list),
+                                },
+                                .particles =m_device.get_device_pointer(m_sim.particle_buffer),
+                            });
+
+    cmd.dispatch(args, {kMaxNumParticles / 64, 1, 1});
+    cmd.barrier(StageFlags::Compute, StageFlags::Compute);
+    m_device.submit(m_queue, cmd, {});
+
+    m_device.wait_for_device_idle();
 }
 
 ParticleEmitter::~ParticleEmitter() {
@@ -180,17 +220,57 @@ void ParticleEmitter::Update(const WindowState& window) {
 
     loon::imgui::NewFrame();
 
-
     ImGui::Begin("Simulation Parameters");
     ImGui::SliderFloat3("Spawn Position", &m_sim.options.spawn_pos.x, -1.f, 1.f);
     ImGui::SliderFloat("Spawn radius", &m_sim.options.spawn_radius, 0.f, 1.f);
+    ImGui::SliderFloat("Particle size", &m_sim.options.particle_size, 0.f, 1.f);
+    ImGui::SliderFloat("Particle lifetime", &m_sim.options.lifetime, 0.0f, 1.f);
 
     ImGui::End();
+    m_frame_idx++;
+
+    m_sim.options.rng_seed = rand();
+    GpuPtr sim_args = m_ring_buffer.append(m_frame_idx,
+                         SimGpu{.options   = m_sim.options,
+                                .dead_list = {
+                                    .indices = m_device.get_device_pointer(m_sim.dead_list),
+                                },
+                                .particles = m_device.get_device_pointer(m_sim.particle_buffer),
+                            });
+
+
+    GpuPtr vertex_args = m_ring_buffer.append(m_frame_idx, DrawSimArgs {
+        .camera = {
+            .projection =  geometry::projection({.view_width  = (float)window.width,
+                                            .view_height = (float)window.height,
+                                            .y_fov       = geometry::radians_from_degrees(30.f),
+                                            .depth_far   = 0.5f}),
+            .camera_from_world = geometry::transform3d::identity().translated({0, 0, -5}).to_matrix(),              
+        },
+        .camera_right_worldspace = {1,0,0},
+        .camera_up_worldspace = {0,1,0},
+        .particles = m_device.get_device_pointer(m_sim.particle_buffer),
+    });
+
+    uint16_t indices[] = {0, 1, 2, 2, 1, 3};
+
+    GpuPtr indices_ptr = m_ring_buffer.append(m_frame_idx, indices);
 
     // Rendering here.
     auto cmd = m_device.start_command_recording(m_queue);
-    cmd.barrier(RasterColorOut,
-                Compute | PixelShader | RasterColorOut,
+
+
+    cmd.set_pipeline(m_emitter_pipeline);
+    cmd.dispatch(sim_args, Dimension3D{.x = kMaxNumParticles / 64, .y = 1, .z = 1});
+    cmd.barrier(StageFlags::Compute, StageFlags::Compute);
+
+    cmd.set_pipeline(m_update_sim_pipeline);
+    cmd.dispatch(sim_args, Dimension3D{.x = kMaxNumParticles / 64, .y = 1, .z = 1});
+    cmd.barrier(StageFlags::Compute, StageFlags::VertexShader);
+
+    // Render particles
+    cmd.barrier(StageFlags::RasterColorOut,
+                StageFlags::PixelShader | StageFlags::RasterColorOut,
                 {TextureTransition{
                      .texture    = surface_texture.texture,
                      .old_layout = Layout::DontCare,
@@ -202,11 +282,6 @@ void ParticleEmitter::Update(const WindowState& window) {
                      .new_layout = Layout::Attachment,
                  }});
 
-    cmd.set_pipeline(m_update_sim_pipeline);
-    // cmd.dispatch(0, Dimension3D{.x = 1, .y = 1, .z = 1});
-    cmd.barrier(Compute, VertexShader);
-
-    // Render particles
     cmd.begin_render_pass({
         .color_attachments = RenderAttachment {
             .texture_view = swapchain_view,
@@ -225,12 +300,14 @@ void ParticleEmitter::Update(const WindowState& window) {
     cmd.set_depth_stencil_State(m_depth_stencil_state);
     cmd.set_pipeline(m_render_particle_pipeline);
 
+    cmd.draw_indexed_instanced(vertex_args, 0, indices_ptr, 6, kMaxNumParticles);
+
     cmd.set_texture_heap(m_texture_heap);
     loon::imgui::Render(cmd);
     cmd.end_render_pass();
 
-    cmd.barrier(RasterColorOut,
-                RasterColorOut,
+    cmd.barrier(StageFlags::RasterColorOut,
+                StageFlags::RasterColorOut,
                 TextureTransition{
                     .texture    = surface_texture.texture,
                     .old_layout = Layout::Attachment,
@@ -240,7 +317,7 @@ void ParticleEmitter::Update(const WindowState& window) {
                     cmd,
                     SemaphoreInfo{
                         .semaphore = surface_texture.acquire_semaphore,
-                        .stage     = PixelShader,
+                        .stage     = StageFlags::PixelShader,
                     });
 
     const auto status = m_device.present(m_queue);

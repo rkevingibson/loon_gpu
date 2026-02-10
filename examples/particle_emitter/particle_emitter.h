@@ -4,6 +4,8 @@
 
 #include "common/example.h"
 #include "common/geometry.h"
+#include "common/gpu_args.h"
+
 
 using namespace loon::gpu;
 
@@ -15,6 +17,7 @@ struct ParticleSimOptions {
     float            delta_t;
     uint32_t         max_num_particles;
     uint32_t         particles_to_emit;
+    uint32_t         rng_seed;
 };
 
 struct ParticleSim {
@@ -50,4 +53,7 @@ class ParticleEmitter : public Example {
     Handle<Pipeline> m_update_sim_pipeline;
     Handle<Pipeline> m_render_particle_pipeline;
     ParticleSim      m_sim;
+
+    loon::RingBuffer m_ring_buffer;
+    uint64_t         m_frame_idx;
 };

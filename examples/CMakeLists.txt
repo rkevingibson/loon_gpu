@@ -73,6 +73,7 @@ target_include_directories(example_utilities PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/
 set(EXAMPLE_SOURCES
     common/example.cpp
     common/shaders.cpp
+    common/gpu_args.cpp
     hello_triangle/hello_triangle.cpp
     hello_cube/hello_cube.cpp
     textured_cube/textured_cube.cpp

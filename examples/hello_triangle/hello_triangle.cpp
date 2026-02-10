@@ -110,8 +110,8 @@ void HelloTriangle::Update(const WindowState& window) {
 
     auto command_buffer = m_device.start_command_recording(m_queue);
 
-    command_buffer.barrier(loon::gpu::RasterColorOut,
-                           loon::gpu::RasterColorOut,
+    command_buffer.barrier(StageFlags::RasterColorOut,
+                           StageFlags::RasterColorOut,
                            TextureTransition{
                                .texture    = surface_texture.texture,
                                .old_layout = loon::gpu::Layout::DontCare,
@@ -129,8 +129,8 @@ void HelloTriangle::Update(const WindowState& window) {
     command_buffer.draw(0, 0, 3, 1);
 
     command_buffer.end_render_pass();
-    command_buffer.barrier(RasterColorOut,
-                           RasterColorOut,
+    command_buffer.barrier(StageFlags::RasterColorOut,
+                           StageFlags::RasterColorOut,
                            TextureTransition{
                                .texture    = surface_texture.texture,
                                .old_layout = Layout::Attachment,
@@ -141,7 +141,7 @@ void HelloTriangle::Update(const WindowState& window) {
                     command_buffer,
                     SemaphoreInfo{
                         .semaphore = surface_texture.acquire_semaphore,
-                        .stage     = loon::gpu::RasterColorOut,
+                        .stage     = StageFlags::RasterColorOut,
                     });
 
     const auto status = m_device.present(m_queue);

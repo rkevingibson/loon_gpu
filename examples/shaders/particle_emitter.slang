@@ -1,25 +1,26 @@
 struct DeadList {
-    Atomic<int> size;
-    uint* indices;
+    int* indices;
 
     // Since we're either only ever decrementing (in the emitter stage) or incrementing (in the sim stage when particles age out), we can simplify a bit.
     [mutating]
-    uint pop() {
+    int pop() {
         
-        int index = size.decrement() - 1;
-        if (index >= 0) {
+        int index = 0;
+        InterlockedAdd(indices[0], -1, index);
+        if (index > 0) {
             return indices[index];
         } else {
             // Probably a better way to do this, going to be a bunch of memory traffic.
-            size = 0;
+            indices[0] = 0;
             return -1;
         }
     }
 
     [mutating]
-    void push(uint i) {
-        uint prev_size = size.increment();
-        indices[prev_size] = i;
+    void push(int i) {
+        int prev_size = 0;
+        InterlockedAdd(indices[0], 1, prev_size);
+        indices[prev_size + 1] = i;
     }
 };
 
@@ -38,7 +39,7 @@ float uniform_rand(inout uint state)
     // This is imperfect but good enough - generate a float in [1, 2) using 23 bits from x, then subtract 1. 
     // This only covers 50% of the possible float values in [0,1), but that should be plenty. 
     // This feels like it should be fixable using some extra bits in x but eh.
-    return asfloat((x & 0x7FFFF) | (0x7F800000)) - 1.0f;
+    return asfloat((x & 0x7FFFFF) | (0x3F800000)) - 1.0f;
 }
 
 // From PBRT 4E, Pharr, Jakob & Humphreys.
@@ -62,6 +63,7 @@ struct ParticleSimOptions {
     float  delta_t;
     uint   max_num_particles;
     uint   particles_to_emit;
+    uint   rng_seed;
 };
 
 struct Particle {
@@ -87,10 +89,10 @@ void reset_sim(uniform ParticleSim *sim, uint3 gid: SV_DispatchThreadID)
     }
 
     if (gid.x == 0) {
-        sim->dead_list.size = sim->options.max_num_particles;
+        sim->dead_list.indices[0] = sim->options.max_num_particles;
     }
 
-    sim->dead_list.indices[gid.x] = gid.x;
+    sim->dead_list.indices[gid.x + 1] = gid.x;
     sim->particles[gid.x].life = -1;
 }
 
@@ -103,15 +105,19 @@ void emitter(uniform ParticleSim* sim, uint3 gid : SV_DispatchThreadID)
     }
 
     let particle_index = sim->dead_list.pop();
+    if (particle_index == -1) {
+        return;
+    }
 
     ParticleSimOptions options = sim->options;
     // Spawn the particle based on random point in sphere.
-    uint rng_state = rand_pcg(gid.x);
+    uint rng_state = gid.x + options.rng_seed;
+    rand_pcg(rng_state);
 
     float3 sphere_pos = sample_uniform_sphere(rng_state);
     const float3 initial_position = options.spawn_pos + sphere_pos * options.spawn_radius;
 
-    const float3 initial_vel = sample_uniform_sphere(rng_state);
+    const float3 initial_vel = normalize(sphere_pos + sample_uniform_sphere(rng_state));
     // Could do better here.
     const float3 initial_color = float3(uniform_rand(rng_state), uniform_rand(rng_state), uniform_rand(rng_state));
 
@@ -152,6 +158,7 @@ void update_particle_sim(
     // Infinite posibilities - 
 
 
+    sim->particles[particle_id] = p;
     // TODO: Could fill an indirect draw commmand here for more efficient rendering.
 }
 
@@ -196,7 +203,9 @@ VertexStageOutput vertex_main(uniform DrawSimArgs* args, uint32_t vertexIdx : SV
         const float3 vertex_world = p.position 
             + args->camera_right_worldspace * quad_pos.x * p.size 
             + args->camera_up_worldspace * quad_pos.y * p.size;
-        out.pos = float4(vertex_world, 1.0f);
+
+         float4x4 mvp = mul(args->camera.projection, args->camera.cameraFromWorld);
+        out.pos = mul(mvp, float4(vertex_world, 1.0f));
     }
     out.color = p.color;
     out.uv = quad_uv;
@@ -206,6 +215,7 @@ VertexStageOutput vertex_main(uniform DrawSimArgs* args, uint32_t vertexIdx : SV
 [shader("fragment")]
 float4 fragment_main(VertexStageOutput vertex) : SV_Target
 {
-    // TODO: Do a gaussian or something smoother than a solid quad.
-    return vertex.color;
+    // Simple circle for each quad.
+    float alpha = clamp(1.f- 2.f*length(vertex.uv - 0.5f), 0.f, 1.f);
+    return float4(vertex.color.xyz, alpha);
 }

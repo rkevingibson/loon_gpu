@@ -415,7 +415,7 @@ enum class UsageFlags : uint16_t {
 };
 LOON_DEFINE_BITWISE_OPS(UsageFlags);
 
-enum StageFlags : uint16_t {
+enum class StageFlags : uint16_t {
     None           = 0,
     Transfer       = 0x01,
     Compute        = 0x02,
@@ -671,8 +671,8 @@ struct SurfaceTextureInfo {
 struct SemaphoreInfo {
     Handle<Semaphore> semaphore;
     uint64_t          value;
-    StageFlags        stage = None;  // Ignored on signal operations, what stage must be blocked on
-                                     // the wait operation
+    StageFlags        stage = StageFlags::None;  // Ignored on signal operations, what stage must be
+                                                 // blocked on the wait operation
 };
 
 struct TextureTransition {

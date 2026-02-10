@@ -12,10 +12,7 @@
 
 #include "common/example.h"
 #include "common/shaders.h"
-#include "imgui/imgui_impl_loon.h"
 #include "imgui/imgui_impl_win32.h"
-
-
 
 enum ButtonState : uint8_t {
     kButtonStateDefault  = 0x0000,
@@ -170,7 +167,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
 
     ImGui_ImplWin32_Init(window);
 
-    ExampleName selected_example = ExampleName::TexturedCube;
+    ExampleName selected_example = ExampleName::ParticleEmitter;
 
     std::unique_ptr<Example> current_example = create_example(selected_example, window_state);
 

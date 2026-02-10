@@ -149,7 +149,7 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
         auto cmd = bd->device.start_command_recording(bd->queue);
 
         if (need_barrier_before_copy) {
-            cmd.barrier(gpu::None,
+            cmd.barrier(gpu::StageFlags::None,
                         gpu::StageFlags::Transfer,
                         gpu::TextureTransition{
                             .texture    = backend_tex->texture,
@@ -167,14 +167,17 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
                 .image_extent
                 = {static_cast<uint32_t>(tex->Width), static_cast<uint32_t>(tex->Height), 1},
             });
-        cmd.barrier(loon::gpu::Transfer, loon::gpu::PixelShader);
+        cmd.barrier(gpu::StageFlags::Transfer, gpu::StageFlags::PixelShader);
 
         auto copy_semaphore = bd->device.create_semaphore(0);
-        bd->device.submit(
-            bd->queue,
-            cmd,
-            {},
-            gpu::SemaphoreInfo{.semaphore = copy_semaphore, .value = 1, .stage = gpu::Transfer});
+        bd->device.submit(bd->queue,
+                          cmd,
+                          {},
+                          gpu::SemaphoreInfo{
+                              .semaphore = copy_semaphore,
+                              .value     = 1,
+                              .stage     = gpu::StageFlags::Transfer,
+                          });
         bd->device.wait_semaphore(copy_semaphore, 1);
         bd->device.free(copy_semaphore);
 

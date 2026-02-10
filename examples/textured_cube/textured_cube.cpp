@@ -155,8 +155,8 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
     stbi_image_free(image_data);
 
     auto cmd = m_device.start_command_recording(m_queue);
-    cmd.barrier(loon::gpu::None,
-                loon::gpu::Transfer,
+    cmd.barrier(StageFlags::None,
+                StageFlags::Transfer,
                 TextureTransition{
                     .texture    = m_color_texture,
                     .old_layout = loon::gpu::Layout::DontCare,
@@ -171,12 +171,13 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
                             .image_extent      = {(uint32_t)x, (uint32_t)y, 1},
                         });
     //  A little excessive, but wait for the copy to be done before returning.
-    cmd.barrier(loon::gpu::Transfer, loon::gpu::VertexShader);
+    cmd.barrier(StageFlags::Transfer, StageFlags::VertexShader);
     auto copy_semaphore = m_device.create_semaphore(0);
-    m_device.submit(m_queue,
-                    cmd,
-                    {},
-                    SemaphoreInfo{.semaphore = copy_semaphore, .value = 1, .stage = Transfer});
+    m_device.submit(
+        m_queue,
+        cmd,
+        {},
+        SemaphoreInfo{.semaphore = copy_semaphore, .value = 1, .stage = StageFlags::Transfer});
     m_device.wait_semaphore(copy_semaphore, 1);
     m_device.free(copy_semaphore);
 
@@ -263,8 +264,8 @@ void TexturedCube::Update(const WindowState& window) {
 
     command_buffer.set_texture_heap(m_texture_heap);
 
-    command_buffer.barrier(StageFlags(Host | RasterColorOut),
-                           StageFlags(PixelShader | RasterColorOut),
+    command_buffer.barrier(StageFlags(StageFlags::Host | StageFlags::RasterColorOut),
+                           StageFlags(StageFlags::PixelShader | StageFlags::RasterColorOut),
                            {TextureTransition{
                                 .texture    = surface_texture.texture,
                                 .old_layout = loon::gpu::Layout::DontCare,
@@ -306,8 +307,8 @@ void TexturedCube::Update(const WindowState& window) {
 
 
 
-    command_buffer.barrier(RasterColorOut,
-                           RasterColorOut,
+    command_buffer.barrier(StageFlags::RasterColorOut,
+                           StageFlags::RasterColorOut,
                            TextureTransition{
                                .texture    = surface_texture.texture,
                                .old_layout = Layout::Attachment,
@@ -318,7 +319,7 @@ void TexturedCube::Update(const WindowState& window) {
                     command_buffer,
                     SemaphoreInfo{
                         .semaphore = surface_texture.acquire_semaphore,
-                        .stage     = loon::gpu::PixelShader,
+                        .stage     = StageFlags::PixelShader,
                     });
 
     const auto status = m_device.present(m_queue);

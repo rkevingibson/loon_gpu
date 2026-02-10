@@ -1130,15 +1130,14 @@ void Device::Impl::unconfigure_surface() {
 }
 
 SurfaceTextureInfo Device::Impl::get_current_texture() {
-    const uint64_t wait_value = m_surface.frame_idx >= Surface::kMaxFramesInFlight
-                                    ? m_surface.frame_idx - Surface::kMaxFramesInFlight + 1
-                                    : 0;
-    wait_semaphore(m_surface.frame_semaphore, wait_value);
-
-
     auto semaphore
         = m_surface.acquire_semaphores[m_surface.frame_idx % Surface::kMaxFramesInFlight];
     m_surface.frame_idx++;
+    const uint64_t wait_value = m_surface.frame_idx > Surface::kMaxFramesInFlight
+                                    ? m_surface.frame_idx - Surface::kMaxFramesInFlight
+                                    : 0;
+    wait_semaphore(m_surface.frame_semaphore, wait_value);
+
     VkAcquireNextImageInfoKHR acquire_info{
         .sType      = VK_STRUCTURE_TYPE_ACQUIRE_NEXT_IMAGE_INFO_KHR,
         .pNext      = nullptr,

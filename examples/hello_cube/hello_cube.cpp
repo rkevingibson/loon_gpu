@@ -138,13 +138,13 @@ HelloCube::HelloCube(const WindowState& window_state) {
     cmd.memcpy(m_vertex_ptr, m_device.get_device_pointer(m_constant_buffer), Cube::kSize);
 
     // A little excessive, but wait for the copy to be done before returning.
-    cmd.barrier(loon::gpu::Transfer, loon::gpu::VertexShader);
+    cmd.barrier(StageFlags::Transfer, StageFlags::VertexShader);
     auto copy_semaphore = m_device.create_semaphore(0);
     m_device.submit(
         m_queue,
         cmd,
         {},
-        SemaphoreInfo{.semaphore = copy_semaphore, .value = 1, .stage = Transfer});
+        SemaphoreInfo{.semaphore = copy_semaphore, .value = 1, .stage = StageFlags::Transfer});
     m_device.wait_semaphore(copy_semaphore, 1);
     m_device.free(copy_semaphore);
 
@@ -239,8 +239,8 @@ void HelloCube::Update(const WindowState& window) {
 
     auto command_buffer = m_device.start_command_recording(m_queue);
 
-    command_buffer.barrier(loon::gpu::RasterColorOut,
-                           StageFlags(PixelShader | RasterColorOut),
+    command_buffer.barrier(StageFlags::RasterColorOut,
+                           StageFlags::PixelShader | StageFlags::RasterColorOut,
                            {TextureTransition{
                                 .texture    = surface_texture.texture,
                                 .old_layout = loon::gpu::Layout::DontCare,
@@ -276,8 +276,8 @@ void HelloCube::Update(const WindowState& window) {
         1);
 
     command_buffer.end_render_pass();
-    command_buffer.barrier(RasterColorOut,
-                           RasterColorOut,
+    command_buffer.barrier(StageFlags::RasterColorOut,
+                           StageFlags::RasterColorOut,
                            TextureTransition{
                                .texture    = surface_texture.texture,
                                .old_layout = Layout::Attachment,
@@ -287,7 +287,7 @@ void HelloCube::Update(const WindowState& window) {
                     command_buffer,
                     SemaphoreInfo{
                         .semaphore = surface_texture.acquire_semaphore,
-                        .stage     = loon::gpu::RasterColorOut,
+                        .stage     = StageFlags::RasterColorOut,
                     });
 
     const auto status = m_device.present(m_queue);
