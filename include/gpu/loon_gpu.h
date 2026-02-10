@@ -757,7 +757,7 @@ class Device {
     Handle<Queue> get_queue(QueueType type = QueueType::Default);
     CommandBuffer start_command_recording(Handle<Queue> queue);
 
-    // TODO: May want to wrap these args in a struct.
+    // TODO: May want to wrap these args in a struct, or make queue an object with methods.
     void submit(Handle<Queue>             queue,
                 Span<const CommandBuffer> commandBuffers,
                 Span<const SemaphoreInfo> wait_semaphores,
@@ -798,7 +798,7 @@ class CommandBuffer {
                  HazardFlags                   hazards           = HazardFlags(0));
 
     void set_pipeline(Handle<Pipeline> pipeline);
-    void set_depth_stencil_State(Handle<DepthStencilState> state);
+    void set_depth_stencil_state(Handle<DepthStencilState> state);
     void set_scissor_rect(const Rect2D& rect);
 
     void dispatch(GpuPtr dataGpu, const Dimension3D& gridDimensions);

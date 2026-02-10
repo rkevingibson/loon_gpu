@@ -291,7 +291,7 @@ void TexturedCube::Update(const WindowState& window) {
                                    }, 
                                    .render_area = {.width = m_swapchain_width, .height = m_swapchain_height},
                                 });
-    command_buffer.set_depth_stencil_State(m_depth_stencil_state);
+    command_buffer.set_depth_stencil_state(m_depth_stencil_state);
     command_buffer.set_pipeline(m_render_pipeline);
     uint32_t args_offset = sizeof(ShaderArgs) * (m_frame_idx % 3);
     GpuPtr   argsGpu     = m_device.get_device_pointer(m_constant_buffer) + args_offset;
