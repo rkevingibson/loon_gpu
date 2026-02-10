@@ -175,12 +175,10 @@ void update_particle_sim(
     sim->alive_particle_list[instance_id] = particle_id;
 }
 
-
 struct CameraData {
     float4x4 projection;
     float4x4 cameraFromWorld;
 };
-
 
 struct DrawSimArgs {
     CameraData camera;
