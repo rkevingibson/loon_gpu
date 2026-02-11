@@ -280,7 +280,7 @@ void ParticleEmitter::Update(const WindowState& window) {
 
     cmd.set_pipeline(m_update_sim_pipeline);
     cmd.dispatch(sim_args, Dimension3D{.x = kMaxNumParticles / 64, .y = 1, .z = 1});
-    cmd.barrier(StageFlags::Compute, StageFlags::VertexShader);
+    cmd.barrier(StageFlags::Compute, StageFlags::VertexShader, {}, HazardFlags::DrawArguments);
 
     // Render particles
     cmd.barrier(StageFlags::RasterColorOut,

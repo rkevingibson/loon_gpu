@@ -1206,7 +1206,8 @@ Handle<Buffer> Device::Impl::malloc(size_t bytes, size_t align, Memory memory) {
     constexpr VkBufferUsageFlags kDefaultUsages
         = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
           | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT
-          | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+          | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+          | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
 
     VkBufferCreateInfo create_info{
         .sType                 = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -2355,9 +2356,13 @@ void CommandBuffer::barrier(StageFlags                    before,
                             HazardFlags                   hazards) {
     auto impl = reinterpret_cast<Device::Impl*>(device);
     // TODO: Use HazardFlags to reduce the stage/access_masks unless necessary.
-    const auto     src_stage = bridge_pipeline_stage(before);
-    const auto     dst_stage = bridge_pipeline_stage(after);
-    constexpr auto access    = VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT;
+    const auto src_stage = bridge_pipeline_stage(before);
+    auto       dst_stage = bridge_pipeline_stage(after);
+    if ((hazards & HazardFlags::DrawArguments) != HazardFlags::None) {
+        dst_stage |= VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
+    }
+
+    constexpr auto access = VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT;
 
     const VkMemoryBarrier2 barrier_info{
         .sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,

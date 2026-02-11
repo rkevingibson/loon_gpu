@@ -434,6 +434,7 @@ enum class Layout : uint8_t {
 };
 
 enum class HazardFlags : uint8_t {
+    None          = 0x0,
     DrawArguments = 0x1,
     Descriptors   = 0x2,
     DepthStencil  = 0x4,
@@ -687,7 +688,7 @@ struct BufferToTextureCopyInfo {
     Dimension3D image_extent;
 };
 
-struct DrawIndexedIndirectArgs {
+struct alignas(8) DrawIndexedIndirectArgs {
     uint32_t index_count;
     uint32_t instance_count;
     uint32_t first_index;
