@@ -28,11 +28,9 @@ class TexturedCube : public Example {
 
     Handle<Buffer>            m_constant_buffer;
     Handle<Texture>           m_depth_texture;
-    Handle<TextureView>       m_depth_view;
     Handle<DepthStencilState> m_depth_stencil_state;
 
     Handle<TextureHeap> m_texture_heap;
     Handle<Texture>     m_color_texture;
-    Handle<TextureView> m_color_view;
-    uint64_t            m_texture_id = 0;
+    TextureView         m_color_view;
 };

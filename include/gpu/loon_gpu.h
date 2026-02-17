@@ -210,13 +210,13 @@ struct Pipeline;
 struct Buffer;
 struct Texture;
 struct TextureHeap;
-struct TextureView;
 struct DepthStencilState;
 struct Queue;
 struct CommandBuffer;
 struct Semaphore;
 
-using GpuPtr = uint64_t;
+using GpuPtr      = uint64_t;
+using TextureView = uint64_t;
 
 // MARK: Enums
 
@@ -607,10 +607,10 @@ struct RasterDesc {
 };
 
 struct RenderAttachment {
-    Handle<TextureView> texture_view = {0};
-    LoadOp              load_op;
-    StoreOp             store_op;
-    Color               clear_color;
+    Handle<Texture> texture = {0};
+    LoadOp          load_op;
+    StoreOp         store_op;
+    Color           clear_color;
 };
 
 struct RenderPassDesc {
@@ -630,11 +630,12 @@ struct TextureDesc {
 };
 
 struct TextureViewDesc {
-    Format   format      = Format::None;
-    uint8_t  base_mip    = 0;
-    uint8_t  mip_count   = 1;
-    uint16_t base_layer  = 0;
-    uint16_t layer_count = 1;
+    Handle<Texture> texture;
+    Format          format      = Format::None;
+    uint8_t         base_mip    = 0;
+    uint8_t         mip_count   = 1;
+    uint16_t        base_layer  = 0;
+    uint16_t        layer_count = 1;
 };
 
 struct TextureSizeAlign {
@@ -733,14 +734,11 @@ class Device {
     Handle<Texture>     create_texture(const TextureDesc& desc);
     Handle<TextureHeap> create_texture_heap(size_t size);
 
-    Handle<TextureView> create_texture_view(Handle<Texture> texture, TextureViewDesc desc);
-
-    uint32_t add_texture_view_to_heap(Handle<TextureHeap>, Handle<TextureView>);
-    void     remove_texture_view_from_heap(Handle<TextureHeap>, uint32_t);
+    TextureView add_texture_view_to_heap(Handle<TextureHeap>, const TextureViewDesc& desc);
+    void        remove_texture_view_from_heap(Handle<TextureHeap>, TextureView);
 
     void free(Handle<Texture>);
     void free(Handle<TextureHeap>);
-    void free(Handle<TextureView>);
 
     // Pipelines
     Handle<Pipeline> create_compute_pipeline(ShaderSource computeIR);

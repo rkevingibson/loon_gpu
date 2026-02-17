@@ -12,9 +12,8 @@ using namespace loon;
 struct ImGui_ImplLoon_RenderBuffers;
 
 struct ImGui_ImplLoon_Texture {
-    gpu::Handle<gpu::Texture>     texture;
-    gpu::Handle<gpu::TextureView> texture_view;
-    uint32_t                      tex_heap_idx;
+    gpu::Handle<gpu::Texture> texture;
+    uint32_t                  tex_heap_idx;
     ImGui_ImplLoon_Texture() { memset((void*)this, 0, sizeof(*this)); }
 };
 
@@ -76,7 +75,6 @@ static void DestroyTexture(ImTextureData* tex) {
 
         // Free the texture and remove it from the heap.
         bd->device.remove_texture_view_from_heap(bd->texture_heap, backend_tex->tex_heap_idx);
-        bd->device.free(backend_tex->texture_view);
         bd->device.free(backend_tex->texture);
         IM_DELETE(backend_tex);
 
@@ -111,14 +109,12 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
             .usage      = loon::gpu::UsageFlags::Sampled | loon::gpu::UsageFlags::TransferDst,
         });
 
-        backend_tex->texture_view
-            = bd->device.create_texture_view(backend_tex->texture,
-                                             {
-                                                 .format = loon::gpu::Format::RGBA8Unorm,
-
-                                             });
         backend_tex->tex_heap_idx
-            = bd->device.add_texture_view_to_heap(bd->texture_heap, backend_tex->texture_view);
+            = bd->device.add_texture_view_to_heap(bd->texture_heap,
+                                                  {
+                                                      .texture = backend_tex->texture,
+                                                      .format  = loon::gpu::Format::RGBA8Unorm,
+                                                  });
 
         // Store identifiers
         // Because invalid tex id == 0, we add one here and subtract on retrieval.

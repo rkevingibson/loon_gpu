@@ -188,21 +188,13 @@ void ParticleEmitter::recreate_swapchain(uint32_t width, uint32_t height) {
     m_swapchain_height = height;
 
     // Recreate depth buffer as well
-    if (m_depth_view.h) {
-        m_device.free(m_depth_view);
-        m_device.free(m_depth_texture);
-    }
+    if (m_depth_texture) { m_device.free(m_depth_texture); }
     m_depth_texture = m_device.create_texture({
         .type       = TextureType::Tex2D,
         .dimensions = {.x = width, .y = height, .z = 1},
         .format     = loon::gpu::Format::Depth32Float,
         .usage      = loon::gpu::UsageFlags::DepthStencilAttachment,
     });
-
-    m_depth_view = m_device.create_texture_view(m_depth_texture,
-                                                TextureViewDesc{
-                                                    .format = loon::gpu::Format::Depth32Float,
-                                                });
 }
 
 void ParticleEmitter::Update(const WindowState& window) {
@@ -214,11 +206,6 @@ void ParticleEmitter::Update(const WindowState& window) {
     } else if (surface_texture.status == SurfaceStatus::Error) {
         return;
     }
-
-    auto swapchain_view
-        = m_device.create_texture_view(surface_texture.texture,
-                                       TextureViewDesc{.format = m_swapchain_format});
-
 
     // CPU-side update, construct GPU arguments.
 
@@ -298,13 +285,13 @@ void ParticleEmitter::Update(const WindowState& window) {
 
     cmd.begin_render_pass({
         .color_attachments = RenderAttachment {
-            .texture_view = swapchain_view,
+            .texture = surface_texture.texture,
             .load_op = LoadOp::Clear,
             .store_op = StoreOp::Store,
             .clear_color = Color(0,0,0,0),
         },
         .depth_attachment = RenderAttachment {
-            .texture_view = m_depth_view,
+            .texture = m_depth_texture,
             .load_op = LoadOp::Clear,
             .store_op = StoreOp::Discard,
             .clear_color = Color(0,0,0,0),
@@ -338,7 +325,5 @@ void ParticleEmitter::Update(const WindowState& window) {
         recreate_swapchain(window.width, window.height);
     }
 
-    m_device.on_submitted_work_completed(m_queue,
-                                         [&, swapchain_view]() { m_device.free(swapchain_view); });
     m_device.process_events(m_queue);
 }

@@ -40,19 +40,19 @@ struct Buffer {
 };
 
 struct Texture {
-    VkImage         vk_image;
+    VkImage     vk_image;
+    VkImageView default_image_view
+        = VK_NULL_HANDLE;  // We store a default image view of the base mip and layer if
+                           // the image can be used as a render target.
     VmaAllocation   vk_allocation;
     VkImageViewType vk_type = VK_IMAGE_VIEW_TYPE_2D;
     Format          format;
 };
 
-struct TextureView {
-    VkImageView vk_image_view;
-};
-
 struct TextureHeap {
-    VkDescriptorSet vk_descriptor_set;
-    TwoLevelBitset  bitset;
+    VkDescriptorSet     vk_descriptor_set;
+    TwoLevelBitset      bitset;
+    Vector<VkImageView> image_views;
 };
 
 struct Semaphore {
@@ -188,14 +188,12 @@ struct Device::Impl {
     // Textures:
     Handle<Texture>     create_texture(const TextureDesc& desc);
     Handle<TextureHeap> create_texture_heap(size_t size);
-    Handle<TextureView> create_texture_view(Handle<Texture> texture, TextureViewDesc desc);
 
-    uint32_t add_texture_view_to_heap(Handle<TextureHeap>, Handle<TextureView>);
+    uint32_t add_texture_view_to_heap(Handle<TextureHeap>, const TextureViewDesc& desc);
     void     remove_texture_view_from_heap(Handle<TextureHeap>, uint32_t);
 
     void free(Handle<Texture>);
     void free(Handle<TextureHeap>);
-    void free(Handle<TextureView> view);
 
     // Pipelines
     Handle<Pipeline> create_compute_pipeline(ShaderSource computeIR);
@@ -258,7 +256,6 @@ struct Device::Impl {
 
     SlotMap<Buffer>            m_buffer_pool;
     SlotMap<Texture>           m_texture_pool;
-    SlotMap<TextureView>       m_texture_view_pool;
     SlotMap<TextureHeap>       m_texture_heap_pool;
     SlotMap<DepthStencilState> m_depth_stencil_pool;
     SlotMap<Semaphore>         m_semaphore_pool;
@@ -576,19 +573,22 @@ Device::Impl::Impl(const DeviceDesc& desc) :
         }},
     m_texture_pool{m_allocator,
                    [this](Texture* t) {
+                       if (t->default_image_view != VK_NULL_HANDLE) {
+                           m_api.vkDestroyImageView(m_device, t->default_image_view, nullptr);
+                       }
                        if (t->vk_allocation != VK_NULL_HANDLE) {
                            vmaDestroyImage(m_vma, t->vk_image, t->vk_allocation);
                        }
                    }},
-    m_texture_view_pool{m_allocator,
-                        [this](TextureView* v) {
-                            m_api.vkDestroyImageView(m_device, v->vk_image_view, nullptr);
-                            v->~TextureView();
-                        }},
     m_texture_heap_pool(
         m_allocator,
         [this](TextureHeap* h) {
             m_api.vkFreeDescriptorSets(m_device, m_descriptor_pool, 1, &h->vk_descriptor_set);
+            for (auto v : h->image_views) {
+                // TODO: Can we be faster than iterating over the entire vector? Maybe iterate over
+                // the bitset instead
+                if (v != VK_NULL_HANDLE) { m_api.vkDestroyImageView(m_device, v, nullptr); }
+            }
             h->~TextureHeap();
         }),
     m_depth_stencil_pool(m_allocator, [](DepthStencilState* d) { d->~DepthStencilState(); }),
@@ -932,7 +932,6 @@ Device::Impl::~Impl() {
 
     m_buffer_pool.clear();
     m_texture_pool.clear();
-    m_texture_view_pool.clear();
     m_texture_heap_pool.clear();
     m_semaphore_pool.clear();
     m_pipeline_pool.clear();
@@ -1099,9 +1098,36 @@ bool Device::Impl::configure_surface(const SurfaceConfiguration& config) {
         .flags = 0,
     };
     for (int i = 0; i < image_count; ++i) {
+        VkImageView default_image_view = VK_NULL_HANDLE;
+        if ((config.usages & UsageFlags::ColorAttachment) != UsageFlags::None
+            || (config.usages & UsageFlags::DepthStencilAttachment) != UsageFlags::None) {
+            const VkImageViewCreateInfo view_info {
+                .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                .pNext = nullptr,
+                .flags      = 0,
+                .image      = swapchain_images[i],
+                .viewType   = VK_IMAGE_VIEW_TYPE_2D,
+                .format     = bridge(config.format),
+                .components = {VK_COMPONENT_SWIZZLE_IDENTITY,
+                                VK_COMPONENT_SWIZZLE_IDENTITY,
+                                VK_COMPONENT_SWIZZLE_IDENTITY,
+                                VK_COMPONENT_SWIZZLE_IDENTITY,},
+                .subresourceRange = {
+                    .aspectMask = aspects_for_format(config.format),
+                    .baseMipLevel = 0,
+                    .levelCount = 1,
+                    .baseArrayLayer = 0,
+                    .layerCount = 1,
+                },
+            };
+
+            chk(m_api.vkCreateImageView(m_device, &view_info, nullptr, &default_image_view));
+        }
+
         m_surface.swapchain_images[i] = m_texture_pool.emplace({
-            .vk_image      = swapchain_images[i],
-            .vk_allocation = VK_NULL_HANDLE,
+            .vk_image           = swapchain_images[i],
+            .default_image_view = default_image_view,
+            .vk_allocation      = VK_NULL_HANDLE,
         });
 
         VkSemaphore s = VK_NULL_HANDLE;
@@ -1333,11 +1359,39 @@ Handle<Texture> Device::Impl::create_texture(const TextureDesc& desc) {
         return {};
     }
 
+    // Create a default image view for use as a render target attachment.
+    VkImageView default_image_view = VK_NULL_HANDLE;
+    if ((desc.usage & UsageFlags::ColorAttachment) != UsageFlags::None
+        || (desc.usage & UsageFlags::DepthStencilAttachment) != UsageFlags::None) {
+        const VkImageViewCreateInfo view_info {
+                .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                .pNext = nullptr,
+                .flags      = 0,
+                .image      = image,
+                .viewType   = VK_IMAGE_VIEW_TYPE_2D,
+                .format     = bridge(desc.format),
+                .components = {VK_COMPONENT_SWIZZLE_IDENTITY,
+                                VK_COMPONENT_SWIZZLE_IDENTITY,
+                                VK_COMPONENT_SWIZZLE_IDENTITY,
+                                VK_COMPONENT_SWIZZLE_IDENTITY,},
+                .subresourceRange = {
+                    .aspectMask = aspects_for_format(desc.format),
+                    .baseMipLevel = 0,
+                    .levelCount = 1,
+                    .baseArrayLayer = 0,
+                    .layerCount = 1,
+                },
+            };
+
+        chk(m_api.vkCreateImageView(m_device, &view_info, nullptr, &default_image_view));
+    }
+
     const auto handle = m_texture_pool.emplace(Texture{
-        .vk_image      = image,
-        .vk_allocation = allocation,
-        .vk_type       = bridge_view_type(desc.type),
-        .format        = desc.format,
+        .vk_image           = image,
+        .default_image_view = default_image_view,
+        .vk_allocation      = allocation,
+        .vk_type            = bridge_view_type(desc.type),
+        .format             = desc.format,
     });
 
     return handle;
@@ -1366,13 +1420,17 @@ Handle<TextureHeap> Device::Impl::create_texture_heap(size_t size) {
     const auto handle = m_texture_heap_pool.emplace(TextureHeap{
         .vk_descriptor_set = set,
         .bitset            = TwoLevelBitset(m_allocator, size),
+        .image_views       = Vector<VkImageView>(m_allocator, VkImageView{0}, size),
     });
 
     return {handle};
 }
 
-Handle<TextureView> Device::Impl::create_texture_view(Handle<Texture> tex, TextureViewDesc desc) {
-    auto& texture = m_texture_pool[tex];
+uint32_t Device::Impl::add_texture_view_to_heap(Handle<TextureHeap>    heap,
+                                                const TextureViewDesc& desc) {
+    auto& texture_heap = m_texture_heap_pool[heap];
+    auto  texture      = m_texture_pool[desc.texture];
+
     const VkImageViewCreateInfo info {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .pNext = nullptr,
@@ -1393,20 +1451,14 @@ Handle<TextureView> Device::Impl::create_texture_view(Handle<Texture> tex, Textu
         },
     };
     VkImageView image_view;
-    if (!chk(m_api.vkCreateImageView(m_device, &info, nullptr, &image_view))) { return {}; }
-    const auto handle = m_texture_view_pool.emplace({.vk_image_view = image_view});
-    return handle;
-}
+    if (!chk(m_api.vkCreateImageView(m_device, &info, nullptr, &image_view))) { return -1; }
 
-uint32_t Device::Impl::add_texture_view_to_heap(Handle<TextureHeap> heap,
-                                                Handle<TextureView> view) {
-    auto&       texture_heap = m_texture_heap_pool[heap];
-    const auto& texture_view = m_texture_view_pool[view];
-    uint32_t    free_slot    = texture_heap.bitset.set_leading_zero();
+    uint32_t free_slot                  = texture_heap.bitset.set_leading_zero();
+    texture_heap.image_views[free_slot] = image_view;
 
     const VkDescriptorImageInfo image_info{
         .sampler     = VK_NULL_HANDLE,
-        .imageView   = texture_view.vk_image_view,
+        .imageView   = image_view,
         .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
     };
 
@@ -1435,6 +1487,9 @@ void Device::Impl::remove_texture_view_from_heap(Handle<TextureHeap> heap, uint3
     auto& texture_heap = m_texture_heap_pool[heap];
     texture_heap.bitset.clear_bit(idx);
 
+    m_api.vkDestroyImageView(m_device, texture_heap.image_views[idx], nullptr);
+    texture_heap.image_views[idx] = 0;
+
     // This isn't strictly valid without an extension feature from VK_KHR_robustness2.
     // What's a better option?
     // const VkDescriptorImageInfo image_info{
@@ -1460,10 +1515,6 @@ void Device::Impl::remove_texture_view_from_heap(Handle<TextureHeap> heap, uint3
 
 void Device::Impl::free(Handle<TextureHeap> heap) {
     m_texture_heap_pool.erase(heap);
-}
-
-void Device::Impl::free(Handle<TextureView> view) {
-    m_texture_view_pool.erase(view);
 }
 
 // MARK: Pipelines
@@ -2202,23 +2253,21 @@ Handle<TextureHeap> Device::create_texture_heap(size_t size) {
     return impl->create_texture_heap(size);
 }
 
-Handle<TextureView> Device::create_texture_view(Handle<Texture> texture, TextureViewDesc desc) {
-    return impl->create_texture_view(texture, desc);
+TextureView Device::add_texture_view_to_heap(Handle<TextureHeap>    heap,
+                                             const TextureViewDesc& desc) {
+    return impl->add_texture_view_to_heap(heap, desc);
 }
 
-uint32_t Device::add_texture_view_to_heap(Handle<TextureHeap> heap, Handle<TextureView> view) {
-    return impl->add_texture_view_to_heap(heap, view);
-}
-
-void Device::remove_texture_view_from_heap(Handle<TextureHeap> heap, uint32_t idx) {
+void Device::remove_texture_view_from_heap(Handle<TextureHeap> heap, TextureView idx) {
     return impl->remove_texture_view_from_heap(heap, idx);
 }
 
+void Device::free(Handle<Texture> h) {
+    return impl->free(h);
+}
 
-void Device::free(Handle<Texture>) {}
-void Device::free(Handle<TextureHeap>) {}
-void Device::free(Handle<TextureView> view) {
-    return impl->free(view);
+void Device::free(Handle<TextureHeap> h) {
+    return impl->free(h);
 }
 
 Handle<Pipeline> Device::create_compute_pipeline(ShaderSource source) {
@@ -2499,7 +2548,7 @@ void CommandBuffer::begin_render_pass(RenderPassDesc desc) {
         color_attachments = concat(&arena, color_attachments, {
             .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
             .pNext              = nullptr,
-            .imageView          = impl->m_texture_view_pool[attachment.texture_view].vk_image_view,
+            .imageView          = impl->m_texture_pool[attachment.texture].default_image_view,
             .imageLayout        = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
             .resolveMode        = VK_RESOLVE_MODE_NONE,  // TODO: Multisampling support
             .resolveImageView   = VK_NULL_HANDLE,
@@ -2512,14 +2561,14 @@ void CommandBuffer::begin_render_pass(RenderPassDesc desc) {
 
     // TODO: stencil attachment
 
-    const bool                has_depth_attachment = desc.depth_attachment.texture_view.h != 0;
+    const bool                has_depth_attachment = desc.depth_attachment.texture.h != 0;
     VkRenderingAttachmentInfo depth_attachment{};
     if (has_depth_attachment) {
         depth_attachment = VkRenderingAttachmentInfo{
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
             .pNext = nullptr,
-            .imageView = impl->m_texture_view_pool[desc.depth_attachment.texture_view].vk_image_view, 
-            .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, 
+            .imageView = impl->m_texture_pool[desc.depth_attachment.texture].default_image_view,
+            .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
             .resolveMode = VK_RESOLVE_MODE_NONE,
             .resolveImageView = VK_NULL_HANDLE,
             .resolveImageLayout = VK_IMAGE_LAYOUT_GENERAL,

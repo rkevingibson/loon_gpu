@@ -157,11 +157,6 @@ HelloCube::HelloCube(const WindowState& window_state) {
         .usage      = loon::gpu::UsageFlags::DepthStencilAttachment,
     });
 
-    m_depth_view = m_device.create_texture_view(m_depth_texture,
-                                                TextureViewDesc{
-                                                    .format = loon::gpu::Format::Depth32Float,
-                                                });
-
     m_depth_stencil_state = m_device.create_depth_stencil_state(DepthStencilDesc{
         .depth_mode = loon::gpu::DepthFlags::Write | loon::gpu::DepthFlags::Read,
         .depth_test = loon::gpu::Op::Greater,
@@ -185,7 +180,6 @@ void HelloCube::recreate_swapchain(uint32_t width, uint32_t height) {
 
     // Recreate depth buffer as well
 
-    m_device.free(m_depth_view);
     m_device.free(m_depth_texture);
     m_depth_texture = m_device.create_texture({
         .type       = TextureType::Tex2D,
@@ -193,11 +187,6 @@ void HelloCube::recreate_swapchain(uint32_t width, uint32_t height) {
         .format     = loon::gpu::Format::Depth32Float,
         .usage      = loon::gpu::UsageFlags::DepthStencilAttachment,
     });
-
-    m_depth_view = m_device.create_texture_view(m_depth_texture,
-                                                TextureViewDesc{
-                                                    .format = loon::gpu::Format::Depth32Float,
-                                                });
 }
 
 void HelloCube::Update(const WindowState& window) {
@@ -228,15 +217,6 @@ void HelloCube::Update(const WindowState& window) {
         return;
     }
 
-    auto swapchain_view = m_device.create_texture_view(surface_texture.texture,
-                                                       TextureViewDesc{
-                                                           .format      = m_swapchain_format,
-                                                           .base_mip    = 0,
-                                                           .mip_count   = 1,
-                                                           .base_layer  = 0,
-                                                           .layer_count = 1,
-                                                       });
-
     auto command_buffer = m_device.start_command_recording(m_queue);
 
     command_buffer.barrier(StageFlags::RasterColorOut,
@@ -253,13 +233,13 @@ void HelloCube::Update(const WindowState& window) {
                             }});
     command_buffer.begin_render_pass({
                                    .color_attachments = RenderAttachment{
-                                       .texture_view = swapchain_view,
+                                       .texture = surface_texture.texture,
                                        .load_op      = loon::gpu::LoadOp::Clear,
                                        .store_op     = loon::gpu::StoreOp::Store,
                                        .clear_color  = Color(0, 0, 0, 0),
                                    }, 
                                    .depth_attachment = RenderAttachment{
-                                    .texture_view = m_depth_view,
+                                    .texture = m_depth_texture,
                                     .load_op = loon::gpu::LoadOp::Clear,
                                     .store_op = loon::gpu::StoreOp::Discard,
                                     .clear_color = Color(0,0,0,0),
@@ -295,8 +275,6 @@ void HelloCube::Update(const WindowState& window) {
         recreate_swapchain(window.width, window.height);
     }
 
-    m_device.on_submitted_work_completed(m_queue,
-                                         [&, swapchain_view]() { m_device.free(swapchain_view); });
     m_device.process_events(m_queue);
     ++m_frame_idx;
 }

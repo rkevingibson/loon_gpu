@@ -99,15 +99,6 @@ void HelloTriangle::Update(const WindowState& window) {
         return;
     }
 
-    auto swapchain_view = m_device.create_texture_view(surface_texture.texture,
-                                                       TextureViewDesc{
-                                                           .format      = m_swapchain_format,
-                                                           .base_mip    = 0,
-                                                           .mip_count   = 1,
-                                                           .base_layer  = 0,
-                                                           .layer_count = 1,
-                                                       });
-
     auto command_buffer = m_device.start_command_recording(m_queue);
 
     command_buffer.barrier(StageFlags::RasterColorOut,
@@ -119,7 +110,7 @@ void HelloTriangle::Update(const WindowState& window) {
                            });
     command_buffer.begin_render_pass({
                                    .color_attachments = RenderAttachment{
-                                       .texture_view = swapchain_view,
+                                       .texture = surface_texture.texture,
                                        .load_op      = loon::gpu::LoadOp::Clear,
                                        .store_op     = loon::gpu::StoreOp::Store,
                                        .clear_color  = Color(0, 0, 0, 0),
@@ -148,7 +139,6 @@ void HelloTriangle::Update(const WindowState& window) {
     if (status == SurfaceStatus::OutOfDate || status == SurfaceStatus::Suboptimal) {
         recreate_swapchain(window.width, window.height);
     }
-    m_device.on_submitted_work_completed(m_queue,
-                                         [&, swapchain_view]() { m_device.free(swapchain_view); });
+
     m_device.process_events(m_queue);
 }

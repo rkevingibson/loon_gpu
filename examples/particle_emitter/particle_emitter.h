@@ -46,7 +46,6 @@ class ParticleEmitter : public Example {
 
     Handle<DepthStencilState> m_depth_stencil_state;
     Handle<Texture>           m_depth_texture{0};
-    Handle<TextureView>       m_depth_view{0};
     Handle<TextureHeap>       m_texture_heap;
 
     Handle<Pipeline> m_reset_sim_pipeline;

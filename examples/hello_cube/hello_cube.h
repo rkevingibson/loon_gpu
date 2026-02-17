@@ -27,6 +27,5 @@ class HelloCube : public Example {
 
     Handle<Buffer>            m_constant_buffer;
     Handle<Texture>           m_depth_texture;
-    Handle<TextureView>       m_depth_view;
     Handle<DepthStencilState> m_depth_stencil_state;
 };
