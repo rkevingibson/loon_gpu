@@ -7,6 +7,7 @@ option(LOON_GPU_BUILD_EXAMPLES "Build examples" OFF)
 option(LOON_GPU_BUILD_TESTS "Build tests" OFF)
 option(LOON_GPU_WERROR "Treat warnings as errors" OFF)
 option(LOON_GPU_INSTALL "Install library" ON)
+option(LOON_GPU_USE_KOSMICKRISP "Use the kosmickrisp vulkan driver on MacOS" OFF)
 
 set(CLANG_TIDY_CONFIG clang-tidy --config-file=${CMAKE_SOURCE_DIR}/.clang-tidy)
 
@@ -24,40 +25,50 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 add_subdirectory(third_party)
 
-set(SOURCES
-    src/loon_gpu.cpp
-    src/vma_usage.cpp
+add_library(
+    loon_gpu STATIC
     src/containers.cpp
-    src/gpu_to_vk.cpp
     src/platform_utils.cpp
 )
-
 set(PUBLIC_HEADERS
     include/gpu/loon_gpu.h
 )
-
-add_library(
-    loon_gpu
-    STATIC
-    ${SOURCES}
-)
-
 set_target_properties(
     loon_gpu
     PROPERTIES
     PUBLIC_HEADER "${PUBLIC_HEADERS}"
 )
-
-# target_compile_options(loon_gpu PUBLIC -ftime-trace)
-
-target_link_libraries(loon_gpu PRIVATE volk VulkanMemoryAllocator)
-
 target_include_directories(
     loon_gpu
     PRIVATE ./src
     PUBLIC 
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
+
+if (APPLE AND NOT LOON_GPU_USE_KOSMICKRISP)
+
+target_sources(
+    loon_gpu 
+    PRIVATE 
+    src/mtl/loon_gpu.cpp
+)
+target_link_libraries(loon_gpu PRIVATE metal-cpp)
+
+set (TARGETS loon_gpu metal-cpp)
+else()
+set(SOURCES
+    src/vk/loon_gpu.cpp
+    src/vk/vma_usage.cpp
+    src/vk/gpu_to_vk.cpp
+)
+
+target_sources(
+    loon_gpu
+    PRIVATE
+    ${SOURCES}
+)
+
+target_link_libraries(loon_gpu PRIVATE volk VulkanMemoryAllocator)
 
 # We use device-specific loader, can define this to avoid accidentally accessing an unloaded function
 target_compile_definitions(
@@ -66,6 +77,7 @@ target_compile_definitions(
 )
 
 set (TARGETS loon_gpu volk VulkanMemoryAllocator)
+endif()
 
 if (LOON_GPU_WERROR)
     if (MSVC)
