@@ -2461,7 +2461,7 @@ void CommandBuffer::set_pipeline(Handle<Pipeline> pipeline) {
                                   p.vk_pipeline);
 }
 
-void CommandBuffer::set_depth_stencil_State(Handle<DepthStencilState> state) {
+void CommandBuffer::set_depth_stencil_state(Handle<DepthStencilState> state) {
     auto impl = reinterpret_cast<Device::Impl*>(device);
     auto cmd  = reinterpret_cast<VkCommandBuffer>(buffer);
 

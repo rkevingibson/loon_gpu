@@ -298,7 +298,7 @@ void ParticleEmitter::Update(const WindowState& window) {
         },
         .render_area = {.width = m_swapchain_width, .height = m_swapchain_height,},
     });
-    cmd.set_depth_stencil_State(m_depth_stencil_state);
+    cmd.set_depth_stencil_state(m_depth_stencil_state);
     cmd.set_pipeline(m_render_particle_pipeline);
     cmd.draw_indexed_instanced_indirect(vertex_args, 0, indices_ptr, indirect_args);
 

@@ -807,7 +807,7 @@ class CommandBuffer {
                  HazardFlags                   hazards           = HazardFlags(0));
 
     void set_pipeline(Handle<Pipeline> pipeline);
-    void set_depth_stencil_State(Handle<DepthStencilState> state);
+    void set_depth_stencil_state(Handle<DepthStencilState> state);
     void set_scissor_rect(const Rect2D& rect);
 
     void dispatch(GpuPtr dataGpu, const Dimension3D& gridDimensions);

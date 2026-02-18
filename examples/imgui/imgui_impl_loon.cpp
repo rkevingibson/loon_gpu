@@ -58,7 +58,7 @@ static void SetupRenderState(ImDrawData*                   draw_data,
     ImGui_ImplLoon_Data* bd = GetBackendData();
 
     // Bind shader
-    command_list.set_depth_stencil_State(bd->depth_stencil_state);
+    command_list.set_depth_stencil_state(bd->depth_stencil_state);
     command_list.set_pipeline(bd->pipelineState);
 }
 
