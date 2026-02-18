@@ -151,7 +151,7 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
 
 
     // Reset the particle sim
-    auto cmd = m_device.start_command_recording(m_queue);
+    auto cmd = m_queue.start_command_recording();
     cmd.set_pipeline(m_reset_sim_pipeline);
     GpuPtr args = m_ring_buffer.append(m_frame_idx,
                          SimGpu{.options   = m_sim.options,
@@ -163,7 +163,7 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
 
     cmd.dispatch(args, {kMaxNumParticles / 64, 1, 1});
     cmd.barrier(StageFlags::Compute, StageFlags::Compute);
-    m_device.submit(m_queue, cmd, {});
+    m_queue.submit(cmd);
 
     m_device.wait_for_device_idle();
 }
@@ -258,7 +258,7 @@ void ParticleEmitter::Update(const WindowState& window) {
     GpuPtr   indices_ptr = m_ring_buffer.append(m_frame_idx, indices);
 
     // Rendering here.
-    auto cmd = m_device.start_command_recording(m_queue);
+    auto cmd = m_queue.start_command_recording();
 
 
     cmd.set_pipeline(m_emitter_pipeline);
@@ -313,17 +313,16 @@ void ParticleEmitter::Update(const WindowState& window) {
                     .old_layout = Layout::Attachment,
                     .new_layout = Layout::Present,
                 });
-    m_device.submit(m_queue,
-                    cmd,
-                    SemaphoreInfo{
-                        .semaphore = surface_texture.acquire_semaphore,
-                        .stage     = StageFlags::PixelShader,
-                    });
+    m_queue.submit(cmd,
+                   SemaphoreInfo{
+                       .semaphore = surface_texture.acquire_semaphore,
+                       .stage     = StageFlags::PixelShader,
+                   });
 
     const auto status = m_device.present(m_queue);
     if (status == SurfaceStatus::OutOfDate || status == SurfaceStatus::Suboptimal) {
         recreate_swapchain(window.width, window.height);
     }
 
-    m_device.process_events(m_queue);
+    m_queue.process_events();
 }

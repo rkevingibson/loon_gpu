@@ -12,7 +12,7 @@
 namespace loon::imgui {
 struct InitInfo {
     gpu::Device                   device;
-    gpu::Handle<gpu::Queue>       queue;
+    gpu::Queue                    queue;
     gpu::Handle<gpu::TextureHeap> texture_heap;
     int                           num_frames_in_flight;
     loon::gpu::Format             render_target_format;       // RenderTarget format.

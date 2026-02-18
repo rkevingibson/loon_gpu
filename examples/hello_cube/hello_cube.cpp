@@ -134,14 +134,13 @@ HelloCube::HelloCube(const WindowState& window_state) {
     void* dst = m_device.get_host_pointer(m_constant_buffer);
     Cube::write(dst);
 
-    auto cmd = m_device.start_command_recording(m_queue);
+    auto cmd = m_queue.start_command_recording();
     cmd.memcpy(m_vertex_ptr, m_device.get_device_pointer(m_constant_buffer), Cube::kSize);
 
     // A little excessive, but wait for the copy to be done before returning.
     cmd.barrier(StageFlags::Transfer, StageFlags::VertexShader);
     auto copy_semaphore = m_device.create_semaphore(0);
-    m_device.submit(
-        m_queue,
+    m_queue.submit(
         cmd,
         {},
         SemaphoreInfo{.semaphore = copy_semaphore, .value = 1, .stage = StageFlags::Transfer});
@@ -217,7 +216,7 @@ void HelloCube::Update(const WindowState& window) {
         return;
     }
 
-    auto command_buffer = m_device.start_command_recording(m_queue);
+    auto command_buffer = m_queue.start_command_recording();
 
     command_buffer.barrier(StageFlags::RasterColorOut,
                            StageFlags::PixelShader | StageFlags::RasterColorOut,
@@ -263,18 +262,17 @@ void HelloCube::Update(const WindowState& window) {
                                .old_layout = Layout::Attachment,
                                .new_layout = Layout::Present,
                            });
-    m_device.submit(m_queue,
-                    command_buffer,
-                    SemaphoreInfo{
-                        .semaphore = surface_texture.acquire_semaphore,
-                        .stage     = StageFlags::RasterColorOut,
-                    });
+    m_queue.submit(command_buffer,
+                   SemaphoreInfo{
+                       .semaphore = surface_texture.acquire_semaphore,
+                       .stage     = StageFlags::RasterColorOut,
+                   });
 
     const auto status = m_device.present(m_queue);
     if (status == SurfaceStatus::OutOfDate || status == SurfaceStatus::Suboptimal) {
         recreate_swapchain(window.width, window.height);
     }
 
-    m_device.process_events(m_queue);
+    m_queue.process_events();
     ++m_frame_idx;
 }

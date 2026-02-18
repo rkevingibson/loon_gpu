@@ -99,7 +99,7 @@ void HelloTriangle::Update(const WindowState& window) {
         return;
     }
 
-    auto command_buffer = m_device.start_command_recording(m_queue);
+    auto command_buffer = m_queue.start_command_recording();
 
     command_buffer.barrier(StageFlags::RasterColorOut,
                            StageFlags::RasterColorOut,
@@ -128,17 +128,16 @@ void HelloTriangle::Update(const WindowState& window) {
                                .new_layout = Layout::Present,
                            });
 
-    m_device.submit(m_queue,
-                    command_buffer,
-                    SemaphoreInfo{
-                        .semaphore = surface_texture.acquire_semaphore,
-                        .stage     = StageFlags::RasterColorOut,
-                    });
+    m_queue.submit(command_buffer,
+                   SemaphoreInfo{
+                       .semaphore = surface_texture.acquire_semaphore,
+                       .stage     = StageFlags::RasterColorOut,
+                   });
 
     const auto status = m_device.present(m_queue);
     if (status == SurfaceStatus::OutOfDate || status == SurfaceStatus::Suboptimal) {
         recreate_swapchain(window.width, window.height);
     }
 
-    m_device.process_events(m_queue);
+    m_queue.process_events();
 }

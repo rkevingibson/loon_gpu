@@ -38,11 +38,11 @@ class ParticleEmitter : public Example {
    private:
     void recreate_swapchain(uint32_t width, uint32_t height);
 
-    Device        m_device;
-    Handle<Queue> m_queue;
-    Format        m_swapchain_format;
-    uint32_t      m_swapchain_width  = 0;
-    uint32_t      m_swapchain_height = 0;
+    Device   m_device;
+    Queue    m_queue;
+    Format   m_swapchain_format;
+    uint32_t m_swapchain_width  = 0;
+    uint32_t m_swapchain_height = 0;
 
     Handle<DepthStencilState> m_depth_stencil_state;
     Handle<Texture>           m_depth_texture{0};

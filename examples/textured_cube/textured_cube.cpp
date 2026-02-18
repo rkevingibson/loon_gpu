@@ -153,7 +153,7 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
     memcpy(dst, image_data, (size_t)x * y * 4);
     stbi_image_free(image_data);
 
-    auto cmd = m_device.start_command_recording(m_queue);
+    auto cmd = m_queue.start_command_recording();
     cmd.barrier(StageFlags::None,
                 StageFlags::Transfer,
                 TextureTransition{
@@ -172,8 +172,7 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
     //  A little excessive, but wait for the copy to be done before returning.
     cmd.barrier(StageFlags::Transfer, StageFlags::VertexShader);
     auto copy_semaphore = m_device.create_semaphore(0);
-    m_device.submit(
-        m_queue,
+    m_queue.submit(
         cmd,
         {},
         SemaphoreInfo{.semaphore = copy_semaphore, .value = 1, .stage = StageFlags::Transfer});
@@ -242,7 +241,7 @@ void TexturedCube::Update(const WindowState& window) {
         }
     };
 
-    auto command_buffer = m_device.start_command_recording(m_queue);
+    auto command_buffer = m_queue.start_command_recording();
 
     command_buffer.set_texture_heap(m_texture_heap);
 
@@ -297,19 +296,18 @@ void TexturedCube::Update(const WindowState& window) {
                                .new_layout = Layout::Present,
                            });
 
-    m_device.submit(m_queue,
-                    command_buffer,
-                    SemaphoreInfo{
-                        .semaphore = surface_texture.acquire_semaphore,
-                        .stage     = StageFlags::PixelShader,
-                    });
+    m_queue.submit(command_buffer,
+                   SemaphoreInfo{
+                       .semaphore = surface_texture.acquire_semaphore,
+                       .stage     = StageFlags::PixelShader,
+                   });
 
     const auto status = m_device.present(m_queue);
     if (status == SurfaceStatus::OutOfDate || status == SurfaceStatus::Suboptimal) {
         recreate_swapchain(window.width, window.height);
     }
 
-    m_device.process_events(m_queue);
+    m_queue.process_events();
 
     m_frame_idx++;
 }

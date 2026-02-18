@@ -15,7 +15,7 @@ class HelloCube : public Example {
     void recreate_swapchain(uint32_t width, uint32_t height);
 
     Device           m_device;
-    Handle<Queue>    m_queue;
+    Queue            m_queue;
     Format           m_swapchain_format;
     Handle<Pipeline> m_render_pipeline;
     uint64_t         m_frame_idx        = 0;

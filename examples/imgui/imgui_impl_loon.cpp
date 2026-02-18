@@ -21,7 +21,7 @@ struct ImGui_ImplLoon_Data {
     gpu::Device                device;
     gpu::Handle<gpu::Pipeline> pipelineState;
 
-    gpu::Handle<gpu::Queue>             queue;
+    gpu::Queue                          queue;
     gpu::Format                         color_format;
     gpu::Format                         depth_format;
     gpu::Handle<gpu::TextureHeap>       texture_heap;
@@ -142,7 +142,7 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
         void* dst = bd->device.get_host_pointer(fb->buffer);
         memcpy(dst, tex->GetPixels(), tex->GetSizeInBytes());
 
-        auto cmd = bd->device.start_command_recording(bd->queue);
+        auto cmd = bd->queue.start_command_recording();
 
         if (need_barrier_before_copy) {
             cmd.barrier(gpu::StageFlags::None,
@@ -166,14 +166,13 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
         cmd.barrier(gpu::StageFlags::Transfer, gpu::StageFlags::PixelShader);
 
         auto copy_semaphore = bd->device.create_semaphore(0);
-        bd->device.submit(bd->queue,
-                          cmd,
-                          {},
-                          gpu::SemaphoreInfo{
-                              .semaphore = copy_semaphore,
-                              .value     = 1,
-                              .stage     = gpu::StageFlags::Transfer,
-                          });
+        bd->queue.submit(cmd,
+                         {},
+                         gpu::SemaphoreInfo{
+                             .semaphore = copy_semaphore,
+                             .value     = 1,
+                             .stage     = gpu::StageFlags::Transfer,
+                         });
         bd->device.wait_semaphore(copy_semaphore, 1);
         bd->device.free(copy_semaphore);
 

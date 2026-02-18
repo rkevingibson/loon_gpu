@@ -205,14 +205,14 @@ struct Handle {
     constexpr operator bool() const noexcept { return h != 0; }
 };
 
-struct Device;
+class Device;
+class Queue;
+class CommandBuffer;
 struct Pipeline;
 struct Buffer;
 struct Texture;
 struct TextureHeap;
 struct DepthStencilState;
-struct Queue;
-struct CommandBuffer;
 struct Semaphore;
 
 using GpuPtr      = uint64_t;
@@ -721,7 +721,7 @@ class Device {
     bool                configure_surface(const SurfaceConfiguration& config);
     void                unconfigure_surface();
     SurfaceTextureInfo  get_current_texture();
-    SurfaceStatus       present(Handle<Queue> queue);
+    SurfaceStatus       present(Queue queue);
 
     // Buffers:
     Handle<Buffer> malloc(size_t bytes, Memory memory = Memory::Default);
@@ -733,15 +733,14 @@ class Device {
     // Textures:
     Handle<Texture>     create_texture(const TextureDesc& desc);
     Handle<TextureHeap> create_texture_heap(size_t size);
+    void                free(Handle<Texture>);
+    void                free(Handle<TextureHeap>);
 
     TextureView add_texture_view_to_heap(Handle<TextureHeap>, const TextureViewDesc& desc);
     void        remove_texture_view_from_heap(Handle<TextureHeap>, TextureView);
 
-    void free(Handle<Texture>);
-    void free(Handle<TextureHeap>);
-
     // Pipelines
-    Handle<Pipeline> create_compute_pipeline(ShaderSource computeIR);
+    Handle<Pipeline> create_compute_pipeline(ShaderSource compute);
     Handle<Pipeline> create_graphics_pipeline(ShaderSource      vertex,
                                               ShaderSource      fragment,
                                               const RasterDesc& desc);
@@ -752,17 +751,7 @@ class Device {
     void                      free_depth_stencil_state(Handle<DepthStencilState> state);
 
     // Queue
-    Handle<Queue> get_queue(QueueType type = QueueType::Default);
-    CommandBuffer start_command_recording(Handle<Queue> queue);
-
-    // TODO: May want to wrap these args in a struct.
-    void submit(Handle<Queue>             queue,
-                Span<const CommandBuffer> commandBuffers,
-                Span<const SemaphoreInfo> wait_semaphores,
-                Span<const SemaphoreInfo> signal_semaphores = {});
-    void cancel(Handle<Queue> queue, Span<const Handle<CommandBuffer>> commandBuffers);
-    void on_submitted_work_completed(Handle<Queue> queue, Function<void>&& fn);
-    void process_events(Handle<Queue> queue);
+    Queue get_queue(QueueType type = QueueType::Default);
 
     // Semaphores
     Handle<Semaphore> create_semaphore(uint64_t initValue);
@@ -773,8 +762,30 @@ class Device {
     struct Impl;
     Impl* impl = nullptr;
     friend class CommandBuffer;
+    friend class Queue;
 
     Device(Impl* impl) : impl{impl} {};
+};
+
+class Queue {
+   public:
+    Queue()                        = default;
+    Queue(const Queue&)            = default;
+    Queue& operator=(const Queue&) = default;
+
+    CommandBuffer start_command_recording();
+    void          submit(Span<const CommandBuffer> command_buffers,
+                         Span<const SemaphoreInfo> wait_semaphores   = {},
+                         Span<const SemaphoreInfo> signal_semaphores = {});
+    void          cancel(Span<const Handle<CommandBuffer>> command_buffers);
+    void          on_submitted_work_completed(Function<void>&& fn);
+    void          process_events();
+
+   private:
+    void* queue;
+    void* device;
+    friend class Device::Impl;
+    Queue(void* q, void* d) : queue(q), device(d) {}
 };
 
 class CommandBuffer {
@@ -829,7 +840,7 @@ class CommandBuffer {
     void set_compute_ptr(GpuPtr dataGpu);
     void set_graphics_ptrs(GpuPtr vertexDataGpu, GpuPtr fragmentDataGpu);
 
-    friend class Device::Impl;
+    friend class Queue;
     CommandBuffer(void* buffer, void* device) : buffer{buffer}, device(device) {};
     void* buffer;
     void* device;
