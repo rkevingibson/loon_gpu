@@ -128,11 +128,7 @@ void HelloTriangle::Update(const WindowState& window) {
                                .new_layout = Layout::Present,
                            });
 
-    m_queue.submit(command_buffer,
-                   SemaphoreInfo{
-                       .semaphore = surface_texture.acquire_semaphore,
-                       .stage     = StageFlags::RasterColorOut,
-                   });
+    m_queue.submit(command_buffer);
 
     const auto status = m_device.present(m_queue);
     if (status == SurfaceStatus::OutOfDate || status == SurfaceStatus::Suboptimal) {

@@ -121,6 +121,10 @@ struct Surface {
     Handle<Semaphore> acquire_semaphores[kMaxFramesInFlight];
     Handle<Semaphore> present_semaphores[kMaxSwapchainImages];
 
+    // We store the command buffer that first uses the surface image (tracked by barriers doing an
+    // image transition which is necessary before use), so we can wait on an extra semaphore on
+    // submission.
+    VkCommandBuffer first_use_command[kMaxFramesInFlight] = {VK_NULL_HANDLE};
     // We store the command buffer that recording
     // the transition to PRESENT_KHR, so we can
     // signal an extra semaphore on submission.
@@ -1148,9 +1152,10 @@ void Device::Impl::unconfigure_surface() {
 }
 
 SurfaceTextureInfo Device::Impl::get_current_texture() {
+    m_surface.frame_idx++;
     auto semaphore
         = m_surface.acquire_semaphores[m_surface.frame_idx % Surface::kMaxFramesInFlight];
-    m_surface.frame_idx++;
+    m_surface.first_use_command[m_surface.frame_idx % Surface::kMaxFramesInFlight] = VK_NULL_HANDLE;
     const uint64_t wait_value = m_surface.frame_idx > Surface::kMaxFramesInFlight
                                     ? m_surface.frame_idx - Surface::kMaxFramesInFlight
                                     : 0;
@@ -1168,9 +1173,8 @@ SurfaceTextureInfo Device::Impl::get_current_texture() {
     uint32_t           image_idx = 0;
     VkResult           result = m_api.vkAcquireNextImage2KHR(m_device, &acquire_info, &image_idx);
     SurfaceTextureInfo info{
-        .status            = SurfaceStatus::Success,
-        .texture           = m_surface.swapchain_images[image_idx],
-        .acquire_semaphore = semaphore,
+        .status  = SurfaceStatus::Success,
+        .texture = m_surface.swapchain_images[image_idx],
     };
     m_surface.current_image_idx = image_idx;
 
@@ -2193,24 +2197,46 @@ void Queue::submit(Span<const CommandBuffer> command_buffers,
                                   .deviceMask    = 1,
                               });
 
+        if (buf
+            == d->m_surface
+                   .first_use_command[d->m_surface.frame_idx % Surface::kMaxFramesInFlight]) {
+            const auto acquire_semaphore
+                = d->m_semaphore_pool[d->m_surface.acquire_semaphores
+                                          [d->m_surface.frame_idx % Surface::kMaxFramesInFlight]]
+                      .vk_semaphore;
+
+            // TODO: PERF - we could check the configured surface usages to get a more optimal stage
+            // mask - if it's only used as an attachment that can let more work run concurrently.
+            wait_info = concat(&arena,
+                               wait_info,
+                               VkSemaphoreSubmitInfo{
+                                   .sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+                                   .pNext       = nullptr,
+                                   .semaphore   = acquire_semaphore,
+                                   .value       = 0,
+                                   .stageMask   = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+                                   .deviceIndex = 0,
+                               });
+        }
         if (buf == d->m_surface.transitioning_command[d->m_surface.current_image_idx]) {
             // Immediately clear this so we don't accidentally signal it twice (can happen due to
             // cmd buffer reuse,e.g.)
             d->m_surface.transitioning_command[d->m_surface.current_image_idx] = 0;
-            signal_info                                                        = concat(
-                &arena,
-                signal_info,
-                VkSemaphoreSubmitInfo{
-                                                                           .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-                                                                           .pNext = nullptr,
-                                                                           .semaphore
-                    = d->m_semaphore_pool[d->m_surface
-                                              .present_semaphores[d->m_surface.current_image_idx]]
-                          .vk_semaphore,
-                                                                           .value       = 0,
-                                                                           .stageMask   = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                                                           .deviceIndex = 0,
-                });
+            VkSemaphore present_semaphore
+                = d->m_semaphore_pool[d->m_surface
+                                          .present_semaphores[d->m_surface.current_image_idx]]
+                      .vk_semaphore;
+
+            signal_info = concat(&arena,
+                                 signal_info,
+                                 VkSemaphoreSubmitInfo{
+                                     .sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+                                     .pNext       = nullptr,
+                                     .semaphore   = present_semaphore,
+                                     .value       = 0,
+                                     .stageMask   = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                     .deviceIndex = 0,
+                                 });
             signal_info = concat(
                 &arena,
                 signal_info,
@@ -2431,11 +2457,22 @@ void CommandBuffer::barrier(StageFlags                    before,
                                 });
 
 
-        if (t.new_layout == Layout::Present) {
-            assert(t.texture.h
-                   == impl->m_surface.swapchain_images[impl->m_surface.current_image_idx].h);
-            impl->m_surface.transitioning_command[impl->m_surface.current_image_idx]
-                = reinterpret_cast<VkCommandBuffer>(buffer);
+        if (t.texture == impl->m_surface.swapchain_images[impl->m_surface.current_image_idx]) {
+            auto* first_use_command
+                = &impl->m_surface
+                       .first_use_command[impl->m_surface.frame_idx % Surface::kMaxFramesInFlight];
+
+            int64_t expected = 0;
+            // We try and set the first use command value if it hasn't already been set by an
+            // earlier barrier.
+            atomic_compare_exchange(reinterpret_cast<int64_t*>(first_use_command),
+                                    &expected,
+                                    reinterpret_cast<int64_t>(buffer));
+
+            if (t.new_layout == Layout::Present) {
+                impl->m_surface.transitioning_command[impl->m_surface.current_image_idx]
+                    = reinterpret_cast<VkCommandBuffer>(buffer);
+            }
         }
     }
 

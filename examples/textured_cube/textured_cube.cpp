@@ -286,8 +286,6 @@ void TexturedCube::Update(const WindowState& window) {
 
     command_buffer.end_render_pass();
 
-
-
     command_buffer.barrier(StageFlags::RasterColorOut,
                            StageFlags::RasterColorOut,
                            TextureTransition{
@@ -296,11 +294,7 @@ void TexturedCube::Update(const WindowState& window) {
                                .new_layout = Layout::Present,
                            });
 
-    m_queue.submit(command_buffer,
-                   SemaphoreInfo{
-                       .semaphore = surface_texture.acquire_semaphore,
-                       .stage     = StageFlags::PixelShader,
-                   });
+    m_queue.submit(command_buffer);
 
     const auto status = m_device.present(m_queue);
     if (status == SurfaceStatus::OutOfDate || status == SurfaceStatus::Suboptimal) {

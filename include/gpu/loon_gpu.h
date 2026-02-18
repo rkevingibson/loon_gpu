@@ -201,8 +201,9 @@ typedef struct MemoryBlock {
 
 template <class T>
 struct Handle {
-    uint64_t  h = 0;
-    constexpr operator bool() const noexcept { return h != 0; }
+    uint64_t       h = 0;
+    constexpr      operator bool() const noexcept { return h != 0; }
+    constexpr bool operator==(const Handle& other) { return other.h == h; }
 };
 
 class Device;
@@ -665,9 +666,6 @@ struct SurfaceConfiguration {
 struct SurfaceTextureInfo {
     SurfaceStatus   status;
     Handle<Texture> texture;
-
-    // Semaphore needs to be waited on before the texture can safely be used.
-    Handle<Semaphore> acquire_semaphore;
 };
 
 struct SemaphoreInfo {

@@ -313,11 +313,7 @@ void ParticleEmitter::Update(const WindowState& window) {
                     .old_layout = Layout::Attachment,
                     .new_layout = Layout::Present,
                 });
-    m_queue.submit(cmd,
-                   SemaphoreInfo{
-                       .semaphore = surface_texture.acquire_semaphore,
-                       .stage     = StageFlags::PixelShader,
-                   });
+    m_queue.submit(cmd);
 
     const auto status = m_device.present(m_queue);
     if (status == SurfaceStatus::OutOfDate || status == SurfaceStatus::Suboptimal) {
