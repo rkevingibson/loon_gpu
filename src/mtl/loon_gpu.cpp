@@ -38,10 +38,15 @@ struct Texture {
 };
 
 struct TextureHeap {
-    MTL::TextureViewPool* pool          = nullptr;
-    MTL::ResidencySet*    residency_set = nullptr;
+    MTL::TextureViewPool* pool = nullptr;
     TwoLevelBitset        bitset;
 };
+
+struct Pipeline {
+    MTL::RenderPipelineState*  render_pipeline  = nullptr;
+    MTL::ComputePipelineState* compute_pipeline = nullptr;
+};
+
 struct Surface {
     CA::MetalLayer*    metal_layer;
     CA::MetalDrawable* current_drawable = nullptr;
@@ -100,20 +105,17 @@ struct Device::Impl {
     Handle<Texture>     create_texture(const TextureDesc& desc);
     Handle<TextureHeap> create_texture_heap(size_t size);
 
-    uint32_t add_texture_view_to_heap(Handle<TextureHeap>, const TextureViewDesc& desc);
-    void     remove_texture_view_from_heap(Handle<TextureHeap>, uint32_t);
+    TextureView add_texture_view_to_heap(Handle<TextureHeap>, const TextureViewDesc& desc);
+    void        remove_texture_view_from_heap(Handle<TextureHeap>, TextureView);
 
     void free(Handle<Texture>);
     void free(Handle<TextureHeap>);
 
     // Pipelines
     Handle<Pipeline> create_compute_pipeline(ShaderSource computeIR);
-    Handle<Pipeline> create_graphics_pipeline(ShaderSource vertex,
-                                              ShaderSource fragment,
-                                              RasterDesc   desc);
-    Handle<Pipeline> create_graphics_meshlet_pipeline(ShaderSource meshletIR,
-                                                      ShaderSource pixelIR,
-                                                      RasterDesc   desc);
+    Handle<Pipeline> create_graphics_pipeline(ShaderSource      vertex,
+                                              ShaderSource      fragment,
+                                              const RasterDesc& desc);
     void             free(Handle<Pipeline> pipeline);
 
     // State objects
@@ -138,11 +140,12 @@ struct Device::Impl {
 
     MTL::Device* m_device = nullptr;
 
-    MTL::ResidencySet* m_buffer_residency_set = nullptr;
+    MTL::ResidencySet* m_residency_set = nullptr;
 
     SlotMap<Buffer>      m_buffer_pool;
     SlotMap<Texture>     m_texture_pool;
     SlotMap<TextureHeap> m_texture_heap_pool;
+    SlotMap<Pipeline>    m_pipeline_pool;
 
     Surface m_surface;
 };
@@ -161,22 +164,27 @@ Device::Impl::Impl(const DeviceDesc& desc) :
     m_buffer_pool(m_allocator,
                   [this](Buffer* b) {
                       if (b->buffer) {
-                          m_buffer_residency_set->removeAllocation(b->buffer);
+                          m_residency_set->removeAllocation(b->buffer);
                           b->buffer->release();
                       }
                       b->~Buffer();
                   }),
     m_texture_pool(m_allocator,
-                   [](Texture* t) {
-                       if (t->texture) { t->texture->release(); }
+                   [this](Texture* t) {
+                       if (t->texture) {
+                           m_residency_set->removeAllocation(t->texture);
+                           t->texture->release();
+                       }
                        t->~Texture();
                    }),
-    m_texture_heap_pool(m_allocator, [](TextureHeap* t) {
-        if (t->pool) {
-            t->pool->release();
-            t->residency_set->release();
-        }
-        t->~TextureHeap();
+    m_texture_heap_pool(m_allocator,
+                        [](TextureHeap* t) {
+                            if (t->pool) { t->pool->release(); }
+                            t->~TextureHeap();
+                        }),
+    m_pipeline_pool(m_allocator, [](Pipeline* p) {
+        if (p->compute_pipeline) { p->compute_pipeline->release(); }
+        if (p->render_pipeline) { p->render_pipeline->release(); }
     }) {}
 
 Device::Impl::~Impl() {
@@ -195,7 +203,7 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
     auto residency_set_descriptor = MTL::ResidencySetDescriptor::alloc();
     // NOTE: Not sure how much this matters, should dig in more
     residency_set_descriptor->setInitialCapacity(64);
-    m_buffer_residency_set = m_device->newResidencySet(residency_set_descriptor, nullptr);
+    m_residency_set = m_device->newResidencySet(residency_set_descriptor, nullptr);
     residency_set_descriptor->release();
 
     return true;
@@ -276,8 +284,9 @@ Handle<Buffer> Device::Impl::malloc(size_t bytes, size_t align, Memory memory) {
     auto handle = m_buffer_pool.emplace({
         .buffer = buffer,
     });
-    m_buffer_residency_set->addAllocation(buffer);
-    // TODO: Do I need to mark this as dirty or something to indicate it needs committing?
+    m_residency_set->addAllocation(buffer);
+    m_residency_set->commit();
+    // TODO: Can i reduce the frenquency of commits at all?
 
     return handle;
 }
@@ -309,6 +318,8 @@ Handle<Texture> Device::Impl::create_texture(const TextureDesc& desc) {
     info->setUsage(bridge_texture_usage(desc.usage));
     MTL::Texture* texture = m_device->newTexture(info);
     info->release();
+    m_residency_set->addAllocation(texture);
+    m_residency_set->commit();
 
     auto handle = m_texture_pool.emplace({.texture = texture});
     return handle;
@@ -321,15 +332,9 @@ Handle<TextureHeap> Device::Impl::create_texture_heap(size_t size) {
     auto texture_view_pool = m_device->newTextureViewPool(view_pool_descriptor, nullptr);
     view_pool_descriptor->release();
 
-    auto residency_set_descriptor = MTL::ResidencySetDescriptor::alloc();
-    residency_set_descriptor->setInitialCapacity(size);
-    auto residency_set = m_device->newResidencySet(residency_set_descriptor, nullptr);
-    residency_set_descriptor->release();
-
     const auto handle = m_texture_heap_pool.emplace(TextureHeap{
-        .pool          = texture_view_pool,
-        .residency_set = residency_set,
-        .bitset        = TwoLevelBitset(m_allocator, size),
+        .pool   = texture_view_pool,
+        .bitset = TwoLevelBitset(m_allocator, size),
     });
     return handle;
 }
@@ -341,6 +346,67 @@ void Device::Impl::free(Handle<Texture> h) {
 void Device::Impl::free(Handle<TextureHeap> h) {
     m_texture_heap_pool.erase(h);
 }
+
+TextureView Device::Impl::add_texture_view_to_heap(Handle<TextureHeap>    h,
+                                                   const TextureViewDesc& desc) {
+    auto&                       heap      = m_texture_heap_pool[h];
+    auto&                       tex       = m_texture_pool[desc.texture];
+    MTL::TextureViewDescriptor* view_info = MTL::TextureViewDescriptor::alloc();
+    view_info->setLevelRange(NS::Range(desc.base_mip, desc.mip_count));
+    view_info->setPixelFormat(bridge(desc.format));
+    view_info->setSliceRange(NS::Range(desc.base_layer, desc.layer_count));
+    view_info->setTextureType(tex.texture->textureType());
+    const auto      index        = heap.bitset.set_leading_zero();
+    MTL::ResourceID texture_view = heap.pool->setTextureView(tex.texture, view_info, index);
+    view_info->release();
+
+    return texture_view._impl;
+}
+
+void Device::Impl::remove_texture_view_from_heap(Handle<TextureHeap> h, TextureView view) {
+    auto&      heap = m_texture_heap_pool[h];
+    const auto base = heap.pool->baseResourceID()._impl;
+    assert(view > base && view < base + heap.pool->resourceViewCount());
+    const auto index = view - heap.pool->baseResourceID()._impl;
+    heap.bitset.clear_bit(index);
+}
+
+
+// MARK: Pipelines
+Handle<Pipeline> Device::Impl::create_compute_pipeline(ShaderSource compute) {
+    NS::String*    shader_source = NS::String::alloc()->init(compute.spirv.data(),
+                                                          compute.spirv.size(),
+                                                          NS::UTF8StringEncoding,
+                                                          false);
+    NS::String*    entry_point   = NS::String::alloc()->init((void*)compute.entry_point.data(),
+                                                        compute.entry_point.size(),
+                                                        NS::UTF8StringEncoding,
+                                                        false);
+    MTL::Library*  lib           = m_device->newLibrary(shader_source, nullptr);
+    MTL::Function* compute_fn    = lib->newFunction(entry_point);
+    MTL::ComputePipelineState* compute_pipeline
+        = m_device->newComputePipelineState(compute_fn, (NS::Error**)nullptr);
+    shader_source->release();
+    entry_point->release();
+    lib->release();
+    compute_fn->release();
+
+    return m_pipeline_pool.emplace({
+        .compute_pipeline = compute_pipeline,
+        .render_pipeline  = nullptr,
+    });
+}
+
+Handle<Pipeline> Device::Impl::create_graphics_pipeline(ShaderSource      vertex,
+                                                        ShaderSource      fragment,
+                                                        const RasterDesc& desc) {
+    return {};
+}
+
+void Device::Impl::free(Handle<Pipeline> pipeline) {
+    m_pipeline_pool.erase(pipeline);
+}
+
 
 
 // MARK: Device wrapper

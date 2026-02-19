@@ -193,8 +193,8 @@ struct Device::Impl {
     Handle<Texture>     create_texture(const TextureDesc& desc);
     Handle<TextureHeap> create_texture_heap(size_t size);
 
-    uint32_t add_texture_view_to_heap(Handle<TextureHeap>, const TextureViewDesc& desc);
-    void     remove_texture_view_from_heap(Handle<TextureHeap>, uint32_t);
+    TextureView add_texture_view_to_heap(Handle<TextureHeap>, const TextureViewDesc& desc);
+    void        remove_texture_view_from_heap(Handle<TextureHeap>, TextureView);
 
     void free(Handle<Texture>);
     void free(Handle<TextureHeap>);
@@ -1426,8 +1426,8 @@ Handle<TextureHeap> Device::Impl::create_texture_heap(size_t size) {
     return {handle};
 }
 
-uint32_t Device::Impl::add_texture_view_to_heap(Handle<TextureHeap>    heap,
-                                                const TextureViewDesc& desc) {
+TextureView Device::Impl::add_texture_view_to_heap(Handle<TextureHeap>    heap,
+                                                   const TextureViewDesc& desc) {
     auto& texture_heap = m_texture_heap_pool[heap];
     auto  texture      = m_texture_pool[desc.texture];
 
@@ -1483,7 +1483,7 @@ void Device::Impl::free(Handle<Texture> t) {
     m_texture_pool.erase(t);
 }
 
-void Device::Impl::remove_texture_view_from_heap(Handle<TextureHeap> heap, uint32_t idx) {
+void Device::Impl::remove_texture_view_from_heap(Handle<TextureHeap> heap, TextureView idx) {
     auto& texture_heap = m_texture_heap_pool[heap];
     texture_heap.bitset.clear_bit(idx);
 
