@@ -51,8 +51,17 @@ target_sources(
     loon_gpu 
     PRIVATE 
     src/mtl/loon_gpu.cpp
+    src/mtl/gpu_to_mtl.cpp
 )
 target_link_libraries(loon_gpu PRIVATE metal-cpp)
+
+target_link_libraries(loon_gpu
+    PRIVATE
+    "-framework Foundation"
+    "-framework Metal"
+    "-framework QuartzCore"
+    "-framework CoreGraphics"
+    )
 
 set (TARGETS loon_gpu metal-cpp)
 else()

@@ -1227,6 +1227,8 @@ Handle<Buffer> Device::Impl::malloc(size_t bytes, Memory memory) {
 }
 
 Handle<Buffer> Device::Impl::malloc(size_t bytes, size_t align, Memory memory) {
+    // TODO: Alignment is not respected currently.
+
     constexpr VkBufferUsageFlags kDefaultUsages
         = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
           | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT

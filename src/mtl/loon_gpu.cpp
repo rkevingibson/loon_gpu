@@ -4,12 +4,15 @@
 #include <cstddef>
 #include <cstring>
 
-#include "containers.h"
-
+// NB: This include has to be before others, as it defines the implementation of the metal lib.
 #define NS_PRIVATE_IMPLEMENTATION
 #define CA_PRIVATE_IMPLEMENTATION
 #define MTL_PRIVATE_IMPLEMENTATION
 #include <Metal.hpp>
+
+#include "containers.h"
+#include "gpu_to_mtl.h"
+
 
 
 namespace loon::gpu {
@@ -26,6 +29,36 @@ template class Span<const Handle<gpu::CommandBuffer>>;
 template class Span<const gpu::TextureTransition>;
 template class Function<void>;
 
+struct Buffer {
+    MTL::Buffer* buffer;
+};
+
+struct Texture {
+    MTL::Texture* texture;
+};
+
+struct TextureHeap {
+    MTL::TextureViewPool* pool          = nullptr;
+    MTL::ResidencySet*    residency_set = nullptr;
+    TwoLevelBitset        bitset;
+};
+struct Surface {
+    CA::MetalLayer*    metal_layer;
+    CA::MetalDrawable* current_drawable = nullptr;
+
+    // Formats from
+    // https://developer.apple.com/documentation/quartzcore/cametallayer/pixelformat?language=objc
+    // We don't support all of the listed options but we've got the basics
+    static constexpr Format kSwapchainFormats[] = {
+        Format::BGRA8Unorm,
+        Format::BGRA8UnormSrgb,
+        Format::RGBA16Float,
+        Format::RGB10A2Unorm,
+    };
+    static constexpr PresentMode kPresentModes[] = {
+        PresentMode::Fifo,
+    };
+};
 struct ThreadLocalState {
     constexpr static size_t kArenaSize = 256ll * 1024;
     loon::gpu::Allocator    allocator;
@@ -104,6 +137,14 @@ struct Device::Impl {
     loon::gpu::tls_key m_tls_key;
 
     MTL::Device* m_device = nullptr;
+
+    MTL::ResidencySet* m_buffer_residency_set = nullptr;
+
+    SlotMap<Buffer>      m_buffer_pool;
+    SlotMap<Texture>     m_texture_pool;
+    SlotMap<TextureHeap> m_texture_heap_pool;
+
+    Surface m_surface;
 };
 
 
@@ -116,7 +157,27 @@ Device::Impl::Impl(const DeviceDesc& desc) :
     m_tls_key{loon::gpu::tls_alloc([](void* data) {
         auto state = reinterpret_cast<ThreadLocalState*>(data);
         state->~ThreadLocalState();
-    })} {}
+    })},
+    m_buffer_pool(m_allocator,
+                  [this](Buffer* b) {
+                      if (b->buffer) {
+                          m_buffer_residency_set->removeAllocation(b->buffer);
+                          b->buffer->release();
+                      }
+                      b->~Buffer();
+                  }),
+    m_texture_pool(m_allocator,
+                   [](Texture* t) {
+                       if (t->texture) { t->texture->release(); }
+                       t->~Texture();
+                   }),
+    m_texture_heap_pool(m_allocator, [](TextureHeap* t) {
+        if (t->pool) {
+            t->pool->release();
+            t->residency_set->release();
+        }
+        t->~TextureHeap();
+    }) {}
 
 Device::Impl::~Impl() {
     m_device->release();
@@ -126,8 +187,161 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
     m_device = MTL::CreateSystemDefaultDevice();
     if (!m_device) { return false; }
 
+    // Is this a valid cast? We're being passed a CAMetalLayer, not the C++ wrapper. Not sure!
+    // At the very least I want to retain it.
+    m_surface.metal_layer = reinterpret_cast<CA::MetalLayer*>(desc.native_window_handle);
+    m_surface.metal_layer->retain();
+
+    auto residency_set_descriptor = MTL::ResidencySetDescriptor::alloc();
+    // NOTE: Not sure how much this matters, should dig in more
+    residency_set_descriptor->setInitialCapacity(64);
+    m_buffer_residency_set = m_device->newResidencySet(residency_set_descriptor, nullptr);
+    residency_set_descriptor->release();
+
     return true;
 }
+
+// MARK: Surface functions
+SurfaceCapabilities Device::Impl::get_surface_capabilities() {
+    return SurfaceCapabilities{
+        .formats       = Surface::kSwapchainFormats,
+        .present_modes = Surface::kPresentModes,
+        .usages = UsageFlags::ColorAttachment | UsageFlags::TransferDst | UsageFlags::Storage,
+    };
+}
+
+bool Device::Impl::configure_surface(const SurfaceConfiguration& config) {
+    m_surface.metal_layer->setPixelFormat(bridge(config.format));
+    m_surface.metal_layer->setDrawableSize(CGSize{
+        .width  = static_cast<float>(config.width),
+        .height = static_cast<float>(config.height),
+    });
+    return true;
+}
+
+void Device::Impl::unconfigure_surface() {
+    // Not much to do here.
+    if (m_surface.current_drawable) {
+        m_surface.current_drawable->release();
+        m_surface.current_drawable = nullptr;
+    }
+}
+
+SurfaceTextureInfo Device::Impl::get_current_texture() {
+    CA::MetalDrawable* drawable = m_surface.metal_layer->nextDrawable();
+
+    if (!drawable) {
+        return SurfaceTextureInfo{
+            .texture = 0,
+            .status  = SurfaceStatus::Error,
+        };
+    }
+
+    m_surface.current_drawable = drawable;
+    MTL::Texture*   tex        = drawable->texture();
+    Handle<Texture> handle     = m_texture_pool.emplace({
+            .texture = tex,
+    });
+
+    return SurfaceTextureInfo{
+        .texture = handle,
+        .status  = SurfaceStatus::Success,
+    };
+}
+
+SurfaceStatus Device::Impl::present(Queue queue) {
+    m_surface.current_drawable->present();
+    m_surface.current_drawable->release();
+    m_surface.current_drawable = nullptr;
+    return SurfaceStatus::Success;
+}
+
+// MARK: Buffers:
+
+Handle<Buffer> Device::Impl::malloc(size_t bytes, Memory memory) {
+    return malloc(bytes, 64, memory);
+}
+
+Handle<Buffer> Device::Impl::malloc(size_t bytes, size_t align, Memory memory) {
+    MTL::ResourceOptions options = 0;
+    switch (memory) {
+        case Memory::Default: options = MTL::ResourceCPUCacheModeWriteCombined; break;
+        case Memory::Gpu: options = MTL::ResourceStorageModePrivate; break;
+        case Memory::Readback: options = MTL::ResourceCPUCacheModeDefaultCache; break;
+    }
+
+    MTL::Buffer* buffer = m_device->newBuffer(bytes, options);
+    if (!buffer) { return {}; }
+
+    auto handle = m_buffer_pool.emplace({
+        .buffer = buffer,
+    });
+    m_buffer_residency_set->addAllocation(buffer);
+    // TODO: Do I need to mark this as dirty or something to indicate it needs committing?
+
+    return handle;
+}
+
+void Device::Impl::free(Handle<Buffer> buffer) {
+    m_buffer_pool.erase(buffer);
+}
+
+GpuPtr Device::Impl::get_device_pointer(Handle<Buffer> buffer) {
+    return m_buffer_pool[buffer].buffer->gpuAddress();
+}
+
+void* Device::Impl::get_host_pointer(Handle<Buffer> buffer) {
+    return m_buffer_pool[buffer].buffer->contents();
+}
+
+// MARK: Textures
+Handle<Texture> Device::Impl::create_texture(const TextureDesc& desc) {
+    MTL::TextureDescriptor* info = MTL::TextureDescriptor::alloc();
+    info->setTextureType(bridge(desc.type));
+    info->setPixelFormat(bridge(desc.format));
+    info->setWidth(desc.dimensions.x);
+    info->setHeight(desc.dimensions.y);
+    info->setDepth(desc.dimensions.z);
+    info->setMipmapLevelCount(desc.mip_count);
+    info->setSampleCount(desc.sample_count);
+    info->setArrayLength(desc.layer_count);
+    info->setHazardTrackingMode(MTL::HazardTrackingModeUntracked);
+    info->setUsage(bridge_texture_usage(desc.usage));
+    MTL::Texture* texture = m_device->newTexture(info);
+    info->release();
+
+    auto handle = m_texture_pool.emplace({.texture = texture});
+    return handle;
+}
+
+Handle<TextureHeap> Device::Impl::create_texture_heap(size_t size) {
+    auto view_pool_descriptor = MTL::ResourceViewPoolDescriptor::alloc();
+    view_pool_descriptor->setResourceViewCount(size);
+
+    auto texture_view_pool = m_device->newTextureViewPool(view_pool_descriptor, nullptr);
+    view_pool_descriptor->release();
+
+    auto residency_set_descriptor = MTL::ResidencySetDescriptor::alloc();
+    residency_set_descriptor->setInitialCapacity(size);
+    auto residency_set = m_device->newResidencySet(residency_set_descriptor, nullptr);
+    residency_set_descriptor->release();
+
+    const auto handle = m_texture_heap_pool.emplace(TextureHeap{
+        .pool          = texture_view_pool,
+        .residency_set = residency_set,
+        .bitset        = TwoLevelBitset(m_allocator, size),
+    });
+    return handle;
+}
+
+void Device::Impl::free(Handle<Texture> h) {
+    m_texture_pool.erase(h);
+}
+
+void Device::Impl::free(Handle<TextureHeap> h) {
+    m_texture_heap_pool.erase(h);
+}
+
 
 // MARK: Device wrapper
 
