@@ -45,6 +45,7 @@ struct TextureHeap {
 struct Pipeline {
     MTL::RenderPipelineState*  render_pipeline  = nullptr;
     MTL::ComputePipelineState* compute_pipeline = nullptr;
+    Cull                       cull_mode;
 };
 
 struct Surface {
@@ -140,6 +141,9 @@ struct Device::Impl {
 
     MTL::Device* m_device = nullptr;
 
+    MTL4::Compiler*            m_compiler;
+    MTL4::CompilerTaskOptions* m_options;
+
     MTL::ResidencySet* m_residency_set = nullptr;
 
     SlotMap<Buffer>      m_buffer_pool;
@@ -195,16 +199,26 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
     m_device = MTL::CreateSystemDefaultDevice();
     if (!m_device) { return false; }
 
+    NS::Error* error = nullptr;
+
+    auto compiler_desc = MTL4::CompilerDescriptor::alloc()->init();
+    m_compiler         = m_device->newCompiler(compiler_desc, &error);
+    compiler_desc->release();
+    m_options = MTL4::CompilerTaskOptions::alloc()->init();
+
+
     // Is this a valid cast? We're being passed a CAMetalLayer, not the C++ wrapper. Not sure!
     // At the very least I want to retain it.
     m_surface.metal_layer = reinterpret_cast<CA::MetalLayer*>(desc.native_window_handle);
     m_surface.metal_layer->retain();
 
-    auto residency_set_descriptor = MTL::ResidencySetDescriptor::alloc();
+    auto residency_set_descriptor = MTL::ResidencySetDescriptor::alloc()->init();
     // NOTE: Not sure how much this matters, should dig in more
     residency_set_descriptor->setInitialCapacity(64);
     m_residency_set = m_device->newResidencySet(residency_set_descriptor, nullptr);
     residency_set_descriptor->release();
+
+
 
     return true;
 }
@@ -305,7 +319,7 @@ void* Device::Impl::get_host_pointer(Handle<Buffer> buffer) {
 
 // MARK: Textures
 Handle<Texture> Device::Impl::create_texture(const TextureDesc& desc) {
-    MTL::TextureDescriptor* info = MTL::TextureDescriptor::alloc();
+    MTL::TextureDescriptor* info = MTL::TextureDescriptor::alloc()->init();
     info->setTextureType(bridge(desc.type));
     info->setPixelFormat(bridge(desc.format));
     info->setWidth(desc.dimensions.x);
@@ -351,7 +365,7 @@ TextureView Device::Impl::add_texture_view_to_heap(Handle<TextureHeap>    h,
                                                    const TextureViewDesc& desc) {
     auto&                       heap      = m_texture_heap_pool[h];
     auto&                       tex       = m_texture_pool[desc.texture];
-    MTL::TextureViewDescriptor* view_info = MTL::TextureViewDescriptor::alloc();
+    MTL::TextureViewDescriptor* view_info = MTL::TextureViewDescriptor::alloc()->init();
     view_info->setLevelRange(NS::Range(desc.base_mip, desc.mip_count));
     view_info->setPixelFormat(bridge(desc.format));
     view_info->setSliceRange(NS::Range(desc.base_layer, desc.layer_count));
@@ -374,22 +388,37 @@ void Device::Impl::remove_texture_view_from_heap(Handle<TextureHeap> h, TextureV
 
 // MARK: Pipelines
 Handle<Pipeline> Device::Impl::create_compute_pipeline(ShaderSource compute) {
-    NS::String*    shader_source = NS::String::alloc()->init(compute.spirv.data(),
+    NS::String* shader_source = NS::String::alloc()->init(compute.spirv.data(),
                                                           compute.spirv.size(),
                                                           NS::UTF8StringEncoding,
                                                           false);
-    NS::String*    entry_point   = NS::String::alloc()->init((void*)compute.entry_point.data(),
+    NS::String* entry_point   = NS::String::alloc()->init((void*)compute.entry_point.data(),
                                                         compute.entry_point.size(),
                                                         NS::UTF8StringEncoding,
                                                         false);
-    MTL::Library*  lib           = m_device->newLibrary(shader_source, nullptr);
-    MTL::Function* compute_fn    = lib->newFunction(entry_point);
+    NS::Error*  error         = nullptr;
+
+    MTL4::LibraryDescriptor* lib_desc = MTL4::LibraryDescriptor::alloc()->init();
+    lib_desc->setSource(shader_source);
+    MTL::Library* lib = m_compiler->newLibrary(lib_desc, &error);
+
+    auto desc = MTL4::ComputePipelineDescriptor::alloc()->init();
+
+    auto func_desc = MTL4::LibraryFunctionDescriptor::alloc()->init();
+    func_desc->setLibrary(lib);
+    func_desc->setName(entry_point);
+    desc->setComputeFunctionDescriptor(func_desc);
+
+
     MTL::ComputePipelineState* compute_pipeline
-        = m_device->newComputePipelineState(compute_fn, (NS::Error**)nullptr);
-    shader_source->release();
-    entry_point->release();
+        = m_compiler->newComputePipelineState(desc, m_options, &error);
+
+    func_desc->release();
+    desc->release();
+    lib_desc->release();
     lib->release();
-    compute_fn->release();
+    entry_point->release();
+    shader_source->release();
 
     return m_pipeline_pool.emplace({
         .compute_pipeline = compute_pipeline,
@@ -400,7 +429,94 @@ Handle<Pipeline> Device::Impl::create_compute_pipeline(ShaderSource compute) {
 Handle<Pipeline> Device::Impl::create_graphics_pipeline(ShaderSource      vertex,
                                                         ShaderSource      fragment,
                                                         const RasterDesc& desc) {
-    return {};
+    // TODO: Error handling/propagation
+    NS::String* vert_source      = NS::String::alloc()->init(vertex.spirv.data(),
+                                                        vertex.spirv.size(),
+                                                        NS::UTF8StringEncoding,
+                                                        false);
+    NS::String* vert_entry_point = NS::String::alloc()->init((void*)vertex.entry_point.data(),
+                                                             vertex.entry_point.size(),
+                                                             NS::UTF8StringEncoding,
+                                                             false);
+
+    NS::String* frag_source      = NS::String::alloc()->init(fragment.spirv.data(),
+                                                        fragment.spirv.size(),
+                                                        NS::UTF8StringEncoding,
+                                                        false);
+    NS::String* frag_entry_point = NS::String::alloc()->init((void*)fragment.entry_point.data(),
+                                                             fragment.entry_point.size(),
+                                                             NS::UTF8StringEncoding,
+                                                             false);
+    NS::Error*  error            = nullptr;
+
+    MTL4::LibraryDescriptor* vert_lib_desc = MTL4::LibraryDescriptor::alloc()->init();
+    vert_lib_desc->setSource(vert_source);
+    MTL::Library* vert_lib = m_compiler->newLibrary(vert_lib_desc, &error);
+    vert_lib_desc->release();
+
+    MTL4::LibraryDescriptor* frag_lib_desc = MTL4::LibraryDescriptor::alloc()->init();
+    frag_lib_desc->setSource(frag_source);
+    MTL::Library* frag_lib = m_compiler->newLibrary(frag_lib_desc, &error);
+    frag_lib_desc->release();
+
+    auto vert_func_desc = MTL4::LibraryFunctionDescriptor::alloc()->init();
+    vert_func_desc->setLibrary(vert_lib);
+    vert_func_desc->setName(vert_entry_point);
+
+    auto frag_func_desc = MTL4::LibraryFunctionDescriptor::alloc()->init();
+    frag_func_desc->setLibrary(frag_lib);
+    frag_func_desc->setName(frag_entry_point);
+
+    auto pipeline_desc = MTL4::RenderPipelineDescriptor::alloc()->init();
+    pipeline_desc->setVertexFunctionDescriptor(vert_func_desc);
+    pipeline_desc->setFragmentFunctionDescriptor(frag_func_desc);
+    pipeline_desc->setInputPrimitiveTopology(bridge(desc.topology));
+    pipeline_desc->setAlphaToCoverageState(desc.alpha_to_coverage
+                                               ? MTL4::AlphaToCoverageStateEnabled
+                                               : MTL4::AlphaToCoverageStateDisabled);
+    pipeline_desc->setRasterizationEnabled(true);
+    pipeline_desc->setRasterSampleCount(desc.sample_count);
+
+    auto     color_attachments    = pipeline_desc->colorAttachments();
+    uint32_t color_attachment_idx = 0;
+    for (auto c : desc.color_targets) {
+        auto attachment = color_attachments->object(color_attachment_idx++);
+        attachment->setPixelFormat(bridge(c.format));
+        const auto& state = c.blendstate;
+        const bool  blend_disabled
+            = state.color_op == Blend::Add && state.src_color_factor == Factor::One
+              && state.dst_color_factor == Factor::Zero && state.alpha_op == Blend::Add
+              && state.src_alpha_factor == Factor::One && state.dst_color_factor == Factor::Zero;
+
+        attachment->setBlendingState(blend_disabled ? MTL4::BlendStateDisabled
+                                                    : MTL4::BlendStateEnabled);
+        attachment->setWriteMask(state.color_write_mask);
+
+        attachment->setAlphaBlendOperation(bridge(state.alpha_op));
+        attachment->setRgbBlendOperation(bridge(state.color_op));
+        attachment->setSourceAlphaBlendFactor(bridge(state.src_alpha_factor));
+        attachment->setDestinationAlphaBlendFactor(bridge(state.dst_alpha_factor));
+    }
+
+    MTL::RenderPipelineState* render_pipeline
+        = m_compiler->newRenderPipelineState(pipeline_desc, m_options, &error);
+
+    pipeline_desc->release();
+    frag_func_desc->release();
+    vert_func_desc->release();
+    frag_lib->release();
+    vert_lib->release();
+    frag_entry_point->release();
+    frag_source->release();
+    vert_entry_point->release();
+    vert_source->release();
+
+
+    return m_pipeline_pool.emplace({
+        .compute_pipeline = nullptr,
+        .render_pipeline  = render_pipeline,
+        .cull_mode        = desc.cull,
+    });
 }
 
 void Device::Impl::free(Handle<Pipeline> pipeline) {

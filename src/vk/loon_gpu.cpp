@@ -1646,7 +1646,7 @@ Handle<Pipeline> Device::Impl::create_graphics_pipeline(ShaderSource vertex,
     for (auto& t : desc.color_targets) {
         // const auto attachment_state = loon::gpu::bridge(target);
         color_blend_attachment_states
-            = concat(&arena, color_blend_attachment_states, loon::gpu::bridge(desc.blendstate));
+            = concat(&arena, color_blend_attachment_states, loon::gpu::bridge(t.blendstate));
         color_attachment_formats
             = concat(&arena, color_attachment_formats, loon::gpu::bridge(t.format));
     }

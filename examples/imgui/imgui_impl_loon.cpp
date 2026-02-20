@@ -208,15 +208,17 @@ static bool CreateDeviceObjects() {
       RasterDesc{
           .cull = Cull::None,
           .depth_format = bd->depth_format,
-          .color_targets = {{.format = bd->color_format}},
-          .blendstate =
-              {
+          .color_targets = ColorTarget{
+            .format = bd->color_format,
+            .blendstate =
+              BlendDesc{
                   .color_op = Blend::Add,
                   .src_color_factor = Factor::SrcAlpha,
                   .dst_color_factor = Factor::OneMinusSrcAlpha,
                   .src_alpha_factor = Factor::One,
                   .dst_alpha_factor = Factor::OneMinusSrcAlpha,
               },
+        },
       });
 
     // Create depth-stencil State?

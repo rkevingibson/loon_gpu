@@ -353,8 +353,13 @@ VkBlendOp bridge(Blend op) {
 }
 
 VkPipelineColorBlendAttachmentState bridge(const BlendDesc& state) {
+    const bool blend_disabled
+        = state.color_op == Blend::Add && state.src_color_factor == Factor::One
+          && state.dst_color_factor == Factor::Zero && state.alpha_op == Blend::Add
+          && state.src_alpha_factor == Factor::One && state.dst_color_factor == Factor::Zero;
+
     return VkPipelineColorBlendAttachmentState{
-        .blendEnable         = true,
+        .blendEnable         = !blend_disabled,
         .srcColorBlendFactor = bridge(state.src_color_factor),
         .dstColorBlendFactor = bridge(state.dst_color_factor),
         .colorBlendOp        = bridge(state.color_op),

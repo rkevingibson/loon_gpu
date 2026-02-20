@@ -6,6 +6,7 @@
 namespace loon::gpu {
 MTL::PixelFormat bridge(Format f) {
     switch (f) {
+        case Format::None: return MTL::PixelFormatInvalid;
         case Format::R8Unorm: return MTL::PixelFormatR8Unorm;
         case Format::R8Snorm: return MTL::PixelFormatR8Snorm;
         case Format::R8Uint: return MTL::PixelFormatR8Uint;
@@ -133,6 +134,35 @@ MTL::TextureUsage bridge_texture_usage(UsageFlags u) {
     // TODO: TransferSrc/Dst, do they need shader write/read?
     // TODO: PixelFormatView might be needed as a default?
     return usages;
+}
+
+MTL::PrimitiveTopologyClass bridge(Topology t) {
+    switch (t) {
+        case Topology::TriangleList:
+        case Topology::TriangleStrip:
+        case Topology::TriangleFan: return MTL::PrimitiveTopologyClassTriangle;
+    }
+}
+
+MTL::BlendOperation bridge(Blend op) {
+    switch (op) {
+        case Blend::Add: return MTL::BlendOperationAdd;
+        case Blend::Subtract: return MTL::BlendOperationSubtract;
+        case Blend::RevSubtract: return MTL::BlendOperationReverseSubtract;
+        case Blend::Min: return MTL::BlendOperationMin;
+        case Blend::Max: return MTL::BlendOperationMax;
+    }
+}
+
+MTL::BlendFactor bridge(Factor f) {
+    switch (f) {
+        case Factor::Zero: return MTL::BlendFactorZero;
+        case Factor::One: return MTL::BlendFactorOne;
+        case Factor::SrcColor: return MTL::BlendFactorSourceColor;
+        case Factor::DstColor: return MTL::BlendFactorDestinationColor;
+        case Factor::SrcAlpha: return MTL::BlendFactorSourceAlpha;
+        case Factor::OneMinusSrcAlpha: return MTL::BlendFactorOneMinusSourceAlpha;
+    }
 }
 
 }  // namespace loon::gpu

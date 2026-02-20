@@ -591,20 +591,18 @@ struct BlendDesc {
 };
 
 struct ColorTarget {
-    Format  format     = Format::None;
-    uint8_t write_mask = 0xf;
+    Format    format     = Format::None;
+    BlendDesc blendstate = {};
 };
 
 struct RasterDesc {
-    Topology                topology                     = Topology::TriangleList;
-    Cull                    cull                         = Cull::None;
-    bool                    alpha_to_coverage            = false;
-    bool                    support_dual_source_blending = false;
-    uint8_t                 sample_count                 = 1;
-    Format                  depth_format                 = Format::None;
-    Format                  stencil_format               = Format::None;
-    Span<const ColorTarget> color_targets                = {};
-    BlendDesc               blendstate                   = {};
+    Topology                topology          = Topology::TriangleList;
+    Cull                    cull              = Cull::None;
+    bool                    alpha_to_coverage = false;
+    uint8_t                 sample_count      = 1;
+    Format                  depth_format      = Format::None;
+    Format                  stencil_format    = Format::None;
+    Span<const ColorTarget> color_targets     = {};
 };
 
 struct RenderAttachment {

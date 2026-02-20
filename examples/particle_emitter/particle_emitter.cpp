@@ -98,14 +98,16 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
         RasterDesc{
             .cull          = Cull::None,
             .depth_format  = loon::gpu::Format::Depth32Float,
-            .color_targets = ColorTarget{.format = m_swapchain_format},
-            .blendstate = {
-                  .color_op = Blend::Add,
-                  .src_color_factor = Factor::SrcAlpha,
-                  .dst_color_factor = Factor::OneMinusSrcAlpha,
-                  .src_alpha_factor = Factor::One,
-                  .dst_alpha_factor = Factor::OneMinusSrcAlpha,
-              },
+            .color_targets = ColorTarget{
+                .format = m_swapchain_format,
+                .blendstate = BlendDesc{
+                    .color_op = Blend::Add,
+                    .src_color_factor = Factor::SrcAlpha,
+                    .dst_color_factor = Factor::OneMinusSrcAlpha,
+                    .src_alpha_factor = Factor::One,
+                    .dst_alpha_factor = Factor::OneMinusSrcAlpha,
+                },
+            },
         });
     assert(m_update_sim_pipeline.h != 0);
     assert(m_render_particle_pipeline.h != 0);
