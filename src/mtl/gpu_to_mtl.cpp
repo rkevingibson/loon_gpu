@@ -165,4 +165,30 @@ MTL::BlendFactor bridge(Factor f) {
     }
 }
 
+MTL::CompareFunction bridge(Op op) {
+    switch (op) {
+        case Op::Never: return MTL::CompareFunctionNever;
+        case Op::Less: return MTL::CompareFunctionLess;
+        case Op::Equal: return MTL::CompareFunctionEqual;
+        case Op::LessEqual: return MTL::CompareFunctionLessEqual;
+        case Op::Greater: return MTL::CompareFunctionGreater;
+        case Op::NotEqual: return MTL::CompareFunctionNotEqual;
+        case Op::GreaterEqual: return MTL::CompareFunctionGreaterEqual;
+        case Op::Always: return MTL::CompareFunctionAlways;
+    }
+}
+
+MTL::StencilOperation bridge(StencilOp op) {
+    switch (op) {
+        case StencilOp::Keep: return MTL::StencilOperationKeep;
+        case StencilOp::Zero: return MTL::StencilOperationZero;
+        case StencilOp::Replace: return MTL::StencilOperationReplace;
+        case StencilOp::IncrementClamp: return MTL::StencilOperationIncrementClamp;
+        case StencilOp::DecrementClamp: return MTL::StencilOperationDecrementClamp;
+        case StencilOp::Invert: return MTL::StencilOperationInvert;
+        case StencilOp::IncrementWrap: return MTL::StencilOperationIncrementWrap;
+        case StencilOp::DecrementWrap: return MTL::StencilOperationDecrementWrap;
+    }
+}
+
 }  // namespace loon::gpu

@@ -263,7 +263,17 @@ enum class Op : uint8_t {
     NotEqual,
     GreaterEqual,
     Always,
+};
+
+enum class StencilOp : uint8_t {
     Keep,
+    Zero,
+    Replace,
+    IncrementClamp,
+    DecrementClamp,
+    Invert,
+    IncrementWrap,
+    DecrementWrap,
 };
 
 enum class Blend : uint8_t {
@@ -532,11 +542,11 @@ struct Color {
 };
 
 struct Stencil {
-    Op      test          = Op::Always;
-    Op      fail_op       = Op::Keep;
-    Op      pass_op       = Op::Keep;
-    Op      depth_fail_op = Op::Keep;
-    uint8_t reference     = 0;
+    Op        test          = Op::Always;
+    StencilOp fail_op       = StencilOp::Keep;
+    StencilOp pass_op       = StencilOp::Keep;
+    StencilOp depth_fail_op = StencilOp::Keep;
+    uint8_t   reference     = 0;
 };
 
 struct SamplerDesc {
@@ -577,7 +587,7 @@ struct DepthStencilDesc {
     uint8_t    stencil_read_mask       = 0xff;
     uint8_t    stencil_write_mask      = 0xff;
     Stencil    stencil_front;
-    Stencil    stencil_bsack;
+    Stencil    stencil_back;
 };
 
 struct BlendDesc {
@@ -743,7 +753,7 @@ class Device {
     void             free(Handle<Pipeline> pipeline);
 
     // State objects
-    Handle<DepthStencilState> create_depth_stencil_state(DepthStencilDesc desc);
+    Handle<DepthStencilState> create_depth_stencil_state(const DepthStencilDesc& desc);
     void                      free_depth_stencil_state(Handle<DepthStencilState> state);
 
     // Queue

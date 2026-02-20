@@ -48,6 +48,14 @@ struct Pipeline {
     Cull                       cull_mode;
 };
 
+struct DepthStencilState {
+    MTL::DepthStencilState* state = nullptr;
+};
+
+struct Semaphore {
+    MTL::SharedEvent* event = nullptr;
+};
+
 struct Surface {
     CA::MetalLayer*    metal_layer;
     CA::MetalDrawable* current_drawable = nullptr;
@@ -146,10 +154,12 @@ struct Device::Impl {
 
     MTL::ResidencySet* m_residency_set = nullptr;
 
-    SlotMap<Buffer>      m_buffer_pool;
-    SlotMap<Texture>     m_texture_pool;
-    SlotMap<TextureHeap> m_texture_heap_pool;
-    SlotMap<Pipeline>    m_pipeline_pool;
+    SlotMap<Buffer>            m_buffer_pool;
+    SlotMap<Texture>           m_texture_pool;
+    SlotMap<TextureHeap>       m_texture_heap_pool;
+    SlotMap<Pipeline>          m_pipeline_pool;
+    SlotMap<DepthStencilState> m_depth_stencil_state_pool;
+    SlotMap<Semaphore>         m_semaphore_pool;
 
     Surface m_surface;
 };
@@ -186,9 +196,17 @@ Device::Impl::Impl(const DeviceDesc& desc) :
                             if (t->pool) { t->pool->release(); }
                             t->~TextureHeap();
                         }),
-    m_pipeline_pool(m_allocator, [](Pipeline* p) {
-        if (p->compute_pipeline) { p->compute_pipeline->release(); }
-        if (p->render_pipeline) { p->render_pipeline->release(); }
+    m_pipeline_pool(m_allocator,
+                    [](Pipeline* p) {
+                        if (p->compute_pipeline) { p->compute_pipeline->release(); }
+                        if (p->render_pipeline) { p->render_pipeline->release(); }
+                    }),
+    m_depth_stencil_state_pool(m_allocator,
+                               [](DepthStencilState* s) {
+                                   if (s->state) { s->state->release(); }
+                               }),
+    m_semaphore_pool(m_allocator, [](Semaphore* s) {
+        if (s->event) { s->event->release(); }
     }) {}
 
 Device::Impl::~Impl() {
@@ -221,6 +239,10 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
 
 
     return true;
+}
+
+void Device::Impl::wait_for_device_idle() {
+    // TODO: Not sure how to implement this one.
 }
 
 // MARK: Surface functions
@@ -523,7 +545,63 @@ void Device::Impl::free(Handle<Pipeline> pipeline) {
     m_pipeline_pool.erase(pipeline);
 }
 
+// MARK: State Objects
 
+Handle<DepthStencilState> Device::Impl::create_depth_stencil_state(const DepthStencilDesc& desc) {
+    auto info = MTL::DepthStencilDescriptor::alloc()->init();
+    info->setDepthCompareFunction(bridge(desc.depth_test));
+    info->setDepthWriteEnabled((desc.depth_mode & DepthFlags::Write) == DepthFlags::Write);
+
+    auto backface_stencil = MTL::StencilDescriptor::alloc()->init();
+    backface_stencil->setStencilFailureOperation(bridge(desc.stencil_back.fail_op));
+    backface_stencil->setDepthFailureOperation(bridge(desc.stencil_back.depth_fail_op));
+    backface_stencil->setDepthStencilPassOperation(bridge(desc.stencil_back.pass_op));
+    backface_stencil->setStencilCompareFunction(bridge(desc.stencil_back.test));
+    backface_stencil->setReadMask(desc.stencil_read_mask);
+    backface_stencil->setWriteMask(desc.stencil_write_mask);
+    info->setBackFaceStencil(backface_stencil);
+
+    auto frontface_stencil = MTL::StencilDescriptor::alloc()->init();
+    frontface_stencil->setStencilFailureOperation(bridge(desc.stencil_front.fail_op));
+    frontface_stencil->setDepthFailureOperation(bridge(desc.stencil_front.depth_fail_op));
+    frontface_stencil->setDepthStencilPassOperation(bridge(desc.stencil_front.pass_op));
+    frontface_stencil->setStencilCompareFunction(bridge(desc.stencil_front.test));
+    frontface_stencil->setReadMask(desc.stencil_read_mask);
+    frontface_stencil->setWriteMask(desc.stencil_write_mask);
+    info->setFrontFaceStencil(frontface_stencil);
+    auto state = m_device->newDepthStencilState(info);
+    return m_depth_stencil_state_pool.emplace({
+        .state = state,
+    });
+}
+
+void Device::Impl::free(Handle<DepthStencilState> state) {
+    m_depth_stencil_state_pool.erase(state);
+}
+
+// MARK: Queue
+
+Queue Device::Impl::get_queue(QueueType type) {
+    return Queue(nullptr, nullptr);
+}
+
+// MARK: Semaphores
+
+Handle<Semaphore> Device::Impl::create_semaphore(uint64_t initValue) {
+    auto event = m_device->newSharedEvent();
+    event->setSignaledValue(initValue);
+    return m_semaphore_pool.emplace({
+        .event = event,
+    });
+}
+
+void Device::Impl::wait_semaphore(Handle<Semaphore> sema, uint64_t value) {
+    m_semaphore_pool[sema].event->waitUntilSignaledValue(value, UINT64_MAX);
+}
+
+void Device::Impl::free(Handle<Semaphore> sema) {
+    m_semaphore_pool.erase(sema);
+}
 
 // MARK: Device wrapper
 
@@ -632,7 +710,7 @@ void Device::free(Handle<Pipeline> pipeline) {
     return impl->free(pipeline);
 }
 
-Handle<DepthStencilState> Device::create_depth_stencil_state(DepthStencilDesc desc) {
+Handle<DepthStencilState> Device::create_depth_stencil_state(const DepthStencilDesc& desc) {
     return impl->create_depth_stencil_state(desc);
 }
 

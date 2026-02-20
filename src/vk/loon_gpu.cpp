@@ -2112,7 +2112,7 @@ void Device::free(Handle<Pipeline> pipeline) {
     return impl->free(pipeline);
 }
 
-Handle<DepthStencilState> Device::create_depth_stencil_state(DepthStencilDesc desc) {
+Handle<DepthStencilState> Device::create_depth_stencil_state(const DepthStencilDesc& desc) {
     return impl->create_depth_stencil_state(desc);
 }
 
