@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 
 #include "containers.h"
@@ -47,6 +48,7 @@ struct Texture {
     VmaAllocation   vk_allocation;
     VkImageViewType vk_type = VK_IMAGE_VIEW_TYPE_2D;
     Format          format;
+    bool            is_swapchain_image = false;
 };
 
 struct TextureHeap {
@@ -91,7 +93,6 @@ static VkPipelineLayout      create_default_graphics_layout(VkDevice            
 static VkPipelineLayout      create_default_compute_layout(VkDevice               device,
                                                            const VolkDeviceTable& api,
                                                            VkDescriptorSetLayout  set_layout);
-
 struct Surface {
     static constexpr uint32_t kMaxSwapchainImages = 8;
     static constexpr uint32_t kMaxFramesInFlight  = 3;
@@ -158,8 +159,9 @@ struct ThreadLocalState {
 };
 
 struct BufferAndOffset {
-    VkBuffer buffer;
-    uint32_t offset;
+    VkBuffer      buffer;
+    uint32_t      offset;
+    VmaAllocation alloc;
 };
 
 struct Device::Impl {
@@ -190,7 +192,8 @@ struct Device::Impl {
 
 
     // Textures:
-    Handle<Texture>     create_texture(const TextureDesc& desc);
+    TextureSizeAlign    get_texture_size_align(const TextureDesc& desc);
+    Handle<Texture>     create_texture(const TextureDesc& desc, GpuPtr location);
     Handle<TextureHeap> create_texture_heap(size_t size);
 
     TextureView add_texture_view_to_heap(Handle<TextureHeap>, const TextureViewDesc& desc);
@@ -249,6 +252,8 @@ struct Device::Impl {
     VkDescriptorSetLayout m_default_descriptor_layout;
     VkPipelineLayout      m_default_graphics_layout;
     VkPipelineLayout      m_default_compute_layout;
+    VkMemoryRequirements  m_gpu_mem_requirements;
+    VkMemoryRequirements  m_buffer_mem_requirements;
 
     SlotMap<Buffer>            m_buffer_pool;
     SlotMap<Texture>           m_texture_pool;
@@ -574,6 +579,8 @@ Device::Impl::Impl(const DeviceDesc& desc) :
                        }
                        if (t->vk_allocation != VK_NULL_HANDLE) {
                            vmaDestroyImage(m_vma, t->vk_image, t->vk_allocation);
+                       } else if (t->vk_image && !t->is_swapchain_image) {
+                           m_api.vkDestroyImage(m_device, t->vk_image, nullptr);
                        }
                    }},
     m_texture_heap_pool(
@@ -813,6 +820,102 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
     vma_create_info.pVulkanFunctions = &vulkan_functions;
     vmaCreateAllocator(&vma_create_info, &m_vma);
 
+    // Find which memory types are appropriate for different allocations.
+    {
+        VkPhysicalDeviceMemoryProperties props;
+        vkGetPhysicalDeviceMemoryProperties(m_physical_device, &props);
+
+        VkBuffer                     test_device_buffer;
+        constexpr VkBufferUsageFlags kDefaultUsages
+            = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
+              | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT
+              | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+              | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+
+        VkBufferCreateInfo test_buffer_info{
+            .sType                 = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .pNext                 = nullptr,
+            .flags                 = 0,
+            .size                  = 1024ull * 1024,
+            .usage                 = kDefaultUsages,
+            .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,  // TODO: Support multiple queues.
+            .queueFamilyIndexCount = 0,
+            .pQueueFamilyIndices   = nullptr,
+        };
+        chk(m_api.vkCreateBuffer(m_device, &test_buffer_info, nullptr, &test_device_buffer));
+
+        VkMemoryRequirements buffer_requirements;
+        m_api.vkGetBufferMemoryRequirements(m_device, test_device_buffer, &buffer_requirements);
+
+        m_api.vkDestroyBuffer(m_device, test_device_buffer, nullptr);
+
+        VkImage                 test_color_image;
+        const VkImageCreateInfo test_color_info{
+            .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+            .pNext                 = nullptr,
+            .flags                 = 0,
+            .imageType             = VK_IMAGE_TYPE_2D,
+            .format                = VK_FORMAT_R8G8B8A8_SRGB,
+            .extent                = {.width = 4096, .height = 4096, .depth = 1},
+            .mipLevels             = 1,
+            .arrayLayers           = 1,
+            .samples               = VK_SAMPLE_COUNT_1_BIT,  // TODO: Support multisampling
+            .tiling                = VK_IMAGE_TILING_OPTIMAL,
+            .usage                 = VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+            .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
+            .queueFamilyIndexCount = 0,
+            .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
+        };
+        chk(m_api.vkCreateImage(m_device, &test_color_info, nullptr, &test_color_image));
+
+        VkMemoryRequirements color_image_requirements;
+        m_api.vkGetImageMemoryRequirements(m_device, test_color_image, &color_image_requirements);
+        m_api.vkDestroyImage(m_device, test_color_image, nullptr);
+
+        VkImage                 test_depth_image;
+        const VkImageCreateInfo test_depth_info{
+            .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+            .pNext                 = nullptr,
+            .flags                 = 0,
+            .imageType             = VK_IMAGE_TYPE_2D,
+            .format                = VK_FORMAT_D24_UNORM_S8_UINT,
+            .extent                = {.width = 4096, .height = 4096, .depth = 1},
+            .mipLevels             = 1,
+            .arrayLayers           = 1,
+            .samples               = VK_SAMPLE_COUNT_1_BIT,  // TODO: Support multisampling
+            .tiling                = VK_IMAGE_TILING_OPTIMAL,
+            .usage                 = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+            .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
+            .queueFamilyIndexCount = 0,
+            .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
+        };
+        chk(m_api.vkCreateImage(m_device, &test_depth_info, nullptr, &test_depth_image));
+
+        VkMemoryRequirements depth_image_requirements;
+        m_api.vkGetImageMemoryRequirements(m_device, test_depth_image, &depth_image_requirements);
+        m_api.vkDestroyImage(m_device, test_depth_image, nullptr);
+
+        size_t alignment = (color_image_requirements.alignment > depth_image_requirements.alignment)
+                               ? (color_image_requirements.alignment > buffer_requirements.alignment
+                                      ? color_image_requirements.alignment
+                                      : buffer_requirements.alignment)
+                               : (depth_image_requirements.alignment > buffer_requirements.alignment
+                                      ? depth_image_requirements.alignment
+                                      : buffer_requirements.alignment);
+
+        // For GPU-local memory, our requirements need to meet all of the memory type bits for color
+        // and depth images. For Default and Readback, we only need to meet the requirements of
+        // buffer allocation, since we don't support making textures on those memory types.
+        m_buffer_mem_requirements = buffer_requirements;
+        m_gpu_mem_requirements    = VkMemoryRequirements{
+               .size           = 0,
+               .alignment      = alignment,
+               .memoryTypeBits = buffer_requirements.memoryTypeBits
+                              & color_image_requirements.memoryTypeBits
+                              & depth_image_requirements.memoryTypeBits,
+        };
+    }
+
     // Initialize the surface objects:
     m_surface.surface = surface;
     const VkSemaphoreCreateInfo semaphore_create_info{
@@ -943,7 +1046,7 @@ Device::Impl::~Impl() {
 
     m_api.vkDestroyDevice(m_device, nullptr);
 
-    vkDestroySurfaceKHR(m_instance, m_surface.surface, nullptr);
+    if (m_surface.surface) { vkDestroySurfaceKHR(m_instance, m_surface.surface, nullptr); }
 
     vkDestroyInstance(m_instance, nullptr);
     volkFinalize();
@@ -1124,6 +1227,7 @@ bool Device::Impl::configure_surface(const SurfaceConfiguration& config) {
             .vk_image           = swapchain_images[i],
             .default_image_view = default_image_view,
             .vk_allocation      = VK_NULL_HANDLE,
+            .is_swapchain_image = true,
         });
 
         VkSemaphore s = VK_NULL_HANDLE;
@@ -1246,22 +1350,28 @@ Handle<Buffer> Device::Impl::malloc(size_t bytes, size_t align, Memory memory) {
         .pQueueFamilyIndices   = nullptr,
     };
 
-    VmaAllocationCreateFlags flags = 0;
+    VmaAllocationCreateFlags flags    = 0;
+    VkMemoryPropertyFlags    vk_flags = 0;
     switch (memory) {
         case Memory::Default:
             flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
                     | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+            vk_flags = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
             break;
-        case Memory::Gpu: flags = 0; break;
+        case Memory::Gpu:
+            flags    = 0;
+            vk_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+            break;
         case Memory::Readback:
             flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+            vk_flags = VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
             break;
     }
 
     VmaAllocationCreateInfo alloc_info{
         .flags          = flags,
-        .usage          = VMA_MEMORY_USAGE_AUTO,
-        .requiredFlags  = 0,
+        .usage          = VMA_MEMORY_USAGE_UNKNOWN,
+        .requiredFlags  = vk_flags,
         .preferredFlags = 0,
         .memoryTypeBits = 0,
         .pool           = VK_NULL_HANDLE,
@@ -1272,12 +1382,22 @@ Handle<Buffer> Device::Impl::malloc(size_t bytes, size_t align, Memory memory) {
     VkBuffer          vk_buffer     = nullptr;
     VmaAllocation     vk_allocation = nullptr;
     VmaAllocationInfo vma_alloc_info;
-    chk(vmaCreateBuffer(m_vma,
-                        &create_info,
-                        &alloc_info,
-                        &vk_buffer,
-                        &vk_allocation,
-                        &vma_alloc_info));
+
+    VkMemoryRequirements memory_requirements
+        = memory == Memory::Gpu ? m_gpu_mem_requirements : m_buffer_mem_requirements;
+    memory_requirements.alignment
+        = memory_requirements.alignment > align ? memory_requirements.alignment : align;
+    memory_requirements.size = bytes;
+
+    chk(m_api.vkCreateBuffer(m_device, &create_info, nullptr, &vk_buffer));
+
+    chk(vmaAllocateMemory(m_vma,
+                          &memory_requirements,
+                          &alloc_info,
+                          &vk_allocation,
+                          &vma_alloc_info));
+
+    chk(vmaBindBufferMemory(m_vma, vk_allocation, vk_buffer));
 
     VkBufferDeviceAddressInfo addr_info{
         .sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
@@ -1318,12 +1438,13 @@ BufferAndOffset Device::Impl::buffer_and_offset_from_ptr(GpuPtr ptr) {
     return {
         .buffer = b.vk_buffer,
         .offset = static_cast<uint32_t>(ptr - b.device_ptr),
+        .alloc  = b.vk_allocation,
     };
 }
 
 // MARK: Textures
 
-Handle<Texture> Device::Impl::create_texture(const TextureDesc& desc) {
+TextureSizeAlign Device::Impl::get_texture_size_align(const TextureDesc& desc) {
     VkImageCreateInfo info{
         .sType     = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .pNext     = nullptr,
@@ -1342,23 +1463,58 @@ Handle<Texture> Device::Impl::create_texture(const TextureDesc& desc) {
         .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
     };
 
-    VmaAllocationCreateInfo alloc_info{
-        .flags          = 0,
-        .usage          = VMA_MEMORY_USAGE_AUTO,
-        .requiredFlags  = 0,
-        .preferredFlags = 0,
-        .memoryTypeBits = 0,
-        .pool           = VK_NULL_HANDLE,
-        .pUserData      = 0,
-        .priority       = 0.,
+    VkImage vk_image;
+    chk(m_api.vkCreateImage(m_device, &info, nullptr, &vk_image));
+
+    VkMemoryRequirements requirements{};
+    m_api.vkGetImageMemoryRequirements(m_device, vk_image, &requirements);
+    m_api.vkDestroyImage(m_device, vk_image, nullptr);
+
+    return {.size = requirements.size, .align = requirements.alignment};
+}
+
+Handle<Texture> Device::Impl::create_texture(const TextureDesc& desc, GpuPtr location) {
+    VkImageCreateInfo info{
+        .sType     = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .pNext     = nullptr,
+        .flags     = 0,
+        .imageType = bridge(desc.type),
+        .format    = bridge(desc.format),
+        .extent
+        = {.width = desc.dimensions.x, .height = desc.dimensions.y, .depth = desc.dimensions.z},
+        .mipLevels             = desc.mip_count,
+        .arrayLayers           = desc.layer_count,
+        .samples               = VK_SAMPLE_COUNT_1_BIT,  // TODO: Support multisampling
+        .tiling                = VK_IMAGE_TILING_OPTIMAL,
+        .usage                 = bridge_usage_flags(desc.usage),
+        .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = 0,
+        .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
     };
-    VkImage       image;
+
+    VkImage       image      = VK_NULL_HANDLE;
     VmaAllocation allocation = nullptr;
+    if (location != 0) {
+        chk(m_api.vkCreateImage(m_device, &info, nullptr, &image));
 
-    if (!chk(vmaCreateImage(m_vma, &info, &alloc_info, &image, &allocation, nullptr))) {
-        return {};
+        auto memory = buffer_and_offset_from_ptr(location);
+        vmaBindImageMemory2(m_vma, memory.alloc, memory.offset, image, nullptr);
+    } else {
+        VmaAllocationCreateInfo alloc_info{
+            .flags          = 0,
+            .usage          = VMA_MEMORY_USAGE_AUTO,
+            .requiredFlags  = 0,
+            .preferredFlags = 0,
+            .memoryTypeBits = 0,
+            .pool           = VK_NULL_HANDLE,
+            .pUserData      = 0,
+            .priority       = 0.,
+        };
+
+        if (!chk(vmaCreateImage(m_vma, &info, &alloc_info, &image, &allocation, nullptr))) {
+            return {};
+        }
     }
-
     // Create a default image view for use as a render target attachment.
     VkImageView default_image_view = VK_NULL_HANDLE;
     if ((desc.usage & UsageFlags::ColorAttachment) != UsageFlags::None
@@ -2074,9 +2230,14 @@ void* Device::get_host_pointer(Handle<Buffer> buffer) {
     return impl->get_host_pointer(buffer);
 }
 
-Handle<Texture> Device::create_texture(const TextureDesc& desc) {
-    return impl->create_texture(desc);
+TextureSizeAlign Device::get_texture_size_align(const TextureDesc& desc) {
+    return impl->get_texture_size_align(desc);
 }
+
+Handle<Texture> Device::create_texture(const TextureDesc& desc, GpuPtr location) {
+    return impl->create_texture(desc, location);
+}
+
 Handle<TextureHeap> Device::create_texture_heap(size_t size) {
     return impl->create_texture_heap(size);
 }
@@ -2207,8 +2368,9 @@ void Queue::submit(Span<const CommandBuffer> command_buffers,
                                           [d->m_surface.frame_idx % Surface::kMaxFramesInFlight]]
                       .vk_semaphore;
 
-            // TODO: PERF - we could check the configured surface usages to get a more optimal stage
-            // mask - if it's only used as an attachment that can let more work run concurrently.
+            // TODO: PERF - we could check the configured surface usages to get a more optimal
+            // stage mask - if it's only used as an attachment that can let more work run
+            // concurrently.
             wait_info = concat(&arena,
                                wait_info,
                                VkSemaphoreSubmitInfo{
@@ -2221,8 +2383,8 @@ void Queue::submit(Span<const CommandBuffer> command_buffers,
                                });
         }
         if (buf == d->m_surface.transitioning_command[d->m_surface.current_image_idx]) {
-            // Immediately clear this so we don't accidentally signal it twice (can happen due to
-            // cmd buffer reuse,e.g.)
+            // Immediately clear this so we don't accidentally signal it twice (can happen due
+            // to cmd buffer reuse,e.g.)
             d->m_surface.transitioning_command[d->m_surface.current_image_idx] = 0;
             VkSemaphore present_semaphore
                 = d->m_semaphore_pool[d->m_surface
@@ -2293,9 +2455,9 @@ void Queue::submit(Span<const CommandBuffer> command_buffers,
 
     d->m_api.vkQueueSubmit2(q->queue, 1, &submit_info, VK_NULL_HANDLE);
 
-    // Need to free/reset the command buffers once this submission is done - might be worth copying
-    // the whole span of command buffers to a temporary allocation instead of pushing a bunch of
-    // completions here instead.
+    // Need to free/reset the command buffers once this submission is done - might be worth
+    // copying the whole span of command buffers to a temporary allocation instead of pushing a
+    // bunch of completions here instead.
     for (CommandBuffer cmd : command_buffers) {
         q->pending_events.emplace_back(
             QueueImpl::Event{.completed_time = q->timeline_value,
@@ -2465,8 +2627,8 @@ void CommandBuffer::barrier(StageFlags                    before,
                     = &impl->m_surface.first_use_command[impl->m_surface.frame_idx
                                                          % Surface::kMaxFramesInFlight];
                 int64_t expected = 0;
-                // We try and set the first use command value if it hasn't already been set by an
-                // earlier barrier.
+                // We try and set the first use command value if it hasn't already been set by
+                // an earlier barrier.
                 atomic_compare_exchange(reinterpret_cast<int64_t*>(first_use_command),
                                         &expected,
                                         reinterpret_cast<int64_t>(buffer));

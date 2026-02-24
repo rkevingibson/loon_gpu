@@ -737,7 +737,13 @@ class Device {
     void*          get_host_pointer(Handle<Buffer> buffer);
 
     // Textures:
-    Handle<Texture>     create_texture(const TextureDesc& desc);
+    TextureSizeAlign get_texture_size_align(const TextureDesc& desc);
+
+    // Create a new new texture with the provided descriptor. If location != 0, then the texture is
+    // allocated at that location in Gpu memory. Note that textures can only be created in memory
+    // allocated with Memory::Gpu - no host-visible textures can be created. If location == 0,
+    // memory is allocated for the texture.
+    Handle<Texture>     create_texture(const TextureDesc& desc, GpuPtr location = 0);
     Handle<TextureHeap> create_texture_heap(size_t size);
     void                free(Handle<Texture>);
     void                free(Handle<TextureHeap>);
