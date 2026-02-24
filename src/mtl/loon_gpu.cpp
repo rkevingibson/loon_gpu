@@ -31,6 +31,9 @@ template class Function<void>;
 
 struct Buffer {
     MTL::Buffer* buffer;
+    MTL::Heap*   heap;
+    void*        host_ptr;
+    GpuPtr       device_ptr;
 };
 
 struct Texture {
@@ -99,6 +102,7 @@ struct ThreadLocalState {
 
 struct BufferAndOffset {
     MTL::Buffer* buffer;
+    MTL::Heap*   heap;
     uint32_t     offset;
 };
 
@@ -129,7 +133,8 @@ struct Device::Impl {
     BufferAndOffset buffer_and_offset_from_ptr(GpuPtr ptr);
 
     // Textures:
-    Handle<Texture>     create_texture(const TextureDesc& desc);
+    TextureSizeAlign    get_texture_size_align(const TextureDesc& desc);
+    Handle<Texture>     create_texture(const TextureDesc& desc, GpuPtr location);
     Handle<TextureHeap> create_texture_heap(size_t size);
 
     TextureView add_texture_view_to_heap(Handle<TextureHeap>, const TextureViewDesc& desc);
@@ -185,6 +190,33 @@ struct Device::Impl {
     SlotMap<Semaphore>         m_semaphore_pool;
 
     Surface m_surface;
+
+    struct GpuPtrMap {
+        GpuPtr         ptr;
+        Handle<Buffer> buffer;
+    };
+    static constexpr auto kPtrMapCompare
+        = [](const GpuPtrMap& a, const GpuPtrMap& b) -> bool { return a.ptr > b.ptr; };
+
+    static constexpr auto lower_bound
+        = [](GpuPtrMap* first, GpuPtrMap* last, const GpuPtrMap& value) {
+              GpuPtrMap* it;
+              size_t     count = last - first;
+              while (count > 0) {
+                  const size_t step = count / 2;
+                  it                = first + step;
+                  if (kPtrMapCompare(*it, value)) {
+                      first = ++it;
+                      count -= step + 1;
+                  } else {
+                      count = step;
+                  }
+              }
+
+              return first;
+          };
+
+    Vector<GpuPtrMap> m_ptr_map;
 };
 
 void Device::Impl::log(LogLevel lvl, Span<const char> msg) {
@@ -350,20 +382,25 @@ Handle<Buffer> Device::Impl::malloc(size_t bytes, Memory memory) {
 }
 
 Handle<Buffer> Device::Impl::malloc(size_t bytes, size_t align, Memory memory) {
-    MTL::ResourceOptions options = 0;
-    switch (memory) {
-        case Memory::Default: options = MTL::ResourceCPUCacheModeWriteCombined; break;
-        case Memory::Gpu: options = MTL::ResourceStorageModePrivate; break;
-        case Memory::Readback: options = MTL::ResourceCPUCacheModeDefaultCache; break;
-    }
+    MTL::HeapDescriptor* heap_info = MTL::HeapDescriptor::alloc()->init();
+    heap_info->setType(MTL::HeapTypePlacement);
+    heap_info->setStorageMode(memory == Memory::Gpu ? MTL::StorageModePrivate
+                                                    : MTL::StorageModeShared);
+    heap_info->setCpuCacheMode(memory == Memory::Default ? MTL::CPUCacheModeWriteCombined
+                                                         : MTL::CPUCacheModeDefaultCache);
+    heap_info->setHazardTrackingMode(MTL::HazardTrackingModeUntracked);
+    heap_info->setSize(bytes);
 
-    MTL::Buffer* buffer = m_device->newBuffer(bytes, options);
+    MTL::Heap* heap = m_device->newHeap(heap_info);
+    heap_info->release();
+
+    MTL::Buffer* buffer = heap->newBuffer(bytes, 0, 0);
     if (!buffer) { return {}; }
 
     auto handle = m_buffer_pool.emplace({
         .buffer = buffer,
     });
-    m_residency_set->addAllocation(buffer);
+    m_residency_set->addAllocation(heap);
     m_residency_set->commit();
     // TODO: Can i reduce the frenquency of commits at all?
 
@@ -382,8 +419,18 @@ void* Device::Impl::get_host_pointer(Handle<Buffer> buffer) {
     return m_buffer_pool[buffer].buffer->contents();
 }
 
+BufferAndOffset Device::Impl::buffer_and_offset_from_ptr(GpuPtr ptr) {
+    const auto  it = lower_bound(m_ptr_map.begin(), m_ptr_map.end(), GpuPtrMap{.ptr = ptr});
+    const auto& b  = m_buffer_pool[it->buffer];
+    return {
+        .buffer = b.buffer,
+        .offset = static_cast<uint32_t>(ptr - b.device_ptr),
+        .heap   = b.heap,
+    };
+}
+
 // MARK: Textures
-Handle<Texture> Device::Impl::create_texture(const TextureDesc& desc) {
+TextureSizeAlign Device::Impl::get_texture_size_align(const TextureDesc& desc) {
     MTL::TextureDescriptor* info = MTL::TextureDescriptor::alloc()->init();
     info->setTextureType(bridge(desc.type));
     info->setPixelFormat(bridge(desc.format));
@@ -395,10 +442,39 @@ Handle<Texture> Device::Impl::create_texture(const TextureDesc& desc) {
     info->setArrayLength(desc.layer_count);
     info->setHazardTrackingMode(MTL::HazardTrackingModeUntracked);
     info->setUsage(bridge_texture_usage(desc.usage));
-    MTL::Texture* texture = m_device->newTexture(info);
+
+    const auto size_align = m_device->heapTextureSizeAndAlign(info);
     info->release();
-    m_residency_set->addAllocation(texture);
-    m_residency_set->commit();
+
+    return {.size = size_align.size, .align = size_align.align};
+}
+
+Handle<Texture> Device::Impl::create_texture(const TextureDesc& desc, GpuPtr location) {
+    MTL::TextureDescriptor* info = MTL::TextureDescriptor::alloc()->init();
+    info->setTextureType(bridge(desc.type));
+    info->setPixelFormat(bridge(desc.format));
+    info->setWidth(desc.dimensions.x);
+    info->setHeight(desc.dimensions.y);
+    info->setDepth(desc.dimensions.z);
+    info->setMipmapLevelCount(desc.mip_count);
+    info->setSampleCount(desc.sample_count);
+    info->setArrayLength(desc.layer_count);
+    info->setHazardTrackingMode(MTL::HazardTrackingModeUntracked);
+    info->setUsage(bridge_texture_usage(desc.usage));
+
+    MTL::Texture* texture = nullptr;
+    if (location != 0) {
+        // Specify location, use the mtlheap from the buffer
+        auto memory = buffer_and_offset_from_ptr(location);
+        texture     = memory.heap->newTexture(info, memory.offset);
+    } else {
+        texture = m_device->newTexture(info);
+        m_residency_set->addAllocation(texture);
+        m_residency_set->commit();
+    }
+
+    info->release();
+
 
     auto handle = m_texture_pool.emplace({.texture = texture});
     return handle;
@@ -743,7 +819,7 @@ void CommandBuffer::barrier(StageFlags                    before,
     auto d   = reinterpret_cast<Device::Impl*>(device);
     auto cmd = reinterpret_cast<MTL4::CommandBuffer*>(buffer);
 
-    cmd->
+    // cmd->
 }
 
 void CommandBuffer::set_pipeline(Handle<Pipeline> pipeline) {}
@@ -848,8 +924,8 @@ void* Device::get_host_pointer(Handle<Buffer> buffer) {
     return impl->get_host_pointer(buffer);
 }
 
-Handle<Texture> Device::create_texture(const TextureDesc& desc) {
-    return impl->create_texture(desc);
+Handle<Texture> Device::create_texture(const TextureDesc& desc, GpuPtr location) {
+    return impl->create_texture(desc, location);
 }
 Handle<TextureHeap> Device::create_texture_heap(size_t size) {
     return impl->create_texture_heap(size);
