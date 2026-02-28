@@ -58,8 +58,8 @@ static void SetupRenderState(ImDrawData*                   draw_data,
     ImGui_ImplLoon_Data* bd = GetBackendData();
 
     // Bind shader
-    command_list.set_depth_stencil_state(bd->depth_stencil_state);
-    command_list.set_pipeline(bd->pipelineState);
+    gpu::cmd_set_depth_stencil_state(command_list, bd->depth_stencil_state);
+    gpu::cmd_set_pipeline(command_list, bd->pipelineState);
 }
 
 template <typename T>
@@ -74,8 +74,8 @@ static void DestroyTexture(ImTextureData* tex) {
         ImGui_ImplLoon_Data* bd = GetBackendData();
 
         // Free the texture and remove it from the heap.
-        bd->device.remove_texture_view_from_heap(bd->texture_heap, backend_tex->tex_heap_idx);
-        bd->device.free(backend_tex->texture);
+        gpu::remove_texture_view_from_heap(bd->device, bd->texture_heap, backend_tex->tex_heap_idx);
+        gpu::free(bd->device, backend_tex->texture);
         IM_DELETE(backend_tex);
 
         // Clear identifiers and mark as destroyed (in order to allow e.g. calling
@@ -101,20 +101,23 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
 
         // Create a texture, texture view and add it to the texture heap. Use the
         // texture heap index as the tex id.
-        backend_tex->texture = bd->device.create_texture({
-            .dimensions = {.x = static_cast<uint32_t>(tex->Width),
-                           .y = static_cast<uint32_t>(tex->Height),
-                           .z = 1},
-            .format     = loon::gpu::Format::RGBA8Unorm,
-            .usage      = loon::gpu::UsageFlags::Sampled | loon::gpu::UsageFlags::TransferDst,
-        });
+        backend_tex->texture = gpu::create_texture(
+            bd->device,
+            {
+                .dimensions = {.x = static_cast<uint32_t>(tex->Width),
+                               .y = static_cast<uint32_t>(tex->Height),
+                               .z = 1},
+                .format     = loon::gpu::Format::RGBA8Unorm,
+                .usage      = loon::gpu::UsageFlags::Sampled | loon::gpu::UsageFlags::TransferDst,
+            });
 
         backend_tex->tex_heap_idx
-            = bd->device.add_texture_view_to_heap(bd->texture_heap,
-                                                  {
-                                                      .texture = backend_tex->texture,
-                                                      .format  = loon::gpu::Format::RGBA8Unorm,
-                                                  });
+            = gpu::add_texture_view_to_heap(bd->device,
+                                            bd->texture_heap,
+                                            {
+                                                .texture = backend_tex->texture,
+                                                .format  = loon::gpu::Format::RGBA8Unorm,
+                                            });
 
         // Store identifiers
         // Because invalid tex id == 0, we add one here and subtract on retrieval.
@@ -134,28 +137,30 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
         // For simplicity, use a semamphore to make this update a blocking function,
         // not async.
         if (fb->buffer_size < tex->GetSizeInBytes()) {
-            if (fb->buffer) bd->device.free(fb->buffer);
-            fb->buffer      = bd->device.malloc(tex->GetSizeInBytes());
+            if (fb->buffer) gpu::free(bd->device, fb->buffer);
+            fb->buffer      = gpu::malloc(bd->device, tex->GetSizeInBytes());
             fb->buffer_size = tex->GetSizeInBytes();
         }
 
-        void* dst = bd->device.get_host_pointer(fb->buffer);
+        void* dst = gpu::get_host_pointer(bd->device, fb->buffer);
         memcpy(dst, tex->GetPixels(), tex->GetSizeInBytes());
 
-        auto cmd = bd->queue.start_command_recording();
+        auto cmd = gpu::queue_start_command_recording(bd->queue);
 
         if (need_barrier_before_copy) {
-            cmd.barrier(gpu::StageFlags::None,
-                        gpu::StageFlags::Transfer,
-                        gpu::TextureTransition{
-                            .texture    = backend_tex->texture,
-                            .old_layout = loon::gpu::Layout::DontCare,
-                            .new_layout = loon::gpu::Layout::General,
-                        });
+            gpu::cmd_barrier(cmd,
+                             gpu::StageFlags::None,
+                             gpu::StageFlags::Transfer,
+                             gpu::TextureTransition{
+                                 .texture    = backend_tex->texture,
+                                 .old_layout = loon::gpu::Layout::DontCare,
+                                 .new_layout = loon::gpu::Layout::General,
+                             });
         }
 
-        cmd.copy_to_texture(
-            bd->device.get_device_pointer(fb->buffer),
+        gpu::cmd_copy_to_texture(
+            cmd,
+            gpu::get_device_pointer(bd->device, fb->buffer),
             backend_tex->texture,
             gpu::BufferToTextureCopyInfo{
                 .buffer_image_size
@@ -163,18 +168,19 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
                 .image_extent
                 = {static_cast<uint32_t>(tex->Width), static_cast<uint32_t>(tex->Height), 1},
             });
-        cmd.barrier(gpu::StageFlags::Transfer, gpu::StageFlags::PixelShader);
+        gpu::cmd_barrier(cmd, gpu::StageFlags::Transfer, gpu::StageFlags::PixelShader);
 
-        auto copy_semaphore = bd->device.create_semaphore(0);
-        bd->queue.submit(cmd,
-                         {},
-                         gpu::SemaphoreInfo{
-                             .semaphore = copy_semaphore,
-                             .value     = 1,
-                             .stage     = gpu::StageFlags::Transfer,
-                         });
-        bd->device.wait_semaphore(copy_semaphore, 1);
-        bd->device.free(copy_semaphore);
+        auto copy_semaphore = gpu::create_semaphore(bd->device, 0);
+        gpu::queue_submit(bd->queue,
+                          cmd,
+                          {},
+                          gpu::SemaphoreInfo{
+                              .semaphore = copy_semaphore,
+                              .value     = 1,
+                              .stage     = gpu::StageFlags::Transfer,
+                          });
+        gpu::wait_semaphore(bd->device, copy_semaphore, 1);
+        gpu::free(bd->device, copy_semaphore);
 
         tex->SetStatus(ImTextureStatus_OK);
     }
@@ -195,7 +201,7 @@ static bool CreateDeviceObjects() {
     ShaderModule shader         = bd->shader_loader->load_module("imgui.slang");
     const auto   vertex_spirv   = get_spirv(shader.get(), "vertex_main");
     const auto   fragment_spirv = get_spirv(shader.get(), "fragment_main");
-    bd->pipelineState = bd->device.create_graphics_pipeline(
+    bd->pipelineState = gpu::create_graphics_pipeline(bd->device,
       {
           .spirv = Span(vertex_spirv.data(), vertex_spirv.size()).as_bytes(),
           .entry_point = "vertex_main"_sv,
@@ -222,10 +228,12 @@ static bool CreateDeviceObjects() {
       });
 
     // Create depth-stencil State?
-    bd->depth_stencil_state = bd->device.create_depth_stencil_state(DepthStencilDesc{
-        .depth_mode = loon::gpu::DepthFlags::None,
-        .depth_test = loon::gpu::Op::Always,
-    });
+    bd->depth_stencil_state
+        = gpu::create_depth_stencil_state(bd->device,
+                                          DepthStencilDesc{
+                                              .depth_mode = loon::gpu::DepthFlags::None,
+                                              .depth_test = loon::gpu::Op::Always,
+                                          });
 
     return true;
 }
@@ -235,7 +243,7 @@ void InvalidateDeviceObjects() {
     if (!bd) return;
 
     // Destroy GPU resources, pipelines, etc.
-    bd->device.free(bd->pipelineState);
+    gpu::free(bd->device, bd->pipelineState);
     bd->pipelineState.h = 0;
 
     // Destroy all textures
@@ -244,7 +252,7 @@ void InvalidateDeviceObjects() {
 
     for (uint32_t i = 0; i < bd->num_frames_in_flight; i++) {
         ImGui_ImplLoon_RenderBuffers* fr = &bd->pFrameResources[i];
-        bd->device.free(fr->buffer);
+        gpu::free(bd->device, fr->buffer);
     }
 }
 
@@ -366,12 +374,12 @@ void Render(gpu::CommandBuffer cmd) {
         // Round up to some nice multiple to avoid reallocs frequently.
         const size_t buffer_size = ((required_buffer_size + 1023) / 1024) * 1024;
 
-        if (fr->buffer) { bd->device.free(fr->buffer); }
-        fr->buffer      = bd->device.malloc(required_buffer_size, gpu::Memory::Default);
+        if (fr->buffer) { gpu::free(bd->device, fr->buffer); }
+        fr->buffer      = gpu::malloc(bd->device, required_buffer_size, gpu::Memory::Default);
         fr->buffer_size = required_buffer_size;
     }
 
-    char*       buffer_host = (char*)bd->device.get_host_pointer(fr->buffer);
+    char*       buffer_host = (char*)gpu::get_host_pointer(bd->device, fr->buffer);
     ImDrawVert* vtx_dst     = (ImDrawVert*)buffer_host;
     ImDrawIdx*  idx_dst     = (ImDrawIdx*)(buffer_host + vertex_data_size);
     for (const ImDrawList* draw_list : draw_data->CmdLists) {
@@ -383,7 +391,7 @@ void Render(gpu::CommandBuffer cmd) {
 
     VertexInput* draw_args = (VertexInput*)(buffer_host + vertex_data_size + index_data_size);
 
-    const auto device_ptr = bd->device.get_device_pointer(fr->buffer);
+    const auto device_ptr = gpu::get_device_pointer(bd->device, fr->buffer);
 
     // Setup desired state
 
@@ -433,12 +441,13 @@ void Render(gpu::CommandBuffer cmd) {
                 if (clip_max.x <= clip_min.x || clip_max.y <= clip_min.y) continue;
 
                 // Apply scissor/clipping rectangle
-                cmd.set_scissor_rect({
-                    .offset_x = (uint32_t)clip_min.x,
-                    .offset_y = (uint32_t)clip_min.y,
-                    .width    = (uint32_t)(clip_max.x - clip_min.x),
-                    .height   = (uint32_t)(clip_max.y - clip_min.y),
-                });
+                gpu::cmd_set_scissor_rect(cmd,
+                                          {
+                                              .offset_x = (uint32_t)clip_min.x,
+                                              .offset_y = (uint32_t)clip_min.y,
+                                              .width    = (uint32_t)(clip_max.x - clip_min.x),
+                                              .height   = (uint32_t)(clip_max.y - clip_min.y),
+                                          });
 
                 // Bind texture, Draw
                 auto        tex_id     = (uint64_t)pcmd->GetTexID() - 1;
@@ -452,7 +461,12 @@ void Render(gpu::CommandBuffer cmd) {
                     .vertex_buffer = vertex_buf,
                 };
 
-                cmd.draw_indexed_instanced(args_ptr, tex_id, index_buf, pcmd->ElemCount, 1);
+                gpu::cmd_draw_indexed_instanced(cmd,
+                                                args_ptr,
+                                                tex_id,
+                                                index_buf,
+                                                pcmd->ElemCount,
+                                                1);
 
                 args_ptr += sizeof(VertexInput);
                 draw_args++;
