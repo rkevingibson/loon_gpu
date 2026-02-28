@@ -135,7 +135,6 @@ static constexpr auto lower_bound = [](GpuPtrMap* first, GpuPtrMap* last, const 
 };
 
 struct DeviceImpl {
-    int64_t            m_refcount = 1;
     Allocator          m_allocator;
     ProcLogCallback    m_log_callback = nullptr;
     void*              m_log_userdata = nullptr;
@@ -211,7 +210,6 @@ Device create_device(const DeviceDesc& desc) {
     // bit wonky.
     auto d = reinterpret_cast<DeviceImpl*>(blk.ptr);
     return new (blk.ptr) DeviceImpl{
-        .m_refcount                 = 1,
         .m_allocator                = alloc,
         .m_log_callback             = desc.log_callback,
         .m_log_userdata             = desc.log_userdata,
