@@ -844,6 +844,7 @@ struct alignas(8) DrawIndexedIndirectGpuArgs {
  * @return Opaque pointer to a device object.
  */
 Device create_device(const DeviceDesc&);
+void   destroy_device(Device d);
 
 /**
  * @brief Destroy a device object.

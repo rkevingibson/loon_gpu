@@ -67,6 +67,8 @@ struct QueueImpl {
     MTL::SharedEvent*   callback_event = nullptr;
     Vector<Event>       pending_events;
     uint64_t            timeline_value = 0;
+
+    Device device = nullptr;
 };
 
 struct Surface {
@@ -104,67 +106,35 @@ struct BufferAndOffset {
     uint32_t     offset;
 };
 
-struct Device::Impl {
-    Impl(const DeviceDesc& desc);
-    ~Impl();
+struct CommandBufferImpl {
+    MTL4::CommandBuffer* command_buffer;
+    Device               device;
+};
 
-    void add_ref() { atomic_fetch_add(&m_refcount, 1); }
-    bool release_ref() { return atomic_fetch_add(&m_refcount, -1) - 1 == 0; }
+struct GpuPtrMap {
+    GpuPtr         ptr;
+    Handle<Buffer> buffer;
+};
+static constexpr auto kPtrMapCompare
+    = [](const GpuPtrMap& a, const GpuPtrMap& b) -> bool { return a.ptr > b.ptr; };
 
-    bool initialize(const DeviceDesc& desc);
-    void wait_for_device_idle();
+static constexpr auto lower_bound = [](GpuPtrMap* first, GpuPtrMap* last, const GpuPtrMap& value) {
+    GpuPtrMap* it;
+    size_t     count = last - first;
+    while (count > 0) {
+        const size_t step = count / 2;
+        it                = first + step;
+        if (kPtrMapCompare(*it, value)) {
+            first = ++it;
+            count -= step + 1;
+        } else {
+            count = step;
+        }
+    }
+    return first;
+};
 
-    // Surface:
-    SurfaceCapabilities get_surface_capabilities();
-    bool                configure_surface(const SurfaceConfiguration& config);
-    void                unconfigure_surface();
-    SurfaceTextureInfo  get_current_texture();
-    SurfaceStatus       present(Queue queue);
-
-    // Buffers:
-    Handle<Buffer>  malloc(size_t bytes, Memory memory = Memory::Default);
-    Handle<Buffer>  malloc(size_t bytes, size_t align, Memory memory = Memory::Default);
-    void            free(Handle<Buffer> buffer);
-    GpuPtr          get_device_pointer(Handle<Buffer> buffer);
-    void*           get_host_pointer(Handle<Buffer> buffer);
-    BufferAndOffset buffer_and_offset_from_ptr(GpuPtr ptr);
-
-    // Textures:
-    TextureSizeAlign    get_texture_size_align(const TextureDesc& desc);
-    Handle<Texture>     create_texture(const TextureDesc& desc, GpuPtr location);
-    Handle<TextureHeap> create_texture_heap(size_t size);
-
-    TextureView add_texture_view_to_heap(Handle<TextureHeap>, const TextureViewDesc& desc);
-    void        remove_texture_view_from_heap(Handle<TextureHeap>, TextureView);
-
-    void free(Handle<Texture>);
-    void free(Handle<TextureHeap>);
-
-    // Pipelines
-    Handle<Pipeline> create_compute_pipeline(ShaderSource computeIR);
-    Handle<Pipeline> create_graphics_pipeline(ShaderSource      vertex,
-                                              ShaderSource      fragment,
-                                              const RasterDesc& desc);
-    void             free(Handle<Pipeline> pipeline);
-
-    // State objects
-    Handle<DepthStencilState> create_depth_stencil_state(const DepthStencilDesc& desc);
-    void                      free(Handle<DepthStencilState> state);
-
-    // Queue
-    Queue get_queue(QueueType type);
-
-    // Semaphores
-    Handle<Semaphore> create_semaphore(uint64_t initValue);
-    void              wait_semaphore(Handle<Semaphore> sema, uint64_t value);
-    void              free(Handle<Semaphore> sema);
-
-    void   log(LogLevel lvl, Span<const char> msg);
-    Arena* get_thread_local_arena();
-
-   private:
-    friend class Queue;
-
+struct DeviceImpl {
     int64_t            m_refcount = 1;
     Allocator          m_allocator;
     ProcLogCallback    m_log_callback = nullptr;
@@ -178,6 +148,7 @@ struct Device::Impl {
     MTL4::CompilerTaskOptions* m_options;
 
     MTL::ResidencySet* m_residency_set = nullptr;
+    Surface            m_surface;
 
     SlotMap<Buffer>            m_buffer_pool;
     SlotMap<Texture>           m_texture_pool;
@@ -185,145 +156,128 @@ struct Device::Impl {
     SlotMap<Pipeline>          m_pipeline_pool;
     SlotMap<DepthStencilState> m_depth_stencil_state_pool;
     SlotMap<Semaphore>         m_semaphore_pool;
-
-    Surface   m_surface;
-    QueueImpl m_queue;
-
-    struct GpuPtrMap {
-        GpuPtr         ptr;
-        Handle<Buffer> buffer;
-    };
-    static constexpr auto kPtrMapCompare
-        = [](const GpuPtrMap& a, const GpuPtrMap& b) -> bool { return a.ptr > b.ptr; };
-
-    static constexpr auto lower_bound
-        = [](GpuPtrMap* first, GpuPtrMap* last, const GpuPtrMap& value) {
-              GpuPtrMap* it;
-              size_t     count = last - first;
-              while (count > 0) {
-                  const size_t step = count / 2;
-                  it                = first + step;
-                  if (kPtrMapCompare(*it, value)) {
-                      first = ++it;
-                      count -= step + 1;
-                  } else {
-                      count = step;
-                  }
-              }
-
-              return first;
-          };
-
-    Vector<GpuPtrMap> m_ptr_map;
+    Vector<GpuPtrMap>          m_ptr_map;
 };
 
-void Device::Impl::log(LogLevel lvl, Span<const char> msg) {
-    m_log_callback(lvl, msg, m_log_userdata);
+void log(Device d, LogLevel lvl, Span<const char> msg) {
+    d->m_log_callback(lvl, msg, d->m_log_userdata);
 };
 
-Arena* Device::Impl::get_thread_local_arena() {
-    auto state = reinterpret_cast<ThreadLocalState*>(loon::gpu::tls_get_data(m_tls_key));
+Arena* get_thread_local_arena(Device d) {
+    auto state = reinterpret_cast<ThreadLocalState*>(loon::gpu::tls_get_data(d->m_tls_key));
     if (state == nullptr) {
-        auto tls_block = m_allocator.alloc(sizeof(ThreadLocalState));
+        auto tls_block = d->m_allocator.alloc(sizeof(ThreadLocalState));
         if (tls_block.ptr == nullptr) {
-            log(LogLevel::Error, "Allocator out of memory"_sv);
+            log(d, LogLevel::Error, "Allocator out of memory"_sv);
             return nullptr;
         }
-        state = ::new (tls_block.ptr) ThreadLocalState(m_allocator);
-        loon::gpu::tls_set_data(m_tls_key, state);
+        state = ::new (tls_block.ptr) ThreadLocalState(d->m_allocator);
+        loon::gpu::tls_set_data(d->m_tls_key, state);
     }
     return &state->arena;
 }
 
-Device::Impl::Impl(const DeviceDesc& desc) :
-    m_allocator{desc.alloc_callback ? Allocator(desc.alloc_callback, desc.alloc_userdata)
-                                    : Allocator()},
-    m_log_callback(desc.log_callback),
-    m_log_userdata(desc.log_userdata),
-    m_log_level(desc.log_level),
-    m_tls_key{loon::gpu::tls_alloc([](void* data) {
-        auto state = reinterpret_cast<ThreadLocalState*>(data);
-        state->~ThreadLocalState();
-    })},
-    m_buffer_pool(m_allocator,
-                  [this](Buffer* b) {
-                      if (b->buffer) {
-                          m_residency_set->removeAllocation(b->buffer);
-                          b->buffer->release();
-                      }
-                      b->~Buffer();
-                  }),
-    m_texture_pool(m_allocator,
-                   [this](Texture* t) {
-                       if (t->texture) {
-                           m_residency_set->removeAllocation(t->texture);
-                           t->texture->release();
-                       }
-                       t->~Texture();
-                   }),
-    m_texture_heap_pool(m_allocator,
-                        [](TextureHeap* t) {
-                            if (t->pool) { t->pool->release(); }
-                            t->~TextureHeap();
-                        }),
-    m_pipeline_pool(m_allocator,
-                    [](Pipeline* p) {
-                        if (p->compute_pipeline) { p->compute_pipeline->release(); }
-                        if (p->render_pipeline) { p->render_pipeline->release(); }
-                    }),
-    m_depth_stencil_state_pool(m_allocator,
-                               [](DepthStencilState* s) {
-                                   if (s->state) { s->state->release(); }
-                               }),
-    m_semaphore_pool(m_allocator, [](Semaphore* s) {
-        if (s->event) { s->event->release(); }
-    }) {}
+Device create_device(const DeviceDesc& desc) {
+    Allocator alloc
+        = desc.alloc_callback ? Allocator(desc.alloc_callback, desc.alloc_userdata) : Allocator();
 
-Device::Impl::~Impl() {
-    m_compiler->release();
-    m_residency_set->release();
-    m_queue.command_queue->release();
-    m_device->release();
-}
+    auto blk = alloc.alloc(sizeof(DeviceImpl));
+    if (blk.ptr == 0) { return nullptr; }
 
-bool Device::Impl::initialize(const DeviceDesc& desc) {
-    m_device = MTL::CreateSystemDefaultDevice();
-    if (!m_device) { return false; }
+    auto device = MTL::CreateSystemDefaultDevice();
+    if (!device) { return nullptr; }
 
     NS::Error* error = nullptr;
 
     auto compiler_desc = MTL4::CompilerDescriptor::alloc()->init();
-    m_compiler         = m_device->newCompiler(compiler_desc, &error);
+    auto compiler      = device->newCompiler(compiler_desc, &error);
     compiler_desc->release();
-    m_options = MTL4::CompilerTaskOptions::alloc()->init();
-
+    auto options = MTL4::CompilerTaskOptions::alloc()->init();
 
     // Is this a valid cast? We're being passed a CAMetalLayer, not the C++ wrapper. Not sure!
     // At the very least I want to retain it.
-    m_surface.metal_layer = reinterpret_cast<CA::MetalLayer*>(desc.native_window_handle);
-    m_surface.metal_layer->retain();
+    auto surface_metal_layer = reinterpret_cast<CA::MetalLayer*>(desc.native_window_handle);
+    surface_metal_layer->retain();
 
     auto residency_set_descriptor = MTL::ResidencySetDescriptor::alloc()->init();
     // NOTE: Not sure how much this matters, should dig in more
     residency_set_descriptor->setInitialCapacity(64);
-    m_residency_set = m_device->newResidencySet(residency_set_descriptor, nullptr);
+    auto residency_set = device->newResidencySet(residency_set_descriptor, nullptr);
     residency_set_descriptor->release();
 
-
-    // Initialize the queue
-    m_queue.command_queue  = m_device->newMTL4CommandQueue();
-    m_queue.callback_event = m_device->newSharedEvent();
-    m_queue.pending_events = Vector<QueueImpl::Event>(m_allocator);
-
-    return true;
+    // NOTE: Not 100% sure about if this is UB - I need a pointer to the device in order to capture
+    // it in the lambdas, that are created during construction of the object. It probably is
+    // technically undefined behviour. I'm also pretty certain it's totally fine in practice, if a
+    // bit wonky.
+    auto d = reinterpret_cast<DeviceImpl*>(blk.ptr);
+    return new (blk.ptr) DeviceImpl{
+        .m_refcount                 = 1,
+        .m_allocator                = alloc,
+        .m_log_callback             = desc.log_callback,
+        .m_log_userdata             = desc.log_userdata,
+        .m_log_level                = desc.log_level,
+        .m_tls_key                  = loon::gpu::tls_alloc([](void* data) {
+            auto state = reinterpret_cast<ThreadLocalState*>(data);
+            state->~ThreadLocalState();
+        }),
+        .m_device                   = device,
+        .m_compiler                 = compiler,
+        .m_options                  = options,
+        .m_residency_set            = residency_set,
+        .m_surface                  = Surface{
+            .metal_layer = surface_metal_layer,
+            .current_drawable = nullptr,
+        },
+        .m_buffer_pool              = SlotMap<Buffer>(alloc,
+                                         [d](Buffer* b) {
+                                             if (b->buffer) {
+                                                 d->m_residency_set->removeAllocation(b->buffer);
+                                                 b->buffer->release();
+                                             }
+                                             b->~Buffer();
+                                         }),
+        .m_texture_pool             = SlotMap<Texture>(alloc,
+                                           [d](Texture* t) {
+                                               if (t->texture) {
+                                                   d->m_residency_set->removeAllocation(t->texture);
+                                                   t->texture->release();
+                                               }
+                                               t->~Texture();
+                                           }),
+        .m_texture_heap_pool        = SlotMap<TextureHeap>(alloc,
+                                                    [](TextureHeap* t) {
+                                                        if (t->pool) { t->pool->release(); }
+                                                        t->~TextureHeap();
+                                                    }),
+        .m_pipeline_pool            = SlotMap<Pipeline>(alloc,
+                                             [](Pipeline* p) {
+                                                 if (p->compute_pipeline) {
+                                                     p->compute_pipeline->release();
+                                                 }
+                                                 if (p->render_pipeline) {
+                                                     p->render_pipeline->release();
+                                                 }
+                                             }),
+        .m_depth_stencil_state_pool = SlotMap<DepthStencilState>(alloc,
+                                                                 [](DepthStencilState* s) {
+                                                                     if (s->state) {
+                                                                         s->state->release();
+                                                                     }
+                                                                 }),
+        .m_semaphore_pool           = SlotMap<Semaphore>(alloc,
+                                               [](Semaphore* s) {
+                                                   if (s->event) { s->event->release(); }
+                                               }),
+        .m_ptr_map                  = Vector<GpuPtrMap>(alloc),
+    };
 }
 
-void Device::Impl::wait_for_device_idle() {
+void device_wait_for_idle(Device d) {
     // TODO: Not sure how to implement this one.
 }
 
 // MARK: Surface functions
-SurfaceCapabilities Device::Impl::get_surface_capabilities() {
+SurfaceCapabilities get_surface_capabilities(Device d) {
     return SurfaceCapabilities{
         .formats       = Surface::kSwapchainFormats,
         .present_modes = Surface::kPresentModes,
@@ -331,25 +285,25 @@ SurfaceCapabilities Device::Impl::get_surface_capabilities() {
     };
 }
 
-bool Device::Impl::configure_surface(const SurfaceConfiguration& config) {
-    m_surface.metal_layer->setPixelFormat(bridge(config.format));
-    m_surface.metal_layer->setDrawableSize(CGSize{
+bool configure_surface(Device d, const SurfaceConfiguration& config) {
+    d->m_surface.metal_layer->setPixelFormat(bridge(config.format));
+    d->m_surface.metal_layer->setDrawableSize(CGSize{
         .width  = static_cast<float>(config.width),
         .height = static_cast<float>(config.height),
     });
     return true;
 }
 
-void Device::Impl::unconfigure_surface() {
+void unconfigure_surface(Device d) {
     // Not much to do here.
-    if (m_surface.current_drawable) {
-        m_surface.current_drawable->release();
-        m_surface.current_drawable = nullptr;
+    if (d->m_surface.current_drawable) {
+        d->m_surface.current_drawable->release();
+        d->m_surface.current_drawable = nullptr;
     }
 }
 
-SurfaceTextureInfo Device::Impl::get_current_texture() {
-    CA::MetalDrawable* drawable = m_surface.metal_layer->nextDrawable();
+SurfaceTextureInfo get_current_texture(Device d) {
+    CA::MetalDrawable* drawable = d->m_surface.metal_layer->nextDrawable();
 
     if (!drawable) {
         return SurfaceTextureInfo{
@@ -358,10 +312,10 @@ SurfaceTextureInfo Device::Impl::get_current_texture() {
         };
     }
 
-    m_surface.current_drawable = drawable;
-    MTL::Texture*   tex        = drawable->texture();
-    Handle<Texture> handle     = m_texture_pool.emplace({
-            .texture = tex,
+    d->m_surface.current_drawable = drawable;
+    MTL::Texture*   tex           = drawable->texture();
+    Handle<Texture> handle        = d->m_texture_pool.emplace({
+               .texture = tex,
     });
 
     return SurfaceTextureInfo{
@@ -370,23 +324,22 @@ SurfaceTextureInfo Device::Impl::get_current_texture() {
     };
 }
 
-SurfaceStatus Device::Impl::present(Queue queue) {
-    auto queue_impl = reinterpret_cast<QueueImpl*>(queue.queue);
-    queue_impl->command_queue->signalDrawable(m_surface.current_drawable);
+SurfaceStatus present(Device d, Queue queue) {
+    queue->command_queue->signalDrawable(d->m_surface.current_drawable);
 
-    m_surface.current_drawable->present();
-    m_surface.current_drawable->release();
-    m_surface.current_drawable = nullptr;
+    d->m_surface.current_drawable->present();
+    d->m_surface.current_drawable->release();
+    d->m_surface.current_drawable = nullptr;
     return SurfaceStatus::Success;
 }
 
 // MARK: Buffers:
 
-Handle<Buffer> Device::Impl::malloc(size_t bytes, Memory memory) {
-    return malloc(bytes, 64, memory);
+Handle<Buffer> malloc(Device d, size_t bytes, Memory memory) {
+    return malloc(d, bytes, 64, memory);
 }
 
-Handle<Buffer> Device::Impl::malloc(size_t bytes, size_t align, Memory memory) {
+Handle<Buffer> malloc(Device d, size_t bytes, size_t align, Memory memory) {
     MTL::HeapDescriptor* heap_info = MTL::HeapDescriptor::alloc()->init();
     heap_info->setType(MTL::HeapTypePlacement);
     heap_info->setStorageMode(memory == Memory::Gpu ? MTL::StorageModePrivate
@@ -396,37 +349,37 @@ Handle<Buffer> Device::Impl::malloc(size_t bytes, size_t align, Memory memory) {
     heap_info->setHazardTrackingMode(MTL::HazardTrackingModeUntracked);
     heap_info->setSize(bytes);
 
-    MTL::Heap* heap = m_device->newHeap(heap_info);
+    MTL::Heap* heap = d->m_device->newHeap(heap_info);
     heap_info->release();
 
     MTL::Buffer* buffer = heap->newBuffer(bytes, 0, 0);
     if (!buffer) { return {}; }
 
-    auto handle = m_buffer_pool.emplace({
+    auto handle = d->m_buffer_pool.emplace({
         .buffer = buffer,
     });
-    m_residency_set->addAllocation(heap);
-    m_residency_set->commit();
+    d->m_residency_set->addAllocation(heap);
+    d->m_residency_set->commit();
     // TODO: Can i reduce the frenquency of commits at all?
 
     return handle;
 }
 
-void Device::Impl::free(Handle<Buffer> buffer) {
-    m_buffer_pool.erase(buffer);
+void free(Device d, Handle<Buffer> buffer) {
+    d->m_buffer_pool.erase(buffer);
 }
 
-GpuPtr Device::Impl::get_device_pointer(Handle<Buffer> buffer) {
-    return m_buffer_pool[buffer].buffer->gpuAddress();
+GpuPtr get_device_pointer(Device d, Handle<Buffer> buffer) {
+    return d->m_buffer_pool[buffer].buffer->gpuAddress();
 }
 
-void* Device::Impl::get_host_pointer(Handle<Buffer> buffer) {
-    return m_buffer_pool[buffer].buffer->contents();
+void* get_host_pointer(Device d, Handle<Buffer> buffer) {
+    return d->m_buffer_pool[buffer].buffer->contents();
 }
 
-BufferAndOffset Device::Impl::buffer_and_offset_from_ptr(GpuPtr ptr) {
-    const auto  it = lower_bound(m_ptr_map.begin(), m_ptr_map.end(), GpuPtrMap{.ptr = ptr});
-    const auto& b  = m_buffer_pool[it->buffer];
+BufferAndOffset buffer_and_offset_from_ptr(Device d, GpuPtr ptr) {
+    const auto  it = lower_bound(d->m_ptr_map.begin(), d->m_ptr_map.end(), GpuPtrMap{.ptr = ptr});
+    const auto& b  = d->m_buffer_pool[it->buffer];
     return {
         .buffer = b.buffer,
         .offset = static_cast<uint32_t>(ptr - b.device_ptr),
@@ -435,7 +388,7 @@ BufferAndOffset Device::Impl::buffer_and_offset_from_ptr(GpuPtr ptr) {
 }
 
 // MARK: Textures
-TextureSizeAlign Device::Impl::get_texture_size_align(const TextureDesc& desc) {
+TextureSizeAlign get_texture_size_align(Device d, const TextureDesc& desc) {
     MTL::TextureDescriptor* info = MTL::TextureDescriptor::alloc()->init();
     info->setTextureType(bridge(desc.type));
     info->setPixelFormat(bridge(desc.format));
@@ -448,13 +401,13 @@ TextureSizeAlign Device::Impl::get_texture_size_align(const TextureDesc& desc) {
     info->setHazardTrackingMode(MTL::HazardTrackingModeUntracked);
     info->setUsage(bridge_texture_usage(desc.usage));
 
-    const auto size_align = m_device->heapTextureSizeAndAlign(info);
+    const auto size_align = d->m_device->heapTextureSizeAndAlign(info);
     info->release();
 
     return {.size = size_align.size, .align = size_align.align};
 }
 
-Handle<Texture> Device::Impl::create_texture(const TextureDesc& desc, GpuPtr location) {
+Handle<Texture> create_texture(Device d, const TextureDesc& desc, GpuPtr location) {
     MTL::TextureDescriptor* info = MTL::TextureDescriptor::alloc()->init();
     info->setTextureType(bridge(desc.type));
     info->setPixelFormat(bridge(desc.format));
@@ -470,47 +423,46 @@ Handle<Texture> Device::Impl::create_texture(const TextureDesc& desc, GpuPtr loc
     MTL::Texture* texture = nullptr;
     if (location != 0) {
         // Specify location, use the mtlheap from the buffer
-        auto memory = buffer_and_offset_from_ptr(location);
+        auto memory = buffer_and_offset_from_ptr(d, location);
         texture     = memory.heap->newTexture(info, memory.offset);
     } else {
-        texture = m_device->newTexture(info);
-        m_residency_set->addAllocation(texture);
-        m_residency_set->commit();
+        texture = d->m_device->newTexture(info);
+        d->m_residency_set->addAllocation(texture);
+        d->m_residency_set->commit();
     }
 
     info->release();
 
 
-    auto handle = m_texture_pool.emplace({.texture = texture});
+    auto handle = d->m_texture_pool.emplace({.texture = texture});
     return handle;
 }
 
-Handle<TextureHeap> Device::Impl::create_texture_heap(size_t size) {
+Handle<TextureHeap> create_texture_heap(Device d, size_t size) {
     auto view_pool_descriptor = MTL::ResourceViewPoolDescriptor::alloc();
     view_pool_descriptor->setResourceViewCount(size);
 
-    auto texture_view_pool = m_device->newTextureViewPool(view_pool_descriptor, nullptr);
+    auto texture_view_pool = d->m_device->newTextureViewPool(view_pool_descriptor, nullptr);
     view_pool_descriptor->release();
 
-    const auto handle = m_texture_heap_pool.emplace(TextureHeap{
+    const auto handle = d->m_texture_heap_pool.emplace(TextureHeap{
         .pool   = texture_view_pool,
-        .bitset = TwoLevelBitset(m_allocator, size),
+        .bitset = TwoLevelBitset(d->m_allocator, size),
     });
     return handle;
 }
 
-void Device::Impl::free(Handle<Texture> h) {
-    m_texture_pool.erase(h);
+void free(Device d, Handle<Texture> h) {
+    d->m_texture_pool.erase(h);
 }
 
-void Device::Impl::free(Handle<TextureHeap> h) {
-    m_texture_heap_pool.erase(h);
+void free(Device d, Handle<TextureHeap> h) {
+    d->m_texture_heap_pool.erase(h);
 }
 
-TextureView Device::Impl::add_texture_view_to_heap(Handle<TextureHeap>    h,
-                                                   const TextureViewDesc& desc) {
-    auto&                       heap      = m_texture_heap_pool[h];
-    auto&                       tex       = m_texture_pool[desc.texture];
+TextureView add_texture_view_to_heap(Device d, Handle<TextureHeap> h, const TextureViewDesc& desc) {
+    auto&                       heap      = d->m_texture_heap_pool[h];
+    auto&                       tex       = d->m_texture_pool[desc.texture];
     MTL::TextureViewDescriptor* view_info = MTL::TextureViewDescriptor::alloc()->init();
     view_info->setLevelRange(NS::Range(desc.base_mip, desc.mip_count));
     view_info->setPixelFormat(bridge(desc.format));
@@ -523,8 +475,8 @@ TextureView Device::Impl::add_texture_view_to_heap(Handle<TextureHeap>    h,
     return texture_view._impl;
 }
 
-void Device::Impl::remove_texture_view_from_heap(Handle<TextureHeap> h, TextureView view) {
-    auto&      heap = m_texture_heap_pool[h];
+void remove_texture_view_from_heap(Device d, Handle<TextureHeap> h, TextureView view) {
+    auto&      heap = d->m_texture_heap_pool[h];
     const auto base = heap.pool->baseResourceID()._impl;
     assert(view > base && view < base + heap.pool->resourceViewCount());
     const auto index = view - heap.pool->baseResourceID()._impl;
@@ -533,7 +485,7 @@ void Device::Impl::remove_texture_view_from_heap(Handle<TextureHeap> h, TextureV
 
 
 // MARK: Pipelines
-Handle<Pipeline> Device::Impl::create_compute_pipeline(ShaderSource compute) {
+Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource compute) {
     NS::String* shader_source = NS::String::alloc()->init(compute.spirv.data(),
                                                           compute.spirv.size(),
                                                           NS::UTF8StringEncoding,
@@ -546,7 +498,7 @@ Handle<Pipeline> Device::Impl::create_compute_pipeline(ShaderSource compute) {
 
     MTL4::LibraryDescriptor* lib_desc = MTL4::LibraryDescriptor::alloc()->init();
     lib_desc->setSource(shader_source);
-    MTL::Library* lib = m_compiler->newLibrary(lib_desc, &error);
+    MTL::Library* lib = d->m_compiler->newLibrary(lib_desc, &error);
 
     auto desc = MTL4::ComputePipelineDescriptor::alloc()->init();
 
@@ -557,7 +509,7 @@ Handle<Pipeline> Device::Impl::create_compute_pipeline(ShaderSource compute) {
 
 
     MTL::ComputePipelineState* compute_pipeline
-        = m_compiler->newComputePipelineState(desc, m_options, &error);
+        = d->m_compiler->newComputePipelineState(desc, d->m_options, &error);
 
     func_desc->release();
     desc->release();
@@ -566,15 +518,16 @@ Handle<Pipeline> Device::Impl::create_compute_pipeline(ShaderSource compute) {
     entry_point->release();
     shader_source->release();
 
-    return m_pipeline_pool.emplace({
+    return d->m_pipeline_pool.emplace({
         .compute_pipeline = compute_pipeline,
         .render_pipeline  = nullptr,
     });
 }
 
-Handle<Pipeline> Device::Impl::create_graphics_pipeline(ShaderSource      vertex,
-                                                        ShaderSource      fragment,
-                                                        const RasterDesc& desc) {
+Handle<Pipeline> create_graphics_pipeline(Device            d,
+                                          ShaderSource      vertex,
+                                          ShaderSource      fragment,
+                                          const RasterDesc& desc) {
     // TODO: Error handling/propagation
     NS::String* vert_source      = NS::String::alloc()->init(vertex.spirv.data(),
                                                         vertex.spirv.size(),
@@ -597,12 +550,12 @@ Handle<Pipeline> Device::Impl::create_graphics_pipeline(ShaderSource      vertex
 
     MTL4::LibraryDescriptor* vert_lib_desc = MTL4::LibraryDescriptor::alloc()->init();
     vert_lib_desc->setSource(vert_source);
-    MTL::Library* vert_lib = m_compiler->newLibrary(vert_lib_desc, &error);
+    MTL::Library* vert_lib = d->m_compiler->newLibrary(vert_lib_desc, &error);
     vert_lib_desc->release();
 
     MTL4::LibraryDescriptor* frag_lib_desc = MTL4::LibraryDescriptor::alloc()->init();
     frag_lib_desc->setSource(frag_source);
-    MTL::Library* frag_lib = m_compiler->newLibrary(frag_lib_desc, &error);
+    MTL::Library* frag_lib = d->m_compiler->newLibrary(frag_lib_desc, &error);
     frag_lib_desc->release();
 
     auto vert_func_desc = MTL4::LibraryFunctionDescriptor::alloc()->init();
@@ -645,7 +598,7 @@ Handle<Pipeline> Device::Impl::create_graphics_pipeline(ShaderSource      vertex
     }
 
     MTL::RenderPipelineState* render_pipeline
-        = m_compiler->newRenderPipelineState(pipeline_desc, m_options, &error);
+        = d->m_compiler->newRenderPipelineState(pipeline_desc, d->m_options, &error);
 
     pipeline_desc->release();
     frag_func_desc->release();
@@ -658,20 +611,20 @@ Handle<Pipeline> Device::Impl::create_graphics_pipeline(ShaderSource      vertex
     vert_source->release();
 
 
-    return m_pipeline_pool.emplace({
+    return d->m_pipeline_pool.emplace({
         .compute_pipeline = nullptr,
         .render_pipeline  = render_pipeline,
         .cull_mode        = desc.cull,
     });
 }
 
-void Device::Impl::free(Handle<Pipeline> pipeline) {
-    m_pipeline_pool.erase(pipeline);
+void free(Device d, Handle<Pipeline> pipeline) {
+    d->m_pipeline_pool.erase(pipeline);
 }
 
 // MARK: State Objects
 
-Handle<DepthStencilState> Device::Impl::create_depth_stencil_state(const DepthStencilDesc& desc) {
+Handle<DepthStencilState> create_depth_stencil_state(Device d, const DepthStencilDesc& desc) {
     auto info = MTL::DepthStencilDescriptor::alloc()->init();
     info->setDepthCompareFunction(bridge(desc.depth_test));
     info->setDepthWriteEnabled((desc.depth_mode & DepthFlags::Write) == DepthFlags::Write);
@@ -693,51 +646,51 @@ Handle<DepthStencilState> Device::Impl::create_depth_stencil_state(const DepthSt
     frontface_stencil->setReadMask(desc.stencil_read_mask);
     frontface_stencil->setWriteMask(desc.stencil_write_mask);
     info->setFrontFaceStencil(frontface_stencil);
-    auto state = m_device->newDepthStencilState(info);
-    return m_depth_stencil_state_pool.emplace({
+    auto state = d->m_device->newDepthStencilState(info);
+    return d->m_depth_stencil_state_pool.emplace({
         .state = state,
     });
 }
 
-void Device::Impl::free(Handle<DepthStencilState> state) {
-    m_depth_stencil_state_pool.erase(state);
+void free(Device d, Handle<DepthStencilState> state) {
+    d->m_depth_stencil_state_pool.erase(state);
 }
 
 // MARK: Semaphores
 
-Handle<Semaphore> Device::Impl::create_semaphore(uint64_t initValue) {
-    auto event = m_device->newSharedEvent();
+Handle<Semaphore> create_semaphore(Device d, uint64_t initValue) {
+    auto event = d->m_device->newSharedEvent();
     event->setSignaledValue(initValue);
-    return m_semaphore_pool.emplace({
+    return d->m_semaphore_pool.emplace({
         .event = event,
     });
 }
 
-void Device::Impl::wait_semaphore(Handle<Semaphore> sema, uint64_t value) {
-    m_semaphore_pool[sema].event->waitUntilSignaledValue(value, UINT64_MAX);
+void wait_semaphore(Device d, Handle<Semaphore> sema, uint64_t value) {
+    d->m_semaphore_pool[sema].event->waitUntilSignaledValue(value, UINT64_MAX);
 }
 
-void Device::Impl::free(Handle<Semaphore> sema) {
-    m_semaphore_pool.erase(sema);
+void free(Device d, Handle<Semaphore> sema) {
+    d->m_semaphore_pool.erase(sema);
 }
 
 
 // MARK: Queue
 
-Queue Device::Impl::get_queue(QueueType type) {
-    return Queue(&m_queue, this);
+Queue get_queue(Device d, QueueType type) {
+    return nullptr;
 }
 
-CommandBuffer Queue::start_command_recording() {
+CommandBuffer queue_start_command_recording(Queue q) {
     return CommandBuffer();
 }
 
-void Queue::submit(Span<const CommandBuffer> command_buffers,
-                   Span<const SemaphoreInfo> wait_semaphores,
-                   Span<const SemaphoreInfo> signal_semaphores) {
-    auto q     = reinterpret_cast<QueueImpl*>(queue);
-    auto d     = reinterpret_cast<Device::Impl*>(device);
-    auto arena = *d->get_thread_local_arena();
+void queue_submit(Queue                     q,
+                  Span<const CommandBuffer> command_buffers,
+                  Span<const SemaphoreInfo> wait_semaphores,
+                  Span<const SemaphoreInfo> signal_semaphores) {
+    auto d     = q->device;
+    auto arena = *get_thread_local_arena(d);
 
     for (auto s : wait_semaphores) {
         // NOTE: Metal doesn't support waiting for a specific stage, so this is a full pipeline
@@ -749,7 +702,7 @@ void Queue::submit(Span<const CommandBuffer> command_buffers,
 
     Span<MTL4::CommandBuffer*> commands;
     for (auto cmd : command_buffers) {
-        MTL4::CommandBuffer* buf = reinterpret_cast<MTL4::CommandBuffer*>(cmd.buffer);
+        MTL4::CommandBuffer* buf = reinterpret_cast<MTL4::CommandBuffer*>(cmd->command_buffer);
         buf->endCommandBuffer();
         commands = concat(&arena, commands, buf);
     }
@@ -762,18 +715,15 @@ void Queue::submit(Span<const CommandBuffer> command_buffers,
     }
 }
 
-void Queue::cancel(Span<const Handle<CommandBuffer>> command_buffers) {}
+void queue_cancel(Queue q, Span<const Handle<CommandBuffer>> command_buffers) {}
 
-void Queue::on_submitted_work_completed(Function<void>&& fn) {
-    auto q = reinterpret_cast<QueueImpl*>(queue);
-
+void queue_on_submitted_work_completed(Queue q, Function<void>&& fn) {
     q->pending_events.emplace_back(
         QueueImpl::Event{.completed_time = q->timeline_value, .callback = std::move(fn)});
     q->command_queue->signalEvent(q->callback_event, q->timeline_value++);
 }
 
-void Queue::process_events() {
-    auto     q            = reinterpret_cast<QueueImpl*>(queue);
+void queue_process_events(Queue q) {
     uint64_t current_time = q->callback_event->signaledValue();
     uint32_t i            = 0;
     while (i < q->pending_events.size() && q->pending_events[i].completed_time <= current_time) {
@@ -787,207 +737,90 @@ void Queue::process_events() {
 
 // MARK: CommandBuffer
 
-void CommandBuffer::memcpy(GpuPtr destGpu, GpuPtr srcGpu, size_t size) {
-    auto d   = reinterpret_cast<Device::Impl*>(device);
-    auto cmd = reinterpret_cast<MTL4::CommandBuffer*>(buffer);
+void cmd_memcpy(CommandBuffer cmd, GpuPtr destGpu, GpuPtr srcGpu, size_t size) {
+    auto d = cmd->device;
 
-    auto encoder = cmd->computeCommandEncoder();
-    auto src     = d->buffer_and_offset_from_ptr(srcGpu);
-    auto dst     = d->buffer_and_offset_from_ptr(destGpu);
+    auto encoder = cmd->command_buffer->computeCommandEncoder();
+    auto src     = buffer_and_offset_from_ptr(d, srcGpu);
+    auto dst     = buffer_and_offset_from_ptr(d, destGpu);
     encoder->copyFromBuffer(src.buffer, src.offset, dst.buffer, dst.offset, size);
     encoder->endEncoding();
 }
 
-void CommandBuffer::copy_to_texture(GpuPtr                         srcGpu,
-                                    Handle<Texture>                texture,
-                                    const BufferToTextureCopyInfo& info) {
-    auto d   = reinterpret_cast<Device::Impl*>(device);
-    auto cmd = reinterpret_cast<MTL4::CommandBuffer*>(buffer);
+void cmd_copy_to_texture(CommandBuffer                  cmd,
+                         GpuPtr                         srcGpu,
+                         Handle<Texture>                texture,
+                         const BufferToTextureCopyInfo& info) {
+    auto d = cmd->device;
 
-    auto encoder = cmd->computeCommandEncoder();
-    auto src     = d->buffer_and_offset_from_ptr(srcGpu);
+    auto encoder = cmd->command_buffer->computeCommandEncoder();
+    auto src     = buffer_and_offset_from_ptr(d, srcGpu);
 
     // TODO: I need more info here than I'm currently getting, need an API change.
     // encoder->copyFromBuffer(src.buffer, src.offset,,info.buffer_image_size,)
 }
 
-void CommandBuffer::copy_from_texture(GpuPtr destGpu, GpuPtr srcGpu, Handle<Texture> texture) {}
+void cmd_copy_from_texture(CommandBuffer   cmd,
+                           GpuPtr          destGpu,
+                           GpuPtr          srcGpu,
+                           Handle<Texture> texture) {}
 
-void CommandBuffer::set_texture_heap(Handle<TextureHeap> heap) {
+void cmd_set_texture_heap(CommandBuffer cmd, Handle<TextureHeap> heap) {
     // This is currently a NOOP since all textures are in the global residency set.
 }
 
-void CommandBuffer::barrier(StageFlags                    before,
-                            StageFlags                    after,
-                            Span<const TextureTransition> image_transitions,
-                            HazardFlags                   hazards) {
-    auto d   = reinterpret_cast<Device::Impl*>(device);
-    auto cmd = reinterpret_cast<MTL4::CommandBuffer*>(buffer);
+void cmd_barrier(CommandBuffer                 cmd,
+                 StageFlags                    before,
+                 StageFlags                    after,
+                 Span<const TextureTransition> image_transitions,
+                 HazardFlags                   hazards) {
+    auto d = cmd->device;
 
     // cmd->
 }
 
+<<<<<<< HEAD
 void CommandBuffer::set_pipeline(Handle<Pipeline> pipeline) {
     auto d   = reinterpret_cast<Device::Impl*>(device);
     auto cmd = reinterpret_cast<MTL4::CommandBuffer*>(buffer);
 }
+=======
+void cmd_set_pipeline(CommandBuffer cmd, Handle<Pipeline> pipeline) {}
+>>>>>>> b7c3fde (Switching the WIP metal backend over to the C-api. Need to fix the vulkan impl.)
 
-void CommandBuffer::set_depth_stencil_state(Handle<DepthStencilState> state) {}
+void cmd_set_depth_stencil_state(CommandBuffer cmd, Handle<DepthStencilState> state) {}
 
-void CommandBuffer::set_scissor_rect(const Rect2D& rect) {}
+void cmd_set_scissor_rect(CommandBuffer cmd, const Rect2D& rect) {}
 
-void CommandBuffer::dispatch(GpuPtr dataGpu, const Dimension3D& gridDimensions) {}
+void cmd_dispatch(CommandBuffer cmd, GpuPtr dataGpu, const Dimension3D& gridDimensions) {}
 
-void CommandBuffer::dispatch_indirect(GpuPtr dataGpu, GpuPtr gridDimensionsGpu) {}
+void cmd_dispatch_indirect(CommandBuffer cmd, GpuPtr dataGpu, GpuPtr gridDimensionsGpu) {}
 
-void CommandBuffer::begin_render_pass(RenderPassDesc desc) {}
-void CommandBuffer::end_render_pass() {}
+void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {}
+void cmd_end_render_pass(CommandBuffer cmd) {}
 
-void CommandBuffer::draw(GpuPtr   vertexDataGpu,
-                         GpuPtr   fragmentDataGpu,
-                         uint32_t vertexCount,
-                         uint32_t instanceCount) {}
-void CommandBuffer::draw_indexed_instanced(GpuPtr   vertexDataGpu,
-                                           GpuPtr   pixelDataGpu,
-                                           GpuPtr   indicesGpu,
-                                           uint32_t indexCount,
-                                           uint32_t instanceCount) {}
-void CommandBuffer::draw_indexed_instanced_indirect(GpuPtr vertexDataGpu,
-                                                    GpuPtr pixelDataGpu,
-                                                    GpuPtr indicesGpu,
-                                                    GpuPtr argsGpu) {}
-void CommandBuffer::draw_indexed_instanced_indirect_multi(GpuPtr   vertexDataGpu,
-                                                          GpuPtr   pixelDataGpu,
-                                                          GpuPtr   indicesGpu,
-                                                          GpuPtr   argsGpu,
-                                                          GpuPtr   drawCountGpu,
-                                                          uint32_t maxDraws) {}
-
-// MARK: Device wrapper
-
-Device Device::create(const DeviceDesc& desc) {
-    Impl* impl = new Impl(desc);
-    if (impl->initialize(desc)) { return Device(impl); }
-
-    return Device(nullptr);
-}
-
-Device::~Device() {
-    if (impl && impl->release_ref()) { delete impl; }
-}
-
-Device::Device(const Device& other) : impl{other.impl} {
-    impl->add_ref();
-}
-
-Device& Device::operator=(const Device& other) {
-    if (this == &other || other.impl == impl) return *this;
-    other.impl->add_ref();
-    if (impl && impl->release_ref()) { delete impl; }
-    impl = other.impl;
-    return *this;
-}
-
-void Device::wait_for_device_idle() {
-    impl->wait_for_device_idle();
-}
-
-SurfaceCapabilities Device::get_surface_capabilities() {
-    return impl->get_surface_capabilities();
-}
-
-bool Device::configure_surface(const SurfaceConfiguration& config) {
-    return impl->configure_surface(config);
-}
-
-void Device::unconfigure_surface() {
-    return impl->unconfigure_surface();
-}
-
-SurfaceTextureInfo Device::get_current_texture() {
-    return impl->get_current_texture();
-}
-
-SurfaceStatus Device::present(Queue queue) {
-    return impl->present(queue);
-}
-
-Handle<Buffer> Device::malloc(size_t bytes, Memory memory) {
-    return impl->malloc(bytes, memory);
-}
-
-Handle<Buffer> Device::malloc(size_t bytes, size_t align, Memory memory) {
-    return impl->malloc(bytes, align, memory);
-}
-
-void Device::free(Handle<Buffer> buffer) {
-    return impl->free(buffer);
-}
-
-GpuPtr Device::get_device_pointer(Handle<Buffer> buffer) {
-    return impl->get_device_pointer(buffer);
-}
-
-void* Device::get_host_pointer(Handle<Buffer> buffer) {
-    return impl->get_host_pointer(buffer);
-}
-
-Handle<Texture> Device::create_texture(const TextureDesc& desc, GpuPtr location) {
-    return impl->create_texture(desc, location);
-}
-Handle<TextureHeap> Device::create_texture_heap(size_t size) {
-    return impl->create_texture_heap(size);
-}
-
-TextureView Device::add_texture_view_to_heap(Handle<TextureHeap>    heap,
-                                             const TextureViewDesc& desc) {
-    return impl->add_texture_view_to_heap(heap, desc);
-}
-
-void Device::remove_texture_view_from_heap(Handle<TextureHeap> heap, TextureView idx) {
-    return impl->remove_texture_view_from_heap(heap, idx);
-}
-
-void Device::free(Handle<Texture> h) {
-    return impl->free(h);
-}
-
-void Device::free(Handle<TextureHeap> h) {
-    return impl->free(h);
-}
-
-Handle<Pipeline> Device::create_compute_pipeline(ShaderSource source) {
-    return impl->create_compute_pipeline(source);
-}
-
-Handle<Pipeline> Device::create_graphics_pipeline(ShaderSource      vertex,
-                                                  ShaderSource      fragment,
-                                                  const RasterDesc& desc) {
-    return impl->create_graphics_pipeline(vertex, fragment, desc);
-}
-
-void Device::free(Handle<Pipeline> pipeline) {
-    return impl->free(pipeline);
-}
-
-Handle<DepthStencilState> Device::create_depth_stencil_state(const DepthStencilDesc& desc) {
-    return impl->create_depth_stencil_state(desc);
-}
-
-Queue Device::get_queue(QueueType type) {
-    return impl->get_queue(type);
-}
-
-Handle<Semaphore> Device::create_semaphore(uint64_t initValue) {
-    return impl->create_semaphore(initValue);
-}
-
-void Device::wait_semaphore(Handle<Semaphore> sema, uint64_t value) {
-    impl->wait_semaphore(sema, value);
-}
-
-void Device::free(Handle<Semaphore> sema) {
-    impl->free(sema);
-}
+void cmd_draw(CommandBuffer cmd,
+              GpuPtr        vertexDataGpu,
+              GpuPtr        fragmentDataGpu,
+              uint32_t      vertexCount,
+              uint32_t      instanceCount) {}
+void cmd_draw_indexed_instanced(CommandBuffer cmd,
+                                GpuPtr        vertexDataGpu,
+                                GpuPtr        pixelDataGpu,
+                                GpuPtr        indicesGpu,
+                                uint32_t      indexCount,
+                                uint32_t      instanceCount) {}
+void cmd_draw_indexed_instanced_indirect(CommandBuffer cmd,
+                                         GpuPtr        vertexDataGpu,
+                                         GpuPtr        pixelDataGpu,
+                                         GpuPtr        indicesGpu,
+                                         GpuPtr        argsGpu) {}
+void cmd_draw_indexed_instanced_indirect_multi(CommandBuffer cmd,
+                                               GpuPtr        vertexDataGpu,
+                                               GpuPtr        pixelDataGpu,
+                                               GpuPtr        indicesGpu,
+                                               GpuPtr        argsGpu,
+                                               GpuPtr        drawCountGpu,
+                                               uint32_t      maxDraws) {}
 
 }  // namespace loon::gpu
