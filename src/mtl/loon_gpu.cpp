@@ -135,7 +135,6 @@ static constexpr auto lower_bound = [](GpuPtrMap* first, GpuPtrMap* last, const 
 };
 
 struct DeviceImpl {
-    int64_t            m_refcount = 1;
     Allocator          m_allocator;
     ProcLogCallback    m_log_callback = nullptr;
     void*              m_log_userdata = nullptr;
@@ -211,7 +210,6 @@ Device create_device(const DeviceDesc& desc) {
     // bit wonky.
     auto d = reinterpret_cast<DeviceImpl*>(blk.ptr);
     return new (blk.ptr) DeviceImpl{
-        .m_refcount                 = 1,
         .m_allocator                = alloc,
         .m_log_callback             = desc.log_callback,
         .m_log_userdata             = desc.log_userdata,
@@ -779,14 +777,7 @@ void cmd_barrier(CommandBuffer                 cmd,
     // cmd->
 }
 
-<<<<<<< HEAD
-void CommandBuffer::set_pipeline(Handle<Pipeline> pipeline) {
-    auto d   = reinterpret_cast<Device::Impl*>(device);
-    auto cmd = reinterpret_cast<MTL4::CommandBuffer*>(buffer);
-}
-=======
 void cmd_set_pipeline(CommandBuffer cmd, Handle<Pipeline> pipeline) {}
->>>>>>> b7c3fde (Switching the WIP metal backend over to the C-api. Need to fix the vulkan impl.)
 
 void cmd_set_depth_stencil_state(CommandBuffer cmd, Handle<DepthStencilState> state) {}
 
