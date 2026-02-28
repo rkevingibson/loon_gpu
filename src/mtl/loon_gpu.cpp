@@ -13,8 +13,6 @@
 #include "containers.h"
 #include "gpu_to_mtl.h"
 
-
-
 namespace loon::gpu {
 template class Span<const char>;
 template class Span<uint8_t>;
@@ -106,7 +104,6 @@ struct BufferAndOffset {
     uint32_t     offset;
 };
 
-
 struct Device::Impl {
     Impl(const DeviceDesc& desc);
     ~Impl();
@@ -189,7 +186,8 @@ struct Device::Impl {
     SlotMap<DepthStencilState> m_depth_stencil_state_pool;
     SlotMap<Semaphore>         m_semaphore_pool;
 
-    Surface m_surface;
+    Surface   m_surface;
+    QueueImpl m_queue;
 
     struct GpuPtrMap {
         GpuPtr         ptr;
@@ -282,6 +280,9 @@ Device::Impl::Impl(const DeviceDesc& desc) :
     }) {}
 
 Device::Impl::~Impl() {
+    m_compiler->release();
+    m_residency_set->release();
+    m_queue.command_queue->release();
     m_device->release();
 }
 
@@ -309,6 +310,10 @@ bool Device::Impl::initialize(const DeviceDesc& desc) {
     residency_set_descriptor->release();
 
 
+    // Initialize the queue
+    m_queue.command_queue  = m_device->newMTL4CommandQueue();
+    m_queue.callback_event = m_device->newSharedEvent();
+    m_queue.pending_events = Vector<QueueImpl::Event>(m_allocator);
 
     return true;
 }
@@ -720,7 +725,7 @@ void Device::Impl::free(Handle<Semaphore> sema) {
 // MARK: Queue
 
 Queue Device::Impl::get_queue(QueueType type) {
-    return Queue(nullptr, nullptr);
+    return Queue(&m_queue, this);
 }
 
 CommandBuffer Queue::start_command_recording() {
@@ -822,7 +827,10 @@ void CommandBuffer::barrier(StageFlags                    before,
     // cmd->
 }
 
-void CommandBuffer::set_pipeline(Handle<Pipeline> pipeline) {}
+void CommandBuffer::set_pipeline(Handle<Pipeline> pipeline) {
+    auto d   = reinterpret_cast<Device::Impl*>(device);
+    auto cmd = reinterpret_cast<MTL4::CommandBuffer*>(buffer);
+}
 
 void CommandBuffer::set_depth_stencil_state(Handle<DepthStencilState> state) {}
 
