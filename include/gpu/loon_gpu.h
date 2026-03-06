@@ -504,6 +504,14 @@ enum class SamplerAddressing : uint8_t {
     Mirrored,
 };
 
+enum class ErrorType : uint8_t {
+    NoError,
+    Validation,
+    OutOfMemory,
+    Internal,
+    Unknown,
+};
+
 // Custom allocation callback - essentially a realloc function but not exactly
 // the same as the C version.
 // - ptr is null iff old_size is 0
@@ -516,6 +524,7 @@ typedef MemoryBlock (*ProcAllocatorCallback)(void*    userdata,
                                              uint32_t old_size,
                                              uint32_t new_size);
 typedef void (*ProcLogCallback)(LogLevel lvl, Span<const char> message, void* userdata);
+typedef void (*ProcErrorCallback)(ErrorType type, Span<const char> message, void* userdata);
 
 // MARK: Structs
 

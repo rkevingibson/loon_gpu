@@ -97,10 +97,10 @@ class ShaderLoader::Impl {
         SessionDesc session_desc{};
         TargetDesc  target_description{};
         target_description.structureSize = sizeof(TargetDesc);
-        target_description.format        = SLANG_METAL;
-        // target_description.format        = SLANG_SPIRV;
-        // target_description.profile       = m_global_session->findProfile("spirv_1_6");
-        target_description.flags = 0;
+        // target_description.format        = SLANG_METAL;
+        target_description.format  = SLANG_SPIRV;
+        target_description.profile = m_global_session->findProfile("spirv_1_6");
+        target_description.flags   = 0;
 
         CompilerOptionEntry options[]
             = {{

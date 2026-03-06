@@ -66,36 +66,46 @@ struct Pipeline {
     VkPipelineBindPoint bind_point;
 };
 
+struct VulkanInstanceInfo {
+    VkResult   result;
+    VkInstance instance;
+};
+
 struct PhysicalDeviceInfo {
+    VkResult         result                     = VK_SUCCESS;
     VkPhysicalDevice device                     = VK_NULL_HANDLE;
     uint32_t         graphics_queue_family      = 0;
     uint32_t         transfer_queue_family      = 0;
     uint32_t         async_compute_queue_family = 0;
-
-    // If something goes wrong, an error message will be in here.
-    // It will be a string literal, so returning a span is fine - no freeing needed.
-    Span<const char> error_string;
 };
+
+struct SurfaceCreationResult {
+    VkResult     result;
+    VkSurfaceKHR surface;
+};
+
+struct MemoryRequirements {
+    VkMemoryRequirements gpu_mem_requirements;
+    VkMemoryRequirements buffer_mem_requirements;
+    VkResult             result;
+};
+
+struct VmaCreateResult {
+    VkResult     result;
+    VmaAllocator allocator;
+};
+
+struct LogicalDeviceCreateResult {
+    VkResult result;
+    VkDevice logical_device;
+};
+
 
 struct DepthStencilState : DepthStencilDesc {};
 
-static PhysicalDeviceInfo    select_physical_device(VkInstance    instance,
-                                                    VkSurfaceKHR  surface,
-                                                    GpuPreference preference,
-                                                    Arena         arena);
-static VkDescriptorSetLayout create_descriptor_layout(VkDevice               device,
-                                                      const VolkDeviceTable& api,
-                                                      uint32_t               size,
-                                                      Span<const VkSampler>  samplers);
-static VkPipelineLayout      create_default_graphics_layout(VkDevice               device,
-                                                            const VolkDeviceTable& api,
-                                                            VkDescriptorSetLayout  set_layout);
-static VkPipelineLayout      create_default_compute_layout(VkDevice               device,
-                                                           const VolkDeviceTable& api,
-                                                           VkDescriptorSetLayout  set_layout);
-static void                  log(Device d, LogLevel lvl, Span<const char> msg);
-static bool                  chk(Device d, VkResult result);
-static loon::gpu::Arena*     get_thread_local_arena(Device d);
+static void              log(Device d, LogLevel lvl, Span<const char> msg);
+static bool              chk(Device d, VkResult result);
+static loon::gpu::Arena* get_thread_local_arena(Device d);
 
 struct Surface {
     static constexpr uint32_t kMaxSwapchainImages = 8;
@@ -238,23 +248,70 @@ struct DeviceImpl {
 
 // MARK: Initialization
 
+static VulkanInstanceInfo create_instance() {
+    VkResult result = volkInitialize();
+    if (result != VK_SUCCESS) { return {.result = result}; };
 
-PhysicalDeviceInfo select_physical_device(VkInstance    instance,
-                                          VkSurfaceKHR  surface,
-                                          GpuPreference preference,
-                                          Arena         arena) {
+    VkApplicationInfo app_info = {
+        .sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+        .pNext              = nullptr,
+        .pApplicationName   = nullptr,
+        .applicationVersion = 0,
+        .pEngineName        = "loon",
+        .engineVersion      = 0,
+        .apiVersion         = VK_API_VERSION_1_3,
+    };
+
+    const char* instance_extensions[] = {
+        VK_KHR_SURFACE_EXTENSION_NAME,
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+        VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
+#elif defined(VK_USE_PLATFORM_XLIB_KHR)
+        VK_KHR_XLIB_SURFACE_EXTENSION_NAME,
+#elif defined(VK_USE_PLATFORM_METAL_EXT)
+        VK_EXT_METAL_SURFACE_EXTENSION_NAME,
+#endif
+    };
+
+    const auto instance_info = VkInstanceCreateInfo{
+        .sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .pNext                   = nullptr,
+        .flags                   = 0,
+        .pApplicationInfo        = &app_info,
+        .enabledLayerCount       = 0,
+        .ppEnabledLayerNames     = nullptr,
+        .enabledExtensionCount   = sizeof(instance_extensions) / sizeof(instance_extensions[0]),
+        .ppEnabledExtensionNames = instance_extensions,
+    };
+
+    VkInstance instance = VK_NULL_HANDLE;
+    result              = vkCreateInstance(&instance_info, nullptr, &instance);
+    if (result != VK_SUCCESS) { return {.result = result}; };
+
+    volkLoadInstanceOnly(instance);
+
+    return {
+        .result   = result,
+        .instance = instance,
+    };
+}
+
+static PhysicalDeviceInfo select_physical_device(VkInstance    instance,
+                                                 VkSurfaceKHR  surface,
+                                                 GpuPreference preference,
+                                                 Arena         arena) {
     uint32_t device_count = 0;
     VkResult vkresult     = vkEnumeratePhysicalDevices(instance, &device_count, nullptr);
     if (vkresult != VK_SUCCESS) {
         return {
-            .error_string = "Error enumerating physical devices"_sv,
+            .result = vkresult,
         };
     }
 
     auto physical_devices = (VkPhysicalDevice*)arena.alloc(sizeof(VkPhysicalDevice) * device_count);
     if (physical_devices == nullptr) {
         return {
-            .error_string = "Arena out of memory when enumerating physical devices"_sv,
+            .result = VK_ERROR_OUT_OF_HOST_MEMORY,
         };
     }
 
@@ -265,6 +322,7 @@ PhysicalDeviceInfo select_physical_device(VkInstance    instance,
     const bool prefer_dedicated  = preference == GpuPreference::Discrete;
 
     PhysicalDeviceInfo best_device_info = {
+        .result = vkresult,
         .device = VK_NULL_HANDLE,
     };
 
@@ -391,10 +449,52 @@ PhysicalDeviceInfo select_physical_device(VkInstance    instance,
     return best_device_info;
 }
 
-VkDescriptorSetLayout create_descriptor_layout(VkDevice               device,
-                                               const VolkDeviceTable& api,
-                                               uint32_t               size,
-                                               Span<const VkSampler>  samplers) {
+static SurfaceCreationResult create_surface(VkInstance instance, const DeviceDesc& desc) {
+    // Create surface if requested:
+    VkResult     result  = VK_SUCCESS;
+    VkSurfaceKHR surface = VK_NULL_HANDLE;
+    if (desc.native_instance_handle != 0 || desc.native_window_handle != 0) {
+#if defined(VK_USE_PLATFORM_WIN32_KHR)
+        const VkWin32SurfaceCreateInfoKHR surface_info = {
+            .sType     = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
+            .pNext     = nullptr,
+            .flags     = 0,
+            .hinstance = (HINSTANCE)desc.native_instance_handle,
+            .hwnd      = (HWND)desc.native_window_handle,
+        };
+        result = vkCreateWin32SurfaceKHR(m_instance, &surface_info, nullptr, &surface);
+#elif defined(VK_USE_PLATFORM_XLIB_KHR)
+        const VkXlibSurfaceCreateInfoKHR surface_info{
+            .sType  = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR,
+            .pNext  = nullptr,
+            .flags  = 0,
+            .dpy    = reinterpret_cast<Display*>(desc.native_instance_handle),
+            .window = desc.native_window_handle,
+        };
+        result = vkCreateXlibSurfaceKHR(m_instance, &surface_info, nullptr, &surface);
+#elif defined(VK_USE_PLATFORM_METAL_EXT)
+        const VkMetalSurfaceCreateInfoEXT surface_info{
+            .sType  = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT,
+            .pNext  = nullptr,
+            .flags  = 0,
+            .pLayer = reinterpret_cast<CAMetalLayer*>(desc.native_window_handle),
+        };
+        result = vkCreateMetalSurfaceEXT(instance, &surface_info, nullptr, &surface);
+#else
+#    error "Unsupported platform"
+#endif
+    }
+
+    return {
+        .result  = result,
+        .surface = surface,
+    };
+}
+
+static VkDescriptorSetLayout create_descriptor_layout(VkDevice               device,
+                                                      const VolkDeviceTable& api,
+                                                      uint32_t               size,
+                                                      Span<const VkSampler>  samplers) {
     VkDescriptorBindingFlags descVariableFlag[] = {
         0,
         VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
@@ -439,9 +539,9 @@ VkDescriptorSetLayout create_descriptor_layout(VkDevice               device,
     return result == VK_SUCCESS ? descriptor_set_layout : VK_NULL_HANDLE;
 }
 
-VkPipelineLayout create_default_graphics_layout(VkDevice               device,
-                                                const VolkDeviceTable& api,
-                                                VkDescriptorSetLayout  set_layout) {
+static VkPipelineLayout create_default_graphics_layout(VkDevice               device,
+                                                       const VolkDeviceTable& api,
+                                                       VkDescriptorSetLayout  set_layout) {
     // We create 2 push constants - for vertex and fragment data.
     VkPushConstantRange push_constant_ranges = VkPushConstantRange{
         .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -464,9 +564,9 @@ VkPipelineLayout create_default_graphics_layout(VkDevice               device,
     return result == VK_SUCCESS ? pipeline_layout : VK_NULL_HANDLE;
 }
 
-VkPipelineLayout create_default_compute_layout(VkDevice               device,
-                                               const VolkDeviceTable& api,
-                                               VkDescriptorSetLayout  set_layout) {
+static VkPipelineLayout create_default_compute_layout(VkDevice               device,
+                                                      const VolkDeviceTable& api,
+                                                      VkDescriptorSetLayout  set_layout) {
     // We create 1 push constant for compute data
     VkPushConstantRange push_constant_range = {
         VkPushConstantRange{
@@ -491,10 +591,10 @@ VkPipelineLayout create_default_compute_layout(VkDevice               device,
     return result == VK_SUCCESS ? pipeline_layout : VK_NULL_HANDLE;
 }
 
-Vector<VkSampler> create_immutable_samplers(Allocator               alloc,
-                                            const VolkDeviceTable&  api,
-                                            VkDevice                device,
-                                            Span<const SamplerDesc> sampler_descs) {
+static Vector<VkSampler> create_immutable_samplers(Allocator               alloc,
+                                                   const VolkDeviceTable&  api,
+                                                   VkDevice                device,
+                                                   Span<const SamplerDesc> sampler_descs) {
     auto samplers = Vector<VkSampler>(alloc);
 
     constexpr auto bridge_filter = [](SamplerFilter f) {
@@ -552,12 +652,7 @@ Vector<VkSampler> create_immutable_samplers(Allocator               alloc,
     return samplers;
 }
 
-struct MemoryRequirements {
-    VkMemoryRequirements gpu_mem_requirements;
-    VkMemoryRequirements buffer_mem_requirements;
-};
-
-MemoryRequirements get_memory_requirements(const VolkDeviceTable& api, VkDevice device) {
+static MemoryRequirements get_memory_requirements(const VolkDeviceTable& api, VkDevice device) {
     VkBuffer                     test_device_buffer;
     constexpr VkBufferUsageFlags kDefaultUsages
         = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
@@ -575,7 +670,8 @@ MemoryRequirements get_memory_requirements(const VolkDeviceTable& api, VkDevice 
         .queueFamilyIndexCount = 0,
         .pQueueFamilyIndices   = nullptr,
     };
-    chk(api.vkCreateBuffer(device, &test_buffer_info, nullptr, &test_device_buffer));
+    VkResult result = api.vkCreateBuffer(device, &test_buffer_info, nullptr, &test_device_buffer);
+    if (result != VK_SUCCESS) { return {.result = result}; }
 
     VkMemoryRequirements buffer_requirements;
     api.vkGetBufferMemoryRequirements(device, test_device_buffer, &buffer_requirements);
@@ -599,7 +695,8 @@ MemoryRequirements get_memory_requirements(const VolkDeviceTable& api, VkDevice 
         .queueFamilyIndexCount = 0,
         .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
     };
-    chk(api.vkCreateImage(device, &test_color_info, nullptr, &test_color_image));
+    result = api.vkCreateImage(device, &test_color_info, nullptr, &test_color_image);
+    if (result != VK_SUCCESS) { return {.result = result}; }
 
     VkMemoryRequirements color_image_requirements;
     api.vkGetImageMemoryRequirements(device, test_color_image, &color_image_requirements);
@@ -611,7 +708,7 @@ MemoryRequirements get_memory_requirements(const VolkDeviceTable& api, VkDevice 
         .pNext                 = nullptr,
         .flags                 = 0,
         .imageType             = VK_IMAGE_TYPE_2D,
-        .format                = VK_FORMAT_D24_UNORM_S8_UINT,
+        .format                = VK_FORMAT_D16_UNORM,
         .extent                = {.width = 4096, .height = 4096, .depth = 1},
         .mipLevels             = 1,
         .arrayLayers           = 1,
@@ -622,7 +719,8 @@ MemoryRequirements get_memory_requirements(const VolkDeviceTable& api, VkDevice 
         .queueFamilyIndexCount = 0,
         .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
     };
-    chk(api.vkCreateImage(device, &test_depth_info, nullptr, &test_depth_image));
+    result = api.vkCreateImage(device, &test_depth_info, nullptr, &test_depth_image);
+    if (result != VK_SUCCESS) { return {.result = result}; }
 
     VkMemoryRequirements depth_image_requirements;
     api.vkGetImageMemoryRequirements(device, test_depth_image, &depth_image_requirements);
@@ -647,276 +745,144 @@ MemoryRequirements get_memory_requirements(const VolkDeviceTable& api, VkDevice 
                                      .memoryTypeBits = buffer_requirements.memoryTypeBits
                                                     & color_image_requirements.memoryTypeBits
                                                     & depth_image_requirements.memoryTypeBits,
-                              },};
+                              },
+                            .result = VK_SUCCESS,};
 }
 
-bool initialize(Device d, const DeviceDesc& desc) {
-    //     // Actual vulkan init goes here because it can fail.
+static VmaCreateResult create_vma_allocator(VkInstance       instance,
+                                            VkPhysicalDevice physical_device,
+                                            VkDevice         device) {
+    VmaAllocatorCreateInfo vma_create_info{
+        .flags                          = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
+        .physicalDevice                 = physical_device,
+        .device                         = device,
+        .preferredLargeHeapBlockSize    = 0,
+        .pAllocationCallbacks           = nullptr,
+        .pDeviceMemoryCallbacks         = nullptr,
+        .pHeapSizeLimit                 = nullptr,
+        .pVulkanFunctions               = nullptr,
+        .instance                       = instance,
+        .vulkanApiVersion               = VK_API_VERSION_1_3,
+        .pTypeExternalMemoryHandleTypes = nullptr,
+    };
+    VmaVulkanFunctions vulkan_functions;
+    vmaImportVulkanFunctionsFromVolk(&vma_create_info, &vulkan_functions);
+    vma_create_info.pVulkanFunctions = &vulkan_functions;
+    VmaAllocator allocator;
+    VkResult     result = vmaCreateAllocator(&vma_create_info, &allocator);
 
-    //     // Setup instance
-    //     VkResult result = volkInitialize();
-    //     if (result != VK_SUCCESS) return false;
+    return {
+        .result    = result,
+        .allocator = allocator,
+    };
+}
 
-    //     VkApplicationInfo app_info = {
-    //         .sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-    //         .pNext              = nullptr,
-    //         .pApplicationName   = nullptr,
-    //         .applicationVersion = 0,
-    //         .pEngineName        = "loon",
-    //         .engineVersion      = 0,
-    //         .apiVersion         = VK_API_VERSION_1_3,
-    //     };
+static LogicalDeviceCreateResult create_logical_device(
+    const DeviceDesc&         desc,
+    Arena                     arena,
+    const PhysicalDeviceInfo& physical_device_info) {
+    float                         queue_priority = 1.0f;
+    Span<VkDeviceQueueCreateInfo> queue_create_infos;
+    queue_create_infos = concat(&arena,
+                                queue_create_infos,
+                                VkDeviceQueueCreateInfo{
+                                    .sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+                                    .pNext            = nullptr,
+                                    .flags            = 0,
+                                    .queueFamilyIndex = physical_device_info.graphics_queue_family,
+                                    .queueCount       = 1,
+                                    .pQueuePriorities = &queue_priority,
+                                });
 
-    //     const char* instance_extensions[] = {
-    //         VK_KHR_SURFACE_EXTENSION_NAME,
-    // #ifdef VK_USE_PLATFORM_WIN32_KHR
-    //         VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
-    // #elif defined(VK_USE_PLATFORM_XLIB_KHR)
-    //         VK_KHR_XLIB_SURFACE_EXTENSION_NAME,
-    // #elif defined(VK_USE_PLATFORM_METAL_EXT)
-    //         VK_EXT_METAL_SURFACE_EXTENSION_NAME,
-    // #endif
-    //     };
+    if (physical_device_info.async_compute_queue_family != -1
+        && physical_device_info.async_compute_queue_family
+               != physical_device_info.graphics_queue_family) {
+        queue_create_infos
+            = concat(&arena,
+                     queue_create_infos,
+                     {
+                         .sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+                         .pNext            = nullptr,
+                         .flags            = 0,
+                         .queueFamilyIndex = physical_device_info.async_compute_queue_family,
+                         .queueCount       = 1,
+                         .pQueuePriorities = &queue_priority,
+                     });
+    }
 
-    //     const auto instance_info = VkInstanceCreateInfo{
-    //         .sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-    //         .pNext                   = nullptr,
-    //         .flags                   = 0,
-    //         .pApplicationInfo        = &app_info,
-    //         .enabledLayerCount       = 0,
-    //         .ppEnabledLayerNames     = nullptr,
-    //         .enabledExtensionCount   = sizeof(instance_extensions) /
-    //         sizeof(instance_extensions[0]), .ppEnabledExtensionNames = instance_extensions,
-    //     };
+    if (physical_device_info.transfer_queue_family != -1
+        && physical_device_info.transfer_queue_family
+               != physical_device_info.async_compute_queue_family
+        && physical_device_info.transfer_queue_family
+               != physical_device_info.graphics_queue_family) {
+        queue_create_infos
+            = concat(&arena,
+                     queue_create_infos,
+                     {
+                         .sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+                         .pNext            = nullptr,
+                         .flags            = 0,
+                         .queueFamilyIndex = physical_device_info.transfer_queue_family,
+                         .queueCount       = 1,
+                         .pQueuePriorities = &queue_priority,
+                     });
+    }
 
-    //     if (!chk(vkCreateInstance(&instance_info, nullptr, &m_instance))) {
-    //         log(d, LogLevel::Error, "Failed to create vulkan instance");
-    //         return false;
-    //     }
-    //     volkLoadInstanceOnly(m_instance);
+    // TODO: Check required limits against our limits.
+    VkPhysicalDeviceVulkan13Features vulkan_13_features{};
+    vulkan_13_features.sType            = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    vulkan_13_features.pNext            = nullptr;
+    vulkan_13_features.dynamicRendering = true;
+    vulkan_13_features.synchronization2 = true;
 
-    //     // Create surface if requested:
-    //     VkSurfaceKHR surface = VK_NULL_HANDLE;
-    //     if (desc.native_instance_handle != 0 || desc.native_window_handle != 0) {
-    // #if defined(VK_USE_PLATFORM_WIN32_KHR)
-    //         const VkWin32SurfaceCreateInfoKHR surface_info = {
-    //             .sType     = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
-    //             .pNext     = nullptr,
-    //             .flags     = 0,
-    //             .hinstance = (HINSTANCE)desc.native_instance_handle,
-    //             .hwnd      = (HWND)desc.native_window_handle,
-    //         };
-    //         if (!chk(vkCreateWin32SurfaceKHR(m_instance, &surface_info, nullptr, &surface))) {
-    //             return false;
-    //         }
-    // #elif defined(VK_USE_PLATFORM_XLIB_KHR)
-    //         const VkXlibSurfaceCreateInfoKHR surface_info{
-    //             .sType  = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR,
-    //             .pNext  = nullptr,
-    //             .flags  = 0,
-    //             .dpy    = reinterpret_cast<Display*>(desc.native_instance_handle),
-    //             .window = desc.native_window_handle,
-    //         };
-    //         if (!chk(vkCreateXlibSurfaceKHR(m_instance, &surface_info, nullptr, &surface))) {
-    //             return false;
-    //         }
-    // #elif defined(VK_USE_PLATFORM_METAL_EXT)
-    //         const VkMetalSurfaceCreateInfoEXT surface_info{
-    //             .sType  = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT,
-    //             .pNext  = nullptr,
-    //             .flags  = 0,
-    //             .pLayer = reinterpret_cast<CAMetalLayer*>(desc.native_window_handle),
-    //         };
-    //         VkResult result = vkCreateMetalSurfaceEXT(m_instance, &surface_info, nullptr,
-    //         &surface); if (result != VK_SUCCESS) return false;
-    // #else
-    //         default: log(d, LogLevel_Error, "Unsupported surface source"); return false;
-    // #endif
-    //     }
+    VkPhysicalDeviceVulkan12Features vulkan_12_features{};
+    vulkan_12_features.sType                = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    vulkan_12_features.pNext                = &vulkan_13_features;
+    vulkan_12_features.timelineSemaphore    = true;
+    vulkan_12_features.bufferDeviceAddress  = true;
+    vulkan_12_features.descriptorIndexing   = true;
+    vulkan_12_features.shaderInt8           = true;
+    vulkan_12_features.storagePushConstant8 = true;
+    vulkan_12_features.scalarBlockLayout    = true;
+    vulkan_12_features.runtimeDescriptorArray                       = true;
+    vulkan_12_features.descriptorBindingSampledImageUpdateAfterBind = true;
+    vulkan_12_features.descriptorBindingPartiallyBound              = true;
+    vulkan_12_features.descriptorBindingUpdateUnusedWhilePending    = true;
+    vulkan_12_features.descriptorBindingVariableDescriptorCount     = true;
 
-    //     Arena arena = *get_thread_local_arena();
+    VkPhysicalDeviceVulkan11Features vulkan_11_features{};
+    vulkan_11_features.sType                = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+    vulkan_11_features.pNext                = &vulkan_12_features;
+    vulkan_11_features.shaderDrawParameters = true;
 
-    //     auto physical_device_info
-    //         = select_physical_device(m_instance, surface, desc.gpu_preference, arena);
-    //     if (physical_device_info.device == VK_NULL_HANDLE) {
-    //         log(d, LogLevel::Error, physical_device_info.error_string);
-    //         return false;
-    //     }
-    //     m_physical_device            = physical_device_info.device;
-    //     m_graphics_queue_family      = physical_device_info.graphics_queue_family;
-    //     m_transfer_queue_family      = physical_device_info.transfer_queue_family;
-    //     m_async_compute_queue_family = physical_device_info.async_compute_queue_family;
+    VkPhysicalDeviceFeatures2 device_features{
+            .sType    = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+            .pNext    = &vulkan_11_features,
+            .features = {
+                .samplerAnisotropy = true,
+            },
+        };
 
-    //     // Create logical device and request queues.:
+    VkDeviceCreateInfo create_info{
+        .sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        .pNext                   = &device_features,
+        .flags                   = 0,
+        .queueCreateInfoCount    = static_cast<uint32_t>(queue_create_infos.size()),
+        .pQueueCreateInfos       = queue_create_infos.data(),
+        .enabledLayerCount       = 0,
+        .ppEnabledLayerNames     = nullptr,
+        .enabledExtensionCount   = loon::gpu::kRequiredDeviceExtensionsCount,
+        .ppEnabledExtensionNames = loon::gpu::kRequiredDeviceExtensions,
+        .pEnabledFeatures        = nullptr,
+    };
 
-    //     float                         queue_priority = 1.0f;
-    //     Span<VkDeviceQueueCreateInfo> queue_create_infos;
-    //     queue_create_infos = concat(&arena,
-    //                                 queue_create_infos,
-    //                                 VkDeviceQueueCreateInfo{
-    //                                     .sType            =
-    //                                     VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, .pNext =
-    //                                     nullptr, .flags            = 0, .queueFamilyIndex =
-    //                                     m_graphics_queue_family, .queueCount       = 1,
-    //                                     .pQueuePriorities = &queue_priority,
-    //                                 });
+    VkDevice device = VK_NULL_HANDLE;
+    VkResult result = vkCreateDevice(physical_device_info.device, &create_info, nullptr, &device);
 
-    //     if (m_async_compute_queue_family != -1
-    //         && m_async_compute_queue_family != m_graphics_queue_family) {
-    //         queue_create_infos = concat(&arena,
-    //                                     queue_create_infos,
-    //                                     {
-    //                                         .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-    //                                         .pNext = nullptr,
-    //                                         .flags = 0,
-    //                                         .queueFamilyIndex = m_async_compute_queue_family,
-    //                                         .queueCount       = 1,
-    //                                         .pQueuePriorities = &queue_priority,
-    //                                     });
-    //     }
-
-    //     if (m_transfer_queue_family != -1 && m_transfer_queue_family !=
-    //     m_async_compute_queue_family
-    //         && m_transfer_queue_family != m_graphics_queue_family) {
-    //         queue_create_infos = concat(&arena,
-    //                                     queue_create_infos,
-    //                                     {
-    //                                         .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-    //                                         .pNext = nullptr,
-    //                                         .flags = 0,
-    //                                         .queueFamilyIndex = m_transfer_queue_family,
-    //                                         .queueCount       = 1,
-    //                                         .pQueuePriorities = &queue_priority,
-    //                                     });
-    //     }
-
-    //     // TODO: Check required limits against our limits.
-    //     VkPhysicalDeviceVulkan13Features vulkan_13_features{};
-    //     vulkan_13_features.sType            =
-    //     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES; vulkan_13_features.pNext =
-    //     nullptr; vulkan_13_features.dynamicRendering = true; vulkan_13_features.synchronization2
-    //     = true;
-
-    //     VkPhysicalDeviceVulkan12Features vulkan_12_features{};
-    //     vulkan_12_features.sType                =
-    //     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES; vulkan_12_features.pNext =
-    //     &vulkan_13_features; vulkan_12_features.timelineSemaphore    = true;
-    //     vulkan_12_features.bufferDeviceAddress  = true;
-    //     vulkan_12_features.descriptorIndexing   = true;
-    //     vulkan_12_features.shaderInt8           = true;
-    //     vulkan_12_features.storagePushConstant8 = true;
-    //     vulkan_12_features.scalarBlockLayout    = true;
-    //     vulkan_12_features.runtimeDescriptorArray                       = true;
-    //     vulkan_12_features.descriptorBindingSampledImageUpdateAfterBind = true;
-    //     vulkan_12_features.descriptorBindingPartiallyBound              = true;
-    //     vulkan_12_features.descriptorBindingUpdateUnusedWhilePending    = true;
-    //     vulkan_12_features.descriptorBindingVariableDescriptorCount     = true;
-
-    //     VkPhysicalDeviceVulkan11Features vulkan_11_features{};
-    //     vulkan_11_features.sType                =
-    //     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES; vulkan_11_features.pNext =
-    //     &vulkan_12_features; vulkan_11_features.shaderDrawParameters = true;
-
-    //     VkPhysicalDeviceFeatures2 device_features{
-    //         .sType    = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-    //         .pNext    = &vulkan_11_features,
-    //         .features = {
-    //             .samplerAnisotropy = true,
-    //         },
-    //     };
-
-    //     VkDeviceCreateInfo create_info{
-    //         .sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-    //         .pNext                   = &device_features,
-    //         .flags                   = 0,
-    //         .queueCreateInfoCount    = static_cast<uint32_t>(queue_create_infos.size()),
-    //         .pQueueCreateInfos       = queue_create_infos.data(),
-    //         .enabledLayerCount       = 0,
-    //         .ppEnabledLayerNames     = nullptr,
-    //         .enabledExtensionCount   = loon::gpu::kRequiredDeviceExtensionsCount,
-    //         .ppEnabledExtensionNames = loon::gpu::kRequiredDeviceExtensions,
-    //         .pEnabledFeatures        = nullptr,
-    //     };
-
-    //     if (!chk(vkCreateDevice(m_physical_device, &create_info, nullptr, &m_device))) {
-    //         log(d, LogLevel::Error, "Failed to create vulkan device"_sv);
-    //         return false;
-    //     }
-
-    //     volkLoadDeviceTable(&m_api, m_device);
-
-    //     // Initialize VMA:
-
-    //     VmaAllocatorCreateInfo vma_create_info{
-    //         .flags                          = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
-    //         .physicalDevice                 = m_physical_device,
-    //         .device                         = m_device,
-    //         .preferredLargeHeapBlockSize    = 0,
-    //         .pAllocationCallbacks           = nullptr,
-    //         .pDeviceMemoryCallbacks         = nullptr,
-    //         .pHeapSizeLimit                 = nullptr,
-    //         .pVulkanFunctions               = nullptr,
-    //         .instance                       = m_instance,
-    //         .vulkanApiVersion               = VK_API_VERSION_1_3,
-    //         .pTypeExternalMemoryHandleTypes = nullptr,
-    //     };
-    //     VmaVulkanFunctions vulkan_functions;
-    //     vmaImportVulkanFunctionsFromVolk(&vma_create_info, &vulkan_functions);
-    //     vma_create_info.pVulkanFunctions = &vulkan_functions;
-    //     vmaCreateAllocator(&vma_create_info, &m_vma);
-
-    //     // Find which memory types are appropriate for different allocations.
-
-
-    //     // Initialize the surface objects:
-    //     m_surface.surface = surface;
-    //     const VkSemaphoreCreateInfo semaphore_create_info{
-    //         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
-    //         .pNext = nullptr,
-    //         .flags = 0,
-    //     };
-    //     for (uint32_t i = 0; i < Surface::kMaxFramesInFlight; ++i) {
-    //         VkSemaphore s = VK_NULL_HANDLE;
-    //         chk(m_api.vkCreateSemaphore(m_device, &semaphore_create_info, nullptr, &s));
-    //         m_surface.acquire_semaphores[i] = m_semaphore_pool.emplace({s});
-    //     }
-
-
-    //     m_default_descriptor_layout
-    //         = create_descriptor_layout(m_device, m_api, kMaxTextureHeapSize,
-    //         m_immutable_samplers);
-    //     m_default_graphics_layout
-    //         = create_default_graphics_layout(m_device, m_api, m_default_descriptor_layout);
-    //     m_default_compute_layout
-    //         = create_default_compute_layout(m_device, m_api, m_default_descriptor_layout);
-
-    //     VkDescriptorPoolSize pool_sizes[] = {
-    //         {
-    //             .type            = VK_DESCRIPTOR_TYPE_SAMPLER,
-    //             .descriptorCount = m_immutable_samplers.size(),
-    //         },
-    //         {
-    //             .type            = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-    //             .descriptorCount = kMaxTextureHeapSize,
-    //         },
-    //     };
-
-    //     VkDescriptorPoolCreateInfo pool_info = {
-    //         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-    //         .pNext = nullptr,
-    //         .flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT
-    //                  | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
-    //         .maxSets       = kMaxNumTextureHeaps,
-    //         .poolSizeCount = 2,
-    //         .pPoolSizes    = pool_sizes,
-    //     };
-    //     chk(m_api.vkCreateDescriptorPool(m_device, &pool_info, nullptr, &m_descriptor_pool));
-
-
-    //     m_ptr_map = Vector<GpuPtrMap>(m_allocator);
-
-
-    //     return true;
+    return {
+        .result         = result,
+        .logical_device = device,
+    };
 }
 
 Device create_device(const DeviceDesc& desc) {
@@ -927,11 +893,107 @@ Device create_device(const DeviceDesc& desc) {
     if (blk.ptr == 0) { return nullptr; }
 
 
-    VkInstance       vk_instance;
-    VkPhysicalDevice vk_physical_device;
-    VkDevice         vk_device;
-    VolkDeviceTable  api;
-    VmaAllocator     vma;
+    auto  arena_blk = alloc.alloc(256 * 1024ull);
+    Arena init_arena(arena_blk.ptr, arena_blk.len);
+
+    auto [result, instance] = create_instance();
+
+    VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
+    if (result == VK_SUCCESS) {
+        auto s     = create_surface(instance, desc);
+        result     = s.result;
+        vk_surface = s.surface;
+    }
+
+    PhysicalDeviceInfo physical_device_info{};
+    if (result == VK_SUCCESS) {
+        auto p = select_physical_device(instance, vk_surface, desc.gpu_preference, init_arena);
+        result = p.result;
+        physical_device_info = p;
+    }
+
+    VkDevice logical_device = VK_NULL_HANDLE;
+    if (result == VK_SUCCESS) {
+        auto l         = create_logical_device(desc, init_arena, physical_device_info);
+        result         = l.result;
+        logical_device = l.logical_device;
+    }
+
+    alloc.free(arena_blk);
+
+    VolkDeviceTable api;
+    VmaAllocator    vma = VK_NULL_HANDLE;
+    if (result == VK_SUCCESS) {
+        volkLoadDeviceTable(&api, logical_device);
+        auto vma_result
+            = create_vma_allocator(instance, physical_device_info.device, logical_device);
+        result = vma_result.result;
+        vma    = vma_result.allocator;
+    }
+
+    Vector<VkSampler> immutable_samplers;
+    if (result == VK_SUCCESS) {
+        immutable_samplers = create_immutable_samplers(alloc, api, logical_device, desc.samplers);
+        result             = desc.samplers.size() == immutable_samplers.size() ? VK_SUCCESS
+                                                                               : VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    VkDescriptorSetLayout default_descriptor_layout;
+    VkPipelineLayout      default_graphics_layout;
+    VkPipelineLayout      default_compute_layout;
+    if (result == VK_SUCCESS) {
+        default_descriptor_layout = create_descriptor_layout(logical_device,
+                                                             api,
+                                                             kMaxTextureHeapSize,
+                                                             immutable_samplers);
+        default_graphics_layout
+            = create_default_graphics_layout(logical_device, api, default_descriptor_layout);
+        default_compute_layout
+            = create_default_compute_layout(logical_device, api, default_descriptor_layout);
+
+        result = (default_descriptor_layout != nullptr && default_graphics_layout != nullptr
+                  && default_compute_layout != nullptr)
+                     ? VK_SUCCESS
+                     : VK_ERROR_INITIALIZATION_FAILED;
+    }
+
+    VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
+    if (result == VK_SUCCESS) {
+        VkDescriptorPoolSize pool_sizes[] = {
+            {
+                .type            = VK_DESCRIPTOR_TYPE_SAMPLER,
+                .descriptorCount = immutable_samplers.size(),
+            },
+            {
+                .type            = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                .descriptorCount = kMaxTextureHeapSize,
+            },
+        };
+
+        VkDescriptorPoolCreateInfo pool_info = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT
+                     | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+            .maxSets       = kMaxNumTextureHeaps,
+            .poolSizeCount = 2,
+            .pPoolSizes    = pool_sizes,
+        };
+
+        result = api.vkCreateDescriptorPool(logical_device, &pool_info, nullptr, &descriptor_pool);
+    }
+
+    MemoryRequirements memory_requirements{};
+    if (result == VK_SUCCESS) {
+        memory_requirements = get_memory_requirements(api, logical_device);
+        result              = memory_requirements.result;
+    }
+
+    if (result != VK_SUCCESS) {
+        // TODO: Cleanup other resources
+        if (instance) { vkDestroyInstance(instance, nullptr); }
+        return nullptr;
+    }
 
     // NOTE: Not 100% sure about if this is UB - I need a pointer to the device in order to capture
     // it in the lambdas, that are created during construction of the object. It probably is
@@ -939,32 +1001,32 @@ Device create_device(const DeviceDesc& desc) {
     // bit wonky.
     auto d = reinterpret_cast<DeviceImpl*>(blk.ptr);
     return new (blk.ptr) DeviceImpl{
-        .m_allocator    = alloc,
-        .m_log_callback = desc.log_callback,
-        .m_log_userdata = desc.log_userdata,
-        .m_log_level    = desc.log_level,
-        .m_tls_key      = loon::gpu::tls_alloc([](void* data) {
+        .m_allocator                  = alloc,
+        .m_log_callback               = desc.log_callback,
+        .m_log_userdata               = desc.log_userdata,
+        .m_log_level                  = desc.log_level,
+        .m_tls_key                    = loon::gpu::tls_alloc([](void* data) {
             auto state = reinterpret_cast<ThreadLocalState*>(data);
             state->~ThreadLocalState();
         }),
-        .m_instance = vk_instance,
-        .m_physical_device = vk_physical_device,
-        .m_graphics_queue_family = 0,
-        .m_transfer_queue_family = 0,
-        .m_async_compute_queue_family = 0,
-        .m_surface = {
-            
+        .m_instance                   = instance,
+        .m_physical_device            = physical_device_info.device,
+        .m_graphics_queue_family      = physical_device_info.graphics_queue_family,
+        .m_transfer_queue_family      = physical_device_info.transfer_queue_family,
+        .m_async_compute_queue_family = physical_device_info.async_compute_queue_family,
+        .m_surface                    = {
+            .surface = vk_surface,
         },
-        .m_device = vk_device,
-        .m_api = api,
-        .m_vma = vma, 
+        .m_device                     = logical_device,
+        .m_api                        = std::move(api),
+        .m_vma                        = vma,
 
-        // .m_descriptor_pool = ,
-        // .m_default_descriptor_layout = ,
-        // .m_default_graphics_layout = ,
-        // .m_default_compute_layout = ,
-        // .m_gpu_mem_requirements = ,
-        // .m_buffer_mem_requirements =,
+        .m_descriptor_pool = descriptor_pool,
+        .m_default_descriptor_layout = default_descriptor_layout,
+        .m_default_graphics_layout = default_graphics_layout,
+        .m_default_compute_layout = default_compute_layout,
+        .m_gpu_mem_requirements = memory_requirements.gpu_mem_requirements,
+        .m_buffer_mem_requirements = memory_requirements.buffer_mem_requirements,
 
         .m_buffer_pool
         = SlotMap<Buffer>(alloc,
@@ -988,17 +1050,22 @@ Device create_device(const DeviceDesc& desc) {
                     d->m_api.vkDestroyImage(d->m_device, t->vk_image, nullptr);
                 }
             }),
-        .m_texture_heap_pool = SlotMap<TextureHeap>(
-            alloc,
-            [d](TextureHeap* h) {
-                d->m_api.vkFreeDescriptorSets(d->m_device, d->m_descriptor_pool, 1, &h->vk_descriptor_set);
-                for (auto v : h->image_views) {
-                    // TODO: Can we be faster than iterating over the entire vector? Maybe iterate
-                    // over the bitset instead
-                    if (v != VK_NULL_HANDLE) { d->m_api.vkDestroyImageView(d->m_device, v, nullptr); }
-                }
-                h->~TextureHeap();
-            }),
+        .m_texture_heap_pool
+        = SlotMap<TextureHeap>(alloc,
+                               [d](TextureHeap* h) {
+                                   d->m_api.vkFreeDescriptorSets(d->m_device,
+                                                                 d->m_descriptor_pool,
+                                                                 1,
+                                                                 &h->vk_descriptor_set);
+                                   for (auto v : h->image_views) {
+                                       // TODO: Can we be faster than iterating over the entire
+                                       // vector? Maybe iterate over the bitset instead
+                                       if (v != VK_NULL_HANDLE) {
+                                           d->m_api.vkDestroyImageView(d->m_device, v, nullptr);
+                                       }
+                                   }
+                                   h->~TextureHeap();
+                               }),
         .m_depth_stencil_pool
         = SlotMap<DepthStencilState>(alloc, [](DepthStencilState* d) { d->~DepthStencilState(); }),
         .m_semaphore_pool
@@ -1013,45 +1080,46 @@ Device create_device(const DeviceDesc& desc) {
                                 d->m_api.vkDestroyPipeline(d->m_device, p->vk_pipeline, nullptr);
                                 p->~Pipeline();
                             }),
-        .m_immutable_samplers = create_immutable_samplers(alloc, api, vk_device, desc.samplers),
-        .m_ptr_map = Vector<GpuPtrMap>(alloc),
+        .m_immutable_samplers = std::move(immutable_samplers),
+        .m_ptr_map            = Vector<GpuPtrMap>(alloc),
     };
 }
 
 void destroy_device(Device d) {
-    // assert(m_refcount == 0);
-    // device_wait_for_idle(d);
-    // unconfigure_surface(d);
+    device_wait_for_idle(d);
+    unconfigure_surface(d);
 
-    // for (auto& q : m_queues) {
-    //     if (q.queue != VK_NULL_HANDLE) {
-    //         m_api.vkDestroyCommandPool(m_device, q.command_pool, nullptr);
-    //     }
-    // }
+    for (auto& q : d->m_queues) {
+        if (q.queue != VK_NULL_HANDLE) {
+            d->m_api.vkDestroyCommandPool(d->m_device, q.command_pool, nullptr);
+        }
+    }
 
-    // m_buffer_pool.clear();
-    // m_texture_pool.clear();
-    // m_texture_heap_pool.clear();
-    // m_semaphore_pool.clear();
-    // m_pipeline_pool.clear();
+    d->m_buffer_pool.clear();
+    d->m_texture_pool.clear();
+    d->m_texture_heap_pool.clear();
+    d->m_semaphore_pool.clear();
+    d->m_pipeline_pool.clear();
 
-    // for (auto& s : m_immutable_samplers) { m_api.vkDestroySampler(m_device, s, nullptr); }
+    for (auto& s : d->m_immutable_samplers) { d->m_api.vkDestroySampler(d->m_device, s, nullptr); }
 
-    // m_api.vkDestroyDescriptorPool(m_device, m_descriptor_pool, nullptr);
-    // m_api.vkDestroyDescriptorSetLayout(m_device, m_default_descriptor_layout, nullptr);
-    // m_api.vkDestroyPipelineLayout(m_device, m_default_graphics_layout, nullptr);
-    // m_api.vkDestroyPipelineLayout(m_device, m_default_compute_layout, nullptr);
+    d->m_api.vkDestroyDescriptorPool(d->m_device, d->m_descriptor_pool, nullptr);
+    d->m_api.vkDestroyDescriptorSetLayout(d->m_device, d->m_default_descriptor_layout, nullptr);
+    d->m_api.vkDestroyPipelineLayout(d->m_device, d->m_default_graphics_layout, nullptr);
+    d->m_api.vkDestroyPipelineLayout(d->m_device, d->m_default_compute_layout, nullptr);
 
-    // vmaDestroyAllocator(m_vma);
+    vmaDestroyAllocator(d->m_vma);
 
-    // m_api.vkDestroyDevice(m_device, nullptr);
+    d->m_api.vkDestroyDevice(d->m_device, nullptr);
 
-    // if (m_surface.surface) { vkDestroySurfaceKHR(m_instance, m_surface.surface, nullptr); }
+    if (d->m_surface.surface) { vkDestroySurfaceKHR(d->m_instance, d->m_surface.surface, nullptr); }
 
-    // vkDestroyInstance(m_instance, nullptr);
-    // volkFinalize();
+    vkDestroyInstance(d->m_instance, nullptr);
+    volkFinalize();
 
-    // tls_free(m_tls_key);
+    tls_free(d->m_tls_key);
+
+    d->m_allocator.free({.ptr = d, .len = sizeof(DeviceImpl)});
 }
 
 void device_wait_for_idle(Device d) {
@@ -1197,13 +1265,20 @@ bool configure_surface(Device d, const SurfaceConfiguration& config) {
         return false;
     }
 
-    // Convert the swapchain images here to handles, by inserting them into the object pool. Also
-    // create the present semaphores.
     const VkSemaphoreCreateInfo semaphore_create_info{
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
         .pNext = nullptr,
         .flags = 0,
     };
+    // Create the acquire semaphores
+    for (uint32_t i = 0; i < Surface::kMaxFramesInFlight; ++i) {
+        VkSemaphore s = VK_NULL_HANDLE;
+        chk(d, d->m_api.vkCreateSemaphore(d->m_device, &semaphore_create_info, nullptr, &s));
+        d->m_surface.acquire_semaphores[i] = d->m_semaphore_pool.emplace({s});
+    }
+
+    // Convert the swapchain images here to handles, by inserting them into the object pool. Also
+    // create the present semaphores.
     for (int i = 0; i < image_count; ++i) {
         VkImageView default_image_view = VK_NULL_HANDLE;
         if ((config.usages & UsageFlags::ColorAttachment) != UsageFlags::None
@@ -1259,6 +1334,9 @@ void unconfigure_surface(Device d) {
         for (int i = 0; i < d->m_surface.image_count; ++i) {
             d->m_semaphore_pool.erase(d->m_surface.present_semaphores[i]);
             d->m_surface.transitioning_command[i] = VK_NULL_HANDLE;
+        }
+        for (uint32_t i = 0; i < Surface::kMaxFramesInFlight; ++i) {
+            d->m_semaphore_pool.erase(d->m_surface.acquire_semaphores[i]);
         }
         free(d, d->m_surface.frame_semaphore);
     }
@@ -1738,10 +1816,10 @@ Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource source) {
     return h;
 }
 
-Handle<Pipeline> create_graphics_pipeline(Device       d,
-                                          ShaderSource vertex,
-                                          ShaderSource fragment,
-                                          RasterDesc   desc) {
+Handle<Pipeline> create_graphics_pipeline(Device            d,
+                                          ShaderSource      vertex,
+                                          ShaderSource      fragment,
+                                          const RasterDesc& desc) {
     VkShaderModuleCreateInfo vert_info{
         .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .pNext    = nullptr,
@@ -1991,6 +2069,7 @@ Queue get_queue(Device d, QueueType type) {
         auto timeline = create_semaphore(d, 0);
 
         d->m_queues[static_cast<uint32_t>(type)] = {
+            .device         = d,
             .queue          = queue,
             .command_pool   = command_pool,
             .timeline       = timeline,
@@ -2086,8 +2165,6 @@ bool chk(Device d, VkResult result) {
             break;
         case VK_ERROR_FRAGMENTED_POOL: log(d, LogLevel::Error, "VK_ERROR_FRAGMENTED_POOL"); break;
         case VK_ERROR_UNKNOWN: log(d, LogLevel::Error, "VK_ERROR_UNKNOWN"); break;
-        // case VK_ERROR_VALIDATION_FAILED: log(d, LogLevel::LogLevel_Error,
-        // "VK_ERROR_VALIDATION_FAILED"); break;
         case VK_ERROR_OUT_OF_POOL_MEMORY:
             log(d, LogLevel::Error, "VK_ERROR_OUT_OF_POOL_MEMORY");
             break;
@@ -2101,8 +2178,6 @@ bool chk(Device d, VkResult result) {
         case VK_PIPELINE_COMPILE_REQUIRED:
             log(d, LogLevel::Error, "VK_PIPELINE_COMPILE_REQUIRED");
             break;
-        // case VK_ERROR_NOT_PERMITTED: log(d, LogLevel::LogLevel_Error, "VK_ERROR_NOT_PERMITTED");
-        // break;
         case VK_ERROR_SURFACE_LOST_KHR: log(d, LogLevel::Error, "VK_ERROR_SURFACE_LOST_KHR"); break;
         case VK_ERROR_NATIVE_WINDOW_IN_USE_KHR:
             log(d, LogLevel::Error, "VK_ERROR_NATIVE_WINDOW_IN_USE_KHR");
@@ -2136,9 +2211,6 @@ bool chk(Device d, VkResult result) {
         case VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT:
             log(d, LogLevel::Error, "VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT");
             break;
-        // case VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT:
-        //     log(d, LogLevel::LogLevel_Error, "VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT");
-        //     break;
         case VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT:
             log(d, LogLevel::Error, "VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT");
             break;
@@ -2157,12 +2229,6 @@ bool chk(Device d, VkResult result) {
         case VK_INCOMPATIBLE_SHADER_BINARY_EXT:
             log(d, LogLevel::Error, "VK_INCOMPATIBLE_SHADER_BINARY_EXT");
             break;
-        // case VK_PIPELINE_BINARY_MISSING_KHR:
-        //     log(d, LogLevel::LogLevel_Error, "VK_PIPELINE_BINARY_MISSING_KHR");
-        //     break;
-        // case VK_ERROR_NOT_ENOUGH_SPACE_KHR:
-        //     log(d, LogLevel::LogLevel_Error, "VK_ERROR_NOT_ENOUGH_SPACE_KHR");
-        //     break;
         default: log(d, LogLevel::Error, "Unknown error"_sv); break;
     }
 
