@@ -57,6 +57,14 @@ struct Semaphore {
     MTL::SharedEvent* event = nullptr;
 };
 
+struct CommandBufferImpl {
+    MTL4::CommandBuffer* command_buffer;
+    Queue                queue;
+    Device               device;
+};
+
+
+
 struct QueueImpl {
     struct Event {
         uint64_t       completed_time;
@@ -106,10 +114,6 @@ struct BufferAndOffset {
     uint32_t     offset;
 };
 
-struct CommandBufferImpl {
-    MTL4::CommandBuffer* command_buffer;
-    Device               device;
-};
 
 struct GpuPtrMap {
     GpuPtr         ptr;
@@ -148,6 +152,8 @@ struct DeviceImpl {
 
     MTL::ResidencySet* m_residency_set = nullptr;
     Surface            m_surface;
+
+    QueueImpl m_queue;
 
     SlotMap<Buffer>            m_buffer_pool;
     SlotMap<Texture>           m_texture_pool;
@@ -484,7 +490,7 @@ void remove_texture_view_from_heap(Device d, Handle<TextureHeap> h, TextureView 
 
 // MARK: Pipelines
 Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource compute) {
-    NS::String* shader_source = NS::String::alloc()->init(compute.spirv.data(),
+    NS::String* shader_source = NS::String::alloc()->init((void*)compute.spirv.data(),
                                                           compute.spirv.size(),
                                                           NS::UTF8StringEncoding,
                                                           false);
@@ -527,7 +533,7 @@ Handle<Pipeline> create_graphics_pipeline(Device            d,
                                           ShaderSource      fragment,
                                           const RasterDesc& desc) {
     // TODO: Error handling/propagation
-    NS::String* vert_source      = NS::String::alloc()->init(vertex.spirv.data(),
+    NS::String* vert_source      = NS::String::alloc()->init((void*)vertex.spirv.data(),
                                                         vertex.spirv.size(),
                                                         NS::UTF8StringEncoding,
                                                         false);
@@ -536,7 +542,7 @@ Handle<Pipeline> create_graphics_pipeline(Device            d,
                                                              NS::UTF8StringEncoding,
                                                              false);
 
-    NS::String* frag_source      = NS::String::alloc()->init(fragment.spirv.data(),
+    NS::String* frag_source      = NS::String::alloc()->init((void*)fragment.spirv.data(),
                                                         fragment.spirv.size(),
                                                         NS::UTF8StringEncoding,
                                                         false);
@@ -676,7 +682,17 @@ void free(Device d, Handle<Semaphore> sema) {
 // MARK: Queue
 
 Queue get_queue(Device d, QueueType type) {
-    return nullptr;
+    if (d->m_queue.command_queue == nullptr) {
+        auto& q = d->m_queue = {
+            .command_queue  = d->m_device->newMTL4CommandQueue(),
+            .callback_event = d->m_device->newSharedEvent(),
+            .pending_events = Vector<QueueImpl::Event>(d->m_allocator),
+            .timeline_value = 0,
+            .device         = d,
+        };
+    }
+
+    return &d->m_queue;
 }
 
 CommandBuffer queue_start_command_recording(Queue q) {

@@ -20,7 +20,7 @@
     }
 
 #define LOON_BITWISE_ASSIGNMENT_OP(name, op)                                                       \
-    inline constexpr name operator op##=(name lhs, name rhs) {                                     \
+    inline constexpr name operator op## = (name lhs, name rhs) {                                   \
         lhs = lhs op rhs;                                                                          \
         return lhs;                                                                                \
     }
