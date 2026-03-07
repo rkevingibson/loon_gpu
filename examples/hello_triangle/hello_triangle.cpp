@@ -75,7 +75,9 @@ HelloTriangle::HelloTriangle(const WindowState& window_state) {
     m_queue = gpu::get_queue(m_device);
 }
 
-HelloTriangle::~HelloTriangle() {}
+HelloTriangle::~HelloTriangle() {
+    destroy_device(m_device);
+}
 
 void HelloTriangle::recreate_swapchain(uint32_t width, uint32_t height) {
     gpu::unconfigure_surface(m_device);
@@ -131,6 +133,8 @@ void HelloTriangle::Update(const WindowState& window) {
                          .old_layout = Layout::Attachment,
                          .new_layout = Layout::Present,
                      });
+
+    gpu::cmd_finalize(cmd);
 
     gpu::queue_submit(m_queue, cmd);
 

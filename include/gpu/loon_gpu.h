@@ -822,6 +822,7 @@ void cmd_draw_indexed_instanced_indirect_multi(CommandBuffer cmd,
                                                GpuPtr        argsGpu,
                                                GpuPtr        drawCountGpu,
                                                uint32_t      maxDraws);
+void cmd_finalize(CommandBuffer cmd);
 
 extern template class Span<const char>;
 extern template class Span<uint8_t>;

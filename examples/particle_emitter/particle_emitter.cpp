@@ -170,6 +170,7 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
 
     gpu::cmd_dispatch(cmd, args, {kMaxNumParticles / 64, 1, 1});
     gpu::cmd_barrier(cmd, StageFlags::Compute, StageFlags::Compute);
+    gpu::cmd_finalize(cmd);
     gpu::queue_submit(m_queue, cmd);
 
     gpu::device_wait_for_idle(m_device);
@@ -178,6 +179,8 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
 ParticleEmitter::~ParticleEmitter() {
     gpu::device_wait_for_idle(m_device);
     loon::imgui::Shutdown();
+    m_ring_buffer = RingBuffer();
+    destroy_device(m_device);
 }
 
 
@@ -329,6 +332,7 @@ void ParticleEmitter::Update(const WindowState& window) {
                          .old_layout = Layout::Attachment,
                          .new_layout = Layout::Present,
                      });
+    gpu::cmd_finalize(cmd);
     gpu::queue_submit(m_queue, cmd);
 
     const auto status = gpu::present(m_device, m_queue);

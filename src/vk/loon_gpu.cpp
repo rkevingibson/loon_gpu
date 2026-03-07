@@ -7,6 +7,7 @@
 
 #include "containers.h"
 #include "gpu_to_vk.h"
+#include "platform_utils.h"
 #include "vma_usage.h"
 #include "volk.h"
 #include "vulkan/vulkan_core.h"
@@ -146,24 +147,41 @@ struct Surface {
     VkCommandBuffer transitioning_command[kMaxSwapchainImages] = {VK_NULL_HANDLE};
 };
 
+struct CommandPool;
+struct CommandBufferImpl {
+    Device          device;
+    Queue           queue;
+    CommandPool*    pool = nullptr;
+    VkCommandBuffer buffer;
+};
+
+struct CommandPool {
+    VkCommandPool             command_pool = VK_NULL_HANDLE;
+    Vector<CommandBufferImpl> command_buffers;
+    uint64_t                  buffer_free_idx = 0;  // Index of the next command_buffer to use.
+    uint64_t                  frame_idx = 0;  // Frame index of the last time this pool was used.
+};
+
+struct CommandSuperpool {
+    static constexpr uint32_t kPoolsPerGroup           = Surface::kMaxFramesInFlight;
+    static constexpr uint32_t kMaxSimultaneousCommands = 64;
+    int64_t                   available_pools          = ~0;
+    CommandPool               pools[kMaxSimultaneousCommands * kPoolsPerGroup] = {};
+};
+
 struct QueueImpl {
     struct Event {
         uint64_t       completed_time;
         Function<void> callback;
     };
 
-    Device            device         = nullptr;
-    VkQueue           queue          = VK_NULL_HANDLE;
-    VkCommandPool     command_pool   = VK_NULL_HANDLE;
-    Handle<Semaphore> timeline       = {};
-    uint32_t          queue_family   = 0;
-    uint64_t          timeline_value = 0;
+    Device            device            = nullptr;
+    VkQueue           queue             = VK_NULL_HANDLE;
+    CommandSuperpool  command_superpool = {};
+    Handle<Semaphore> timeline          = {};
+    uint32_t          queue_family      = 0;
+    uint64_t          timeline_value    = 0;
     Vector<Event>     pending_events;
-};
-
-struct CommandBufferImpl {
-    Device          device;
-    VkCommandBuffer buffer;
 };
 
 struct ThreadLocalState {
@@ -1091,7 +1109,11 @@ void destroy_device(Device d) {
 
     for (auto& q : d->m_queues) {
         if (q.queue != VK_NULL_HANDLE) {
-            d->m_api.vkDestroyCommandPool(d->m_device, q.command_pool, nullptr);
+            for (auto& p : q.command_superpool.pools) {
+                if (p.command_pool) {
+                    d->m_api.vkDestroyCommandPool(d->m_device, p.command_pool, nullptr);
+                }
+            }
         }
     }
 
@@ -1119,7 +1141,10 @@ void destroy_device(Device d) {
 
     tls_free(d->m_tls_key);
 
-    d->m_allocator.free({.ptr = d, .len = sizeof(DeviceImpl)});
+    auto allocator = d->m_allocator;
+    d->~DeviceImpl();
+
+    allocator.free({.ptr = d, .len = sizeof(DeviceImpl)});
 }
 
 void device_wait_for_idle(Device d) {
@@ -2056,26 +2081,16 @@ Queue get_queue(Device d, QueueType type) {
 
         VkQueue queue;
         d->m_api.vkGetDeviceQueue(d->m_device, queue_family, 0, &queue);
-
-        VkCommandPoolCreateInfo pool_info{
-            .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-            .pNext            = nullptr,
-            .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
-            .queueFamilyIndex = queue_family,
-        };
-        VkCommandPool command_pool;
-        chk(d, d->m_api.vkCreateCommandPool(d->m_device, &pool_info, nullptr, &command_pool));
-
         auto timeline = create_semaphore(d, 0);
 
         d->m_queues[static_cast<uint32_t>(type)] = {
-            .device         = d,
-            .queue          = queue,
-            .command_pool   = command_pool,
-            .timeline       = timeline,
-            .queue_family   = queue_family,
-            .timeline_value = 0,
-            .pending_events = Vector<QueueImpl::Event>(d->m_allocator),
+            .device            = d,
+            .queue             = queue,
+            .command_superpool = {},
+            .timeline          = timeline,
+            .queue_family      = queue_family,
+            .timeline_value    = 0,
+            .pending_events    = Vector<QueueImpl::Event>(d->m_allocator),
         };
     }
 
@@ -2251,28 +2266,127 @@ Arena* get_thread_local_arena(Device d) {
 
 // MARK: Queue
 
+static void reset_command_pool(const VolkDeviceTable& api, VkDevice device, CommandPool* pool) {
+    api.vkResetCommandPool(device, pool->command_pool, 0);
+    pool->buffer_free_idx = 0;
+}
+
+CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
+    CommandSuperpool& superpool       = queue->command_superpool;
+    CommandPool*      pool            = nullptr;
+    int64_t           available_pools = atomic_load(&superpool.available_pools);
+    bool              index_good      = false;
+    uint64_t          idx;
+    while (!index_good && available_pools != 0) {
+        // Try to clear the lowest set bit using a compare_exchange loop.
+        idx                    = count_trailing_zeros(available_pools);
+        const uint64_t mask    = ~(1ull << idx);
+        const int64_t  desired = static_cast<int64_t>(available_pools & mask);
+        index_good = atomic_compare_exchange(&superpool.available_pools, &available_pools, desired);
+    };
+
+    if (index_good) {
+        pool = &superpool.pools[CommandSuperpool::kPoolsPerGroup * idx
+                                + (frame_idx % CommandSuperpool::kPoolsPerGroup)];
+
+        if (pool->command_pool == VK_NULL_HANDLE) {
+            // Initialize the command pool here.
+            VkCommandPoolCreateInfo pool_info{
+                .sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+                .pNext            = nullptr,
+                .flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+                .queueFamilyIndex = queue->queue_family,
+            };
+            VkCommandPool command_pool = VK_NULL_HANDLE;
+            chk(queue->device,
+                queue->device->m_api.vkCreateCommandPool(queue->device->m_device,
+                                                         &pool_info,
+                                                         nullptr,
+                                                         &command_pool));
+            *pool = CommandPool{
+                .command_pool    = command_pool,
+                .command_buffers = Vector<CommandBufferImpl>(queue->device->m_allocator),
+                .buffer_free_idx = 0,
+            };
+        } else if (pool->frame_idx != frame_idx) {
+            // Last time this was used was on a different frame, so reset the pool.
+            reset_command_pool(queue->device->m_api, queue->device->m_device, pool);
+        }
+    } else {
+        log(queue->device,
+            LogLevel::Error,
+            "Unable to get command pool - too many command buffers in flight at once"_sv);
+    }
+
+    return pool;
+}
+
+static void release_command_pool(Queue q, CommandPool* pool) {
+    auto&         superpool = q->command_superpool;
+    const int64_t idx       = (pool - superpool.pools) / CommandSuperpool::kPoolsPerGroup;
+
+    // Need to set the bit in available pools using a compare-exchange loop
+    int64_t previous = atomic_load(&superpool.available_pools);
+
+    int64_t desired = previous | (1ll << idx);
+    while (!atomic_compare_exchange(&superpool.available_pools, &previous, desired)) {
+        desired = previous | (1ll << idx);
+    }
+}
+
+static CommandBufferImpl* get_command_buffer(Queue q, CommandPool* pool) {
+    auto device = q->device;
+
+    if (pool->command_buffers.size() <= pool->buffer_free_idx) {
+        const VkCommandBufferAllocateInfo info{
+            .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            .pNext              = nullptr,
+            .commandPool        = pool->command_pool,
+            .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            .commandBufferCount = 1,
+        };
+        VkCommandBuffer buf;
+        if (!chk(device, device->m_api.vkAllocateCommandBuffers(device->m_device, &info, &buf))) {
+            return nullptr;
+        }
+        pool->command_buffers.emplace_back(CommandBufferImpl{
+            .device = device,
+            .queue  = q,
+            .pool   = pool,
+            .buffer = buf,
+        });
+    }
+
+    CommandBufferImpl* result = pool->command_buffers.data() + pool->buffer_free_idx;
+    pool->buffer_free_idx++;
+    return result;
+}
+
 CommandBuffer queue_start_command_recording(Queue q) {
     auto d = q->device;
 
-    const VkCommandBufferAllocateInfo alloc_info{
-        .sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-        .pNext              = nullptr,
-        .commandPool        = q->command_pool,
-        .level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-        .commandBufferCount = 1,
-    };
-    VkCommandBuffer cmd = VK_NULL_HANDLE;
-    chk(d, d->m_api.vkAllocateCommandBuffers(d->m_device, &alloc_info, &cmd));
+    CommandPool* pool = get_command_pool(q, d->m_surface.frame_idx);
+    if (pool == nullptr) { return nullptr; }
 
-    const VkCommandBufferBeginInfo begin_info{
-        .sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .pNext            = nullptr,
-        .flags            = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-        .pInheritanceInfo = nullptr,
-    };
-    d->m_api.vkBeginCommandBuffer(cmd, &begin_info);
+    CommandBuffer buffer = get_command_buffer(q, pool);
+    if (buffer) {
+        const VkCommandBufferBeginInfo begin_info{
+            .sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+            .pNext            = nullptr,
+            .flags            = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+            .pInheritanceInfo = nullptr,
+        };
+        chk(d, d->m_api.vkBeginCommandBuffer(buffer->buffer, &begin_info));
+    }
+    return buffer;
+}
 
-    return nullptr;  // CommandBuffer(cmd, d);
+void cmd_finalize(CommandBuffer cmd) {
+    auto d = cmd->device;
+    auto q = cmd->queue;
+    chk(d, d->m_api.vkEndCommandBuffer(cmd->buffer));
+
+    release_command_pool(q, cmd->pool);
 }
 
 void queue_submit(Queue                     q,
@@ -2303,8 +2417,6 @@ void queue_submit(Queue                     q,
 
     for (uint32_t i = 0; i < command_buffers.size(); i++) {
         auto buf = command_buffers[i]->buffer;
-
-        chk(d, d->m_api.vkEndCommandBuffer(buf));
 
         command_info = concat(&arena,
                               command_info,
@@ -2409,22 +2521,6 @@ void queue_submit(Queue                     q,
     };
 
     d->m_api.vkQueueSubmit2(q->queue, 1, &submit_info, VK_NULL_HANDLE);
-
-    // Need to free/reset the command buffers once this submission is done - might be worth
-    // copying the whole span of command buffers to a temporary allocation instead of pushing a
-    // bunch of completions here instead.
-    for (CommandBuffer cmd : command_buffers) {
-        q->pending_events.emplace_back(
-            QueueImpl::Event{.completed_time = q->timeline_value,
-                             .callback       = [command_pool = q->command_pool, cmd]() {
-                                 auto impl = reinterpret_cast<DeviceImpl*>(cmd->device);
-                                 impl->m_api.vkFreeCommandBuffers(
-                                     impl->m_device,
-                                     command_pool,
-                                     1,
-                                     reinterpret_cast<const VkCommandBuffer*>(&cmd->buffer));
-                             }});
-    }
 }
 
 void queue_cancel(Queue q, Span<const Handle<CommandBuffer>> commandBuffers) {}

@@ -40,7 +40,7 @@ class RingBuffer {
     uint32_t        m_allocated_range_tail = 0;
     uint32_t        m_allocated_range_head = 0;
 
-    gpu::Device              m_device;
+    gpu::Device              m_device = nullptr;
     gpu::Handle<gpu::Buffer> m_buffer;
     void*                    m_host_ptr;
     gpu::GpuPtr              m_device_ptr;

@@ -179,6 +179,7 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
                              });
     //  A little excessive, but wait for the copy to be done before returning.
     gpu::cmd_barrier(cmd, StageFlags::Transfer, StageFlags::VertexShader);
+    gpu::cmd_finalize(cmd);
     auto copy_semaphore = gpu::create_semaphore(m_device, 0);
     gpu::queue_submit(
         m_queue,
@@ -196,7 +197,9 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
         });
 }
 
-TexturedCube::~TexturedCube() {}
+TexturedCube::~TexturedCube() {
+    destroy_device(m_device);
+}
 
 void TexturedCube::recreate_swapchain(uint32_t width, uint32_t height) {
     gpu::device_wait_for_idle(m_device);
@@ -309,7 +312,7 @@ void TexturedCube::Update(const WindowState& window) {
                          .old_layout = Layout::Attachment,
                          .new_layout = Layout::Present,
                      });
-
+    gpu::cmd_finalize(cmd);
     gpu::queue_submit(m_queue, cmd);
 
     const auto status = gpu::present(m_device, m_queue);

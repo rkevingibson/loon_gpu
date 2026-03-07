@@ -169,8 +169,9 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
                 = {static_cast<uint32_t>(tex->Width), static_cast<uint32_t>(tex->Height), 1},
             });
         gpu::cmd_barrier(cmd, gpu::StageFlags::Transfer, gpu::StageFlags::PixelShader);
-
+        gpu::cmd_finalize(cmd);
         auto copy_semaphore = gpu::create_semaphore(bd->device, 0);
+
         gpu::queue_submit(bd->queue,
                           cmd,
                           {},
