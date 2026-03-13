@@ -101,8 +101,8 @@ class Span {
     constexpr const T* cbegin() const noexcept { return begin(); }
     constexpr const T* cend() const noexcept { return end(); }
 
-    Span<unsigned char> as_bytes() {
-        return Span<unsigned char>((unsigned char*)m_ptr, m_len * sizeof(T));
+    Span<const uint8_t> as_bytes() const {
+        return Span<const uint8_t>((const uint8_t*)m_ptr, m_len * sizeof(T));
     }
 
     template <typename U>
@@ -565,7 +565,7 @@ struct SamplerDesc {
     float             max_anisotropy = 0.0f;
 };
 
-static constexpr SamplerDesc kDefaultSamplers[] = {SamplerDesc{
+inline constexpr SamplerDesc kDefaultSamplers[] = {SamplerDesc{
     .coord          = SamplerCoords::Normalized,
     .filter         = SamplerFilter::Linear,
     .address        = SamplerAddressing::ClampToEdge,
@@ -662,8 +662,8 @@ struct TextureSizeAlign {
 };
 
 struct ShaderSource {
-    Span<uint8_t>    spirv;
-    Span<const char> entry_point;
+    Span<const uint8_t> spirv;
+    Span<const char>    entry_point;
 };
 
 struct SurfaceCapabilities {
@@ -826,16 +826,14 @@ void cmd_finalize(CommandBuffer cmd);
 
 extern template class Span<const char>;
 extern template class Span<uint8_t>;
-extern template class Span<const gpu::SamplerDesc>;
-extern template class Span<const gpu::ColorTarget>;
-extern template class Span<const gpu::RenderAttachment>;
-extern template class Span<const gpu::Format>;
-extern template class Span<const gpu::PresentMode>;
-extern template class Span<const gpu::CommandBuffer>;
-extern template class Span<const gpu::SemaphoreInfo>;
-extern template class Span<const Handle<gpu::CommandBuffer>>;
-extern template class Span<const gpu::TextureTransition>;
-extern template class Function<void>;
+extern template class Span<const SamplerDesc>;
+extern template class Span<const ColorTarget>;
+extern template class Span<const RenderAttachment>;
+extern template class Span<const Format>;
+extern template class Span<const PresentMode>;
+extern template class Span<const CommandBuffer>;
+extern template class Span<const SemaphoreInfo>;
+extern template class Span<const TextureTransition>;
 extern template class Function<void>;
 
 }  // namespace loon::gpu

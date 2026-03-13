@@ -7,7 +7,7 @@ option(LOON_GPU_BUILD_EXAMPLES "Build examples" OFF)
 option(LOON_GPU_BUILD_TESTS "Build tests" OFF)
 option(LOON_GPU_WERROR "Treat warnings as errors" OFF)
 option(LOON_GPU_INSTALL "Install library" ON)
-option(LOON_GPU_USE_KOSMICKRISP "Use the kosmickrisp vulkan driver on MacOS" ON)
+option(LOON_GPU_USE_KOSMICKRISP "Use the kosmickrisp vulkan driver on MacOS" OFF)
 
 set(CLANG_TIDY_CONFIG clang-tidy --config-file=${CMAKE_SOURCE_DIR}/.clang-tidy)
 

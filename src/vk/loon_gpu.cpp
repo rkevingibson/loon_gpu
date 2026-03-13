@@ -15,16 +15,14 @@
 namespace loon::gpu {
 template class Span<const char>;
 template class Span<uint8_t>;
-template class Span<const gpu::SamplerDesc>;
-template class Span<const gpu::ColorTarget>;
-template class Span<const gpu::RenderAttachment>;
-template class Span<const gpu::Format>;
-template class Span<const gpu::PresentMode>;
-template class Span<const gpu::CommandBuffer>;
-template class Span<const gpu::SemaphoreInfo>;
-template class Span<const Handle<gpu::CommandBuffer>>;
-template class Span<const gpu::TextureTransition>;
-
+template class Span<const SamplerDesc>;
+template class Span<const ColorTarget>;
+template class Span<const RenderAttachment>;
+template class Span<const Format>;
+template class Span<const PresentMode>;
+template class Span<const CommandBuffer>;
+template class Span<const SemaphoreInfo>;
+template class Span<const TextureTransition>;
 template class Function<void>;
 
 static constexpr const char* kRequiredDeviceExtensions[] = {
@@ -156,10 +154,10 @@ struct CommandBufferImpl {
 };
 
 struct CommandPool {
-    VkCommandPool             command_pool = VK_NULL_HANDLE;
-    Vector<CommandBufferImpl> command_buffers;
-    uint64_t                  buffer_free_idx = 0;  // Index of the next command_buffer to use.
-    uint64_t                  frame_idx = 0;  // Frame index of the last time this pool was used.
+    VkCommandPool                   command_pool = VK_NULL_HANDLE;
+    SegmentArray<CommandBufferImpl> command_buffers;
+    uint64_t buffer_free_idx = 0;  // Index of the next command_buffer to use.
+    uint64_t frame_idx       = 0;  // Frame index of the last time this pool was used.
 };
 
 struct CommandSuperpool {
@@ -2305,7 +2303,7 @@ CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
                                                          &command_pool));
             *pool = CommandPool{
                 .command_pool    = command_pool,
-                .command_buffers = Vector<CommandBufferImpl>(queue->device->m_allocator),
+                .command_buffers = SegmentArray<CommandBufferImpl>(queue->device->m_allocator),
                 .buffer_free_idx = 0,
             };
         } else if (pool->frame_idx != frame_idx) {
@@ -2357,7 +2355,7 @@ static CommandBufferImpl* get_command_buffer(Queue q, CommandPool* pool) {
         });
     }
 
-    CommandBufferImpl* result = pool->command_buffers.data() + pool->buffer_free_idx;
+    CommandBufferImpl* result = &pool->command_buffers[pool->buffer_free_idx];
     pool->buffer_free_idx++;
     return result;
 }

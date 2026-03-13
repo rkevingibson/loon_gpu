@@ -215,6 +215,93 @@ class Vector {
     T*        m_data     = nullptr;
 };
 
+// MARK: SegmentArray
+
+// As described by https://danielchasehooper.com/posts/segment_array, an array that gives
+// pointer-stability on growth.
+template <class T>
+class SegmentArray {
+   public:
+    using DestructorFn = Function<void, T*>;
+    SegmentArray()     = default;
+    SegmentArray(Allocator alloc) : m_allocator(alloc) {};
+    ~SegmentArray() { clear(); };
+
+    SegmentArray(const SegmentArray&)            = delete;
+    SegmentArray& operator=(const SegmentArray&) = delete;
+    SegmentArray(SegmentArray&& other) : SegmentArray() { swap(*this, other); }
+    SegmentArray& operator=(SegmentArray&& other) {
+        swap(*this, other);
+        return *this;
+    }
+
+    friend void swap(SegmentArray& a, SegmentArray& b) {
+        using std::swap;
+        swap(a.m_allocator, b.m_allocator);
+        swap(a.m_count, b.m_count);
+        swap(a.m_used_segments, b.m_used_segments);
+        swap(a.m_segments, b.m_segments);
+    }
+
+    void clear() {
+        uint32_t remaining_count = m_count;
+        for (uint32_t segment_idx = 0; segment_idx < m_used_segments; ++segment_idx) {
+            const uint32_t segment_size = slots_in_segment(segment_idx);
+            T*             segment      = m_segments[segment_idx];
+            // Destroy any objects in this segment up to count
+            for (uint32_t idx = 0; idx < segment_size && remaining_count > 0;
+                 ++idx, --remaining_count) {
+                segment[idx].~T();
+            }
+
+            m_allocator.free({
+                .ptr = segment,
+                .len = static_cast<uint32_t>(segment_size * sizeof(T)),
+            });
+            m_segments[segment_idx] = nullptr;
+        }
+        m_used_segments = 0;
+        m_count         = 0;
+    }
+
+    template <class... Args>
+    T& emplace_back(Args&&... args) {
+        if (m_count == capacity_for_segment_count(m_used_segments)) { add_segment(); }
+        T* entry = get(m_count++);
+        entry    = ::new (entry) T(std::forward<Args>(args)...);
+        return *entry;
+    }
+
+    const T&           operator[](uint32_t idx) const { return *get(idx); }
+    T&                 operator[](uint32_t idx) { return *get(idx); }
+    constexpr uint32_t size() const { return m_count; }
+
+   private:
+    static constexpr uint32_t kSmallSegmentsToSkip = 6;
+    static constexpr uint32_t slots_in_segment(uint32_t segment_index) {
+        return (1 << kSmallSegmentsToSkip) << segment_index;
+    }
+    static constexpr uint32_t capacity_for_segment_count(uint32_t segment_count) {
+        return ((1 << kSmallSegmentsToSkip) << segment_count) - (1 << kSmallSegmentsToSkip);
+    }
+    void add_segment() {
+        const size_t segment_size     = slots_in_segment(m_used_segments);
+        const auto   blk              = m_allocator.alloc(sizeof(T) * segment_size);
+        m_segments[m_used_segments++] = reinterpret_cast<T*>(blk.ptr);
+    }
+    T* get(uint32_t idx) const {
+        const uint64_t segment = int_log_2((idx >> kSmallSegmentsToSkip) + 1);
+        uint32_t       slot    = idx - capacity_for_segment_count(segment);
+        return &m_segments[segment][slot];
+    }
+
+    uint32_t  m_used_segments = 0;
+    uint32_t  m_count         = 0;
+    Allocator m_allocator;
+    // Smallest segment is 64 items, 26 segments get us to ~4 billion items
+    T* m_segments[26] = {nullptr};
+};
+
 // MARK: Slot Map
 
 // This combines a segment array, as described in https://danielchasehooper.com/posts/segment_array
