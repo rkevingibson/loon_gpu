@@ -13,5 +13,5 @@ This should support most modern desktop GPUs, and I've also been able to run it 
 
 The project is designed to be built with cmake, and should be self-contained (all dependencies are either vendored or downloaded by cmake via FetchContent). 
 Fast compile times are a goal, and so minimal use of C++ STL headers are used whenever possible - internally we use custom containers and the API uses a custom Span replacement.
-Note that this doesn't apply to the examples, which use things like std::filesystem and std::vector for simplicity.
+Note that this doesn't apply to the examples, which use things like std::vector for simplicity.
 
