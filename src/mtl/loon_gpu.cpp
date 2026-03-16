@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cstring>
 
+#include "platform_utils.h"
+
 // NB: This include has to be before others, as it defines the implementation of the metal lib.
 #define NS_PRIVATE_IMPLEMENTATION
 #define CA_PRIVATE_IMPLEMENTATION
@@ -57,28 +59,6 @@ struct Semaphore {
     MTL::SharedEvent* event = nullptr;
 };
 
-struct CommandBufferImpl {
-    MTL4::CommandBuffer* command_buffer;
-    Queue                queue;
-    Device               device;
-};
-
-
-
-struct QueueImpl {
-    struct Event {
-        uint64_t       completed_time;
-        Function<void> callback;
-    };
-
-    MTL4::CommandQueue* command_queue  = nullptr;
-    MTL::SharedEvent*   callback_event = nullptr;
-    Vector<Event>       pending_events;
-    uint64_t            timeline_value = 0;
-
-    Device device = nullptr;
-};
-
 struct Surface {
     CA::MetalLayer*    metal_layer;
     CA::MetalDrawable* current_drawable = nullptr;
@@ -96,6 +76,45 @@ struct Surface {
         PresentMode::Fifo,
     };
 };
+
+struct CommandPool;
+struct CommandBufferImpl {
+    MTL4::CommandBuffer* command_buffer = nullptr;
+    Queue                queue;
+    CommandPool*         pool;
+    Device               device;
+};
+
+struct CommandPool {
+    MTL4::CommandAllocator*         allocator = nullptr;
+    SegmentArray<CommandBufferImpl> command_buffers;  // In theory
+    uint64_t                        buffer_free_idx = 0;
+    uint64_t                        frame_idx       = 0;
+};
+
+struct CommandSuperpool {
+    static constexpr uint32_t kPoolsPerGroup                                   = 3;
+    static constexpr uint32_t kMaxSimultaneousCommands                         = 64;
+    int64_t                   available_pools                                  = ~0;
+    CommandPool               pools[kMaxSimultaneousCommands * kPoolsPerGroup] = {};
+};
+
+struct QueueImpl {
+    struct Event {
+        uint64_t       completed_time;
+        Function<void> callback;
+    };
+
+    MTL4::CommandQueue* command_queue = nullptr;
+    CommandSuperpool    command_superpool;
+    MTL::SharedEvent*   callback_event = nullptr;
+    Vector<Event>       pending_events;
+    uint64_t            timeline_value = 0;
+
+    Device device = nullptr;
+};
+
+
 struct ThreadLocalState {
     constexpr static size_t kArenaSize = 256ll * 1024;
     loon::gpu::Allocator    allocator;
@@ -681,6 +700,79 @@ void free(Device d, Handle<Semaphore> sema) {
 
 // MARK: Queue
 
+static void reset_command_pool(CommandPool* pool) {
+    pool->allocator->reset();
+    pool->buffer_free_idx = 0;
+}
+
+static CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
+    CommandSuperpool& superpool       = queue->command_superpool;
+    CommandPool*      pool            = nullptr;
+    int64_t           available_pools = atomic_load(&superpool.available_pools);
+    bool              index_good      = false;
+    uint64_t          idx;
+    while (!index_good && available_pools != 0) {
+        idx                    = count_trailing_zeros(available_pools);
+        const uint64_t mask    = ~(1ull << idx);
+        const int64_t  desired = static_cast<int64_t>(available_pools & mask);
+        index_good = atomic_compare_exchange(&superpool.available_pools, &available_pools, desired);
+    }
+
+    if (index_good) {
+        pool = &superpool.pools[CommandSuperpool::kPoolsPerGroup * idx
+                                + (frame_idx % CommandSuperpool::kPoolsPerGroup)];
+
+        if (pool->allocator == nullptr) {
+            // Initialize the command pool here.
+            *pool = CommandPool{
+                .allocator       = queue->device->m_device->newCommandAllocator(),
+                .command_buffers = SegmentArray<CommandBufferImpl>(queue->device->m_allocator),
+                .buffer_free_idx = 0,
+                .frame_idx       = 0,
+            };
+        } else if (pool->frame_idx != frame_idx) {
+            // Last time this was used was on a different frame, so reset the pool.
+            reset_command_pool(pool);
+        }
+    } else {
+        log(queue->device,
+            LogLevel::Error,
+            "Unable to get command pool - too many command buffers in flight at once"_sv);
+    }
+
+    return pool;
+}
+
+static void release_command_pool(Queue q, CommandPool* pool) {
+    auto&         superpool = q->command_superpool;
+    const int64_t idx       = (pool - superpool.pools) / CommandSuperpool::kPoolsPerGroup;
+
+    // Need to set the bit in available pools using a compare-exchange loop
+    int64_t previous = atomic_load(&superpool.available_pools);
+
+    int64_t desired = previous | (1ll << idx);
+    while (!atomic_compare_exchange(&superpool.available_pools, &previous, desired)) {
+        desired = previous | (1ll << idx);
+    }
+}
+
+static CommandBufferImpl* get_command_buffer(Queue q, CommandPool* pool) {
+    auto device = q->device;
+
+    if (pool->command_buffers.size() <= pool->buffer_free_idx) {
+        pool->command_buffers.emplace_back(CommandBufferImpl{
+            .command_buffer = device->m_device->newCommandBuffer(),
+            .queue          = q,
+            .pool           = pool,
+            .device         = device,
+        });
+    }
+
+    CommandBufferImpl* result = &pool->command_buffers[pool->buffer_free_idx];
+    pool->buffer_free_idx++;
+    return result;
+}
+
 Queue get_queue(Device d, QueueType type) {
     if (d->m_queue.command_queue == nullptr) {
         auto& q = d->m_queue = {
@@ -696,7 +788,14 @@ Queue get_queue(Device d, QueueType type) {
 }
 
 CommandBuffer queue_start_command_recording(Queue q) {
-    return CommandBuffer();
+    auto d = q->device;
+
+    CommandPool* pool = get_command_pool(q, d->m_surface.frame_idx);
+    if (pool == nullptr) { return nullptr; }
+
+    CommandBuffer buffer = get_command_buffer(q, pool);
+    if (buffer) {}
+    return buffer;
 }
 
 void queue_submit(Queue                     q,
