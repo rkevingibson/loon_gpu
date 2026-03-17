@@ -120,8 +120,7 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
 
     m_queue = gpu::get_queue(m_device);
 
-    m_geometry_buffer = gpu::malloc(m_device, Cube::kSize, Memory::Gpu);
-    m_vertex_ptr      = gpu::get_device_pointer(m_device, m_geometry_buffer);
+    m_vertex_ptr = gpu::malloc(m_device, Cube::kSize, Memory::Gpu);
 
     m_constant_buffer = gpu::malloc(m_device, 1024ull * 1024);
 
@@ -165,13 +164,10 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
                          .old_layout = loon::gpu::Layout::DontCare,
                          .new_layout = Layout::General,
                      });
-    gpu::cmd_memcpy(cmd,
-                    m_vertex_ptr,
-                    gpu::get_device_pointer(m_device, m_constant_buffer),
-                    Cube::kSize);
+    gpu::cmd_memcpy(cmd, m_vertex_ptr, m_constant_buffer, Cube::kSize);
 
     gpu::cmd_copy_to_texture(cmd,
-                             gpu::get_device_pointer(m_device, m_constant_buffer) + Cube::kSize,
+                             m_constant_buffer + Cube::kSize,
                              m_color_texture,
                              BufferToTextureCopyInfo{
                                  .buffer_image_size = {(uint32_t)x, (uint32_t)y},
@@ -293,7 +289,7 @@ void TexturedCube::Update(const WindowState& window) {
     gpu::cmd_set_depth_stencil_state(cmd, m_depth_stencil_state);
     gpu::cmd_set_pipeline(cmd, m_render_pipeline);
     uint32_t args_offset = sizeof(ShaderArgs) * (m_frame_idx % 3);
-    GpuPtr   argsGpu     = gpu::get_device_pointer(m_device, m_constant_buffer) + args_offset;
+    GpuPtr   argsGpu     = m_constant_buffer + args_offset;
 
     gpu::cmd_draw_indexed_instanced(cmd,
                                     argsGpu,

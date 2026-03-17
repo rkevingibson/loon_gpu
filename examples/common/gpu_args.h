@@ -40,12 +40,11 @@ class RingBuffer {
     uint32_t        m_allocated_range_tail = 0;
     uint32_t        m_allocated_range_head = 0;
 
-    gpu::Device              m_device = nullptr;
-    gpu::Handle<gpu::Buffer> m_buffer;
-    void*                    m_host_ptr;
-    gpu::GpuPtr              m_device_ptr;
-    uint32_t                 m_mask;
-    uint32_t                 m_num_frames_in_flight;
+    gpu::Device m_device     = nullptr;
+    gpu::GpuPtr m_device_ptr = 0;
+    void*       m_host_ptr;
+    uint32_t    m_mask;
+    uint32_t    m_num_frames_in_flight;
 };
 
 template <class T>

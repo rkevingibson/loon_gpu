@@ -1435,11 +1435,11 @@ SurfaceStatus present(Device d, Queue q) {
 
 // MARK: Buffers
 
-Handle<Buffer> malloc(Device d, size_t bytes, Memory memory) {
+GpuPtr malloc(Device d, size_t bytes, Memory memory) {
     return malloc(d, bytes, 64, memory);
 }
 
-Handle<Buffer> malloc(Device d, size_t bytes, size_t align, Memory memory) {
+GpuPtr malloc(Device d, size_t bytes, size_t align, Memory memory) {
     // TODO: Alignment is not respected currently.
 
     constexpr VkBufferUsageFlags kDefaultUsages
@@ -1528,22 +1528,10 @@ Handle<Buffer> malloc(Device d, size_t bytes, size_t align, Memory memory) {
         = lower_bound(d->m_ptr_map.begin(), d->m_ptr_map.end(), {.ptr = device_ptr});
     d->m_ptr_map.insert(insertion_pos, {.ptr = device_ptr, .buffer = handle});
 
-    return handle;
+    return device_ptr;
 }
 
-void free(Device d, Handle<Buffer> buffer) {
-    d->m_buffer_pool.erase(buffer);
-}
-
-GpuPtr get_device_pointer(Device d, Handle<Buffer> buffer) {
-    return d->m_buffer_pool[buffer].device_ptr;
-}
-
-void* get_host_pointer(Device d, Handle<Buffer> buffer) {
-    return d->m_buffer_pool[buffer].host_ptr;
-}
-
-BufferAndOffset buffer_and_offset_from_ptr(Device d, GpuPtr ptr) {
+static BufferAndOffset buffer_and_offset_from_ptr(Device d, GpuPtr ptr) {
     const auto  it = lower_bound(d->m_ptr_map.begin(), d->m_ptr_map.end(), GpuPtrMap{.ptr = ptr});
     const auto& b  = d->m_buffer_pool[it->buffer];
     return {
@@ -1552,6 +1540,19 @@ BufferAndOffset buffer_and_offset_from_ptr(Device d, GpuPtr ptr) {
         .alloc  = b.vk_allocation,
     };
 }
+
+
+void free(Device d, GpuPtr ptr) {
+    const auto it = lower_bound(d->m_ptr_map.begin(), d->m_ptr_map.end(), GpuPtrMap{.ptr = ptr});
+    assert(it->ptr == ptr);  // Shouldn't free from another pointer in the same allocation.
+    d->m_buffer_pool.erase(it->buffer);
+}
+
+void* get_host_pointer(Device d, GpuPtr ptr) {
+    const auto it = lower_bound(d->m_ptr_map.begin(), d->m_ptr_map.end(), GpuPtrMap{.ptr = ptr});
+    return d->m_buffer_pool[it->buffer].host_ptr;
+}
+
 
 // MARK: Textures
 

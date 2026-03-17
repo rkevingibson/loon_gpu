@@ -23,10 +23,9 @@ class TexturedCube : public Example {
     uint32_t                  m_swapchain_width  = 0;
     uint32_t                  m_swapchain_height = 0;
 
-    Handle<Buffer> m_geometry_buffer;
-    GpuPtr         m_vertex_ptr;
+    GpuPtr m_vertex_ptr;
 
-    Handle<Buffer>            m_constant_buffer;
+    GpuPtr                    m_constant_buffer;
     Handle<Texture>           m_depth_texture;
     Handle<DepthStencilState> m_depth_stencil_state;
 

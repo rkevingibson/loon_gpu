@@ -46,8 +46,8 @@ static ImGui_ImplLoon_Data* GetBackendData() {
 
 // Buffers used during the rendering of a frame
 struct ImGui_ImplLoon_RenderBuffers {
-    gpu::Handle<gpu::Buffer> buffer;
-    size_t                   buffer_size;
+    gpu::GpuPtr buffer;
+    size_t      buffer_size;
 };
 
 static void SetupRenderState(ImDrawData*                   draw_data,
@@ -160,7 +160,7 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
 
         gpu::cmd_copy_to_texture(
             cmd,
-            gpu::get_device_pointer(bd->device, fb->buffer),
+            fb->buffer,
             backend_tex->texture,
             gpu::BufferToTextureCopyInfo{
                 .buffer_image_size
@@ -392,8 +392,6 @@ void Render(gpu::CommandBuffer cmd) {
 
     VertexInput* draw_args = (VertexInput*)(buffer_host + vertex_data_size + index_data_size);
 
-    const auto device_ptr = gpu::get_device_pointer(bd->device, fr->buffer);
-
     // Setup desired state
 
     SetupRenderState(draw_data, cmd, fr);
@@ -408,7 +406,7 @@ void Render(gpu::CommandBuffer cmd) {
     // Render command lists
     // (Because we merged all buffers into a single one, we maintain our own
     // offset into them)
-    gpu::GpuPtr global_vtx_ptr = device_ptr;
+    gpu::GpuPtr global_vtx_ptr = fr->buffer;
     gpu::GpuPtr global_idx_ptr = global_vtx_ptr + vertex_data_size;
     gpu::GpuPtr args_ptr       = global_idx_ptr + index_data_size;
 

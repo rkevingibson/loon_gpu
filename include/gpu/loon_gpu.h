@@ -210,7 +210,6 @@ typedef struct DeviceImpl*        Device;
 typedef struct QueueImpl*         Queue;
 typedef struct CommandBufferImpl* CommandBuffer;
 struct Pipeline;
-struct Buffer;
 struct Texture;
 struct TextureHeap;
 struct DepthStencilState;
@@ -726,11 +725,10 @@ SurfaceTextureInfo  get_current_texture(Device d);
 SurfaceStatus       present(Device d, Queue queue);
 
 // Buffers:
-Handle<Buffer> malloc(Device d, size_t bytes, Memory memory = Memory::Default);
-Handle<Buffer> malloc(Device d, size_t bytes, size_t align, Memory memory = Memory::Default);
-void           free(Device d, Handle<Buffer> buffer);
-GpuPtr         get_device_pointer(Device d, Handle<Buffer> buffer);
-void*          get_host_pointer(Device d, Handle<Buffer> buffer);
+GpuPtr malloc(Device d, size_t bytes, Memory memory = Memory::Default);
+GpuPtr malloc(Device d, size_t bytes, size_t align, Memory memory = Memory::Default);
+void   free(Device d, GpuPtr ptr);
+void*  get_host_pointer(Device d, GpuPtr ptr);
 
 // Textures:
 TextureSizeAlign get_texture_size_align(Device d, const TextureDesc& desc);

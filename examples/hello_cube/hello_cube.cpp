@@ -129,8 +129,7 @@ HelloCube::HelloCube(const WindowState& window_state) {
 
     m_queue = gpu::get_queue(m_device);
 
-    m_geometry_buffer = gpu::malloc(m_device, Cube::kSize, Memory::Gpu);
-    m_vertex_ptr      = gpu::get_device_pointer(m_device, m_geometry_buffer);
+    m_vertex_ptr = gpu::malloc(m_device, Cube::kSize, Memory::Gpu);
 
     m_constant_buffer = gpu::malloc(m_device, 1024ull * 1024);
     // Copy over the geometry to the geometry buffer
@@ -138,10 +137,7 @@ HelloCube::HelloCube(const WindowState& window_state) {
     Cube::write(dst);
 
     auto cmd = gpu::queue_start_command_recording(m_queue);
-    gpu::cmd_memcpy(cmd,
-                    m_vertex_ptr,
-                    gpu::get_device_pointer(m_device, m_constant_buffer),
-                    Cube::kSize);
+    gpu::cmd_memcpy(cmd, m_vertex_ptr, m_constant_buffer, Cube::kSize);
 
     // A little excessive, but wait for the copy to be done before returning.
     gpu::cmd_barrier(cmd, StageFlags::Transfer, StageFlags::VertexShader);
@@ -266,8 +262,7 @@ void HelloCube::Update(const WindowState& window) {
     gpu::cmd_set_depth_stencil_state(cmd, m_depth_stencil_state);
     gpu::cmd_set_pipeline(cmd, m_render_pipeline);
     gpu::cmd_draw_indexed_instanced(cmd,
-                                    gpu::get_device_pointer(m_device, m_constant_buffer)
-                                        + sizeof(ShaderArgs) * (m_frame_idx % 3),
+                                    m_constant_buffer + sizeof(ShaderArgs) * (m_frame_idx % 3),
                                     0,
                                     m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kColors),
                                     36,

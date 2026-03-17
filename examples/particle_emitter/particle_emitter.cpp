@@ -163,9 +163,9 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
     GpuPtr args = m_ring_buffer.append(m_frame_idx,
                          SimGpu{.options   = m_sim.options,
                                 .dead_list = {
-                                    .indices = gpu::get_device_pointer(m_device,m_sim.dead_list),
+                                    .indices = m_sim.dead_list,
                                 },
-                                .particles =gpu::get_device_pointer(m_device,m_sim.particle_buffer),
+                                .particles =m_sim.particle_buffer,
                             });
 
     gpu::cmd_dispatch(cmd, args, {kMaxNumParticles / 64, 1, 1});
@@ -246,11 +246,11 @@ void ParticleEmitter::Update(const WindowState& window) {
     GpuPtr sim_args = m_ring_buffer.append(m_frame_idx,
                          SimGpu{.options   = m_sim.options,
                                 .dead_list = {
-                                    .indices = gpu::get_device_pointer(m_device,m_sim.dead_list),
+                                    .indices = m_sim.dead_list,
                                 },
-                                .particles = gpu::get_device_pointer(m_device,m_sim.particle_buffer),
+                                .particles = m_sim.particle_buffer,
                                 .indirect_args = indirect_args,
-                                .alive_list = gpu::get_device_pointer(m_device,m_sim.alive_list),
+                                .alive_list = m_sim.alive_list,
                             });
 
     GpuPtr vertex_args = m_ring_buffer.append(m_frame_idx, DrawSimArgs {
@@ -263,8 +263,8 @@ void ParticleEmitter::Update(const WindowState& window) {
         },
         .camera_right_worldspace = {1,0,0},
         .camera_up_worldspace = {0,1,0},
-        .particles = gpu::get_device_pointer(m_device,m_sim.particle_buffer),
-        .alive_list = gpu::get_device_pointer(m_device,m_sim.alive_list),
+        .particles = m_sim.particle_buffer,
+        .alive_list = m_sim.alive_list,
     });
 
     uint16_t indices[]   = {0, 1, 2, 2, 1, 3};
