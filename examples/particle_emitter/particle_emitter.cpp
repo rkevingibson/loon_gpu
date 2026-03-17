@@ -8,6 +8,7 @@
 #include "imgui/imgui_impl_loon.h"
 #include "shaders.h"
 
+using namespace loon;
 struct Particle {
     geometry::float3 position;
     float            life;
@@ -54,7 +55,7 @@ static Format select_surface_format(const loon::gpu::SurfaceCapabilities& surfac
 }
 
 ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
-    m_device = loon::gpu::Device::create({
+    m_device = loon::gpu::create_device({
         .gpu_preference         = GpuPreference::Discrete,
         .native_window_handle   = window_state.native_window_handle,
         .native_instance_handle = window_state.native_instance_handle,
@@ -65,7 +66,7 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
         .alloc_userdata         = nullptr,
     });
 
-    auto surface_capabilities = m_device.get_surface_capabilities();
+    auto surface_capabilities = gpu::get_surface_capabilities(m_device);
     m_swapchain_format        = select_surface_format(surface_capabilities);
 
     recreate_swapchain(window_state.width, window_state.height);
@@ -74,10 +75,12 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
     ShaderModule shader = window_state.shader_loader->load_module("particle_emitter.slang");
     const auto   get_compute_pipeline = [&](loon::gpu::Span<const char> name) -> Handle<Pipeline> {
         const auto spirv = get_spirv(shader.get(), name.data());
-        return m_device.create_compute_pipeline({
-              .spirv       = Span(spirv.data(), spirv.size()).as_bytes(),
-              .entry_point = name,
-        });
+        return gpu::create_compute_pipeline(
+            m_device,
+            {
+                  .spirv       = Span(spirv.data(), spirv.size()).as_bytes(),
+                  .entry_point = name,
+            });
     };
 
     m_reset_sim_pipeline  = get_compute_pipeline("reset_sim"_sv);
@@ -86,7 +89,7 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
 
     auto vertex_spirv   = get_spirv(shader.get(), "vertex_main");
     auto fragment_spirv = get_spirv(shader.get(), "fragment_main");
-    m_render_particle_pipeline = m_device.create_graphics_pipeline(
+    m_render_particle_pipeline = gpu::create_graphics_pipeline(m_device,
         {
             .spirv       = Span(vertex_spirv.data(), vertex_spirv.size()).as_bytes(),
             .entry_point = "vertex_main"_sv,
@@ -98,30 +101,34 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
         RasterDesc{
             .cull          = Cull::None,
             .depth_format  = loon::gpu::Format::Depth32Float,
-            .color_targets = ColorTarget{.format = m_swapchain_format},
-            .blendstate = {
-                  .color_op = Blend::Add,
-                  .src_color_factor = Factor::SrcAlpha,
-                  .dst_color_factor = Factor::OneMinusSrcAlpha,
-                  .src_alpha_factor = Factor::One,
-                  .dst_alpha_factor = Factor::OneMinusSrcAlpha,
-              },
+            .color_targets = ColorTarget{
+                .format = m_swapchain_format,
+                .blendstate = BlendDesc{
+                    .color_op = Blend::Add,
+                    .src_color_factor = Factor::SrcAlpha,
+                    .dst_color_factor = Factor::OneMinusSrcAlpha,
+                    .src_alpha_factor = Factor::One,
+                    .dst_alpha_factor = Factor::OneMinusSrcAlpha,
+                },
+            },
         });
     assert(m_update_sim_pipeline.h != 0);
     assert(m_render_particle_pipeline.h != 0);
 
-    m_queue = m_device.get_queue();
+    m_queue = gpu::get_queue(m_device);
 
-    m_depth_stencil_state = m_device.create_depth_stencil_state(DepthStencilDesc{
-        .depth_mode = loon::gpu::DepthFlags::Read,
-        .depth_test = Op::Greater,
-    });
+    m_depth_stencil_state
+        = gpu::create_depth_stencil_state(m_device,
+                                          DepthStencilDesc{
+                                              .depth_mode = loon::gpu::DepthFlags::Read,
+                                              .depth_test = Op::Greater,
+                                          });
 
     // Particle sim initialization:
-    m_sim.particle_buffer = m_device.malloc(sizeof(Particle) * kMaxNumParticles, Memory::Gpu);
+    m_sim.particle_buffer = gpu::malloc(m_device, sizeof(Particle) * kMaxNumParticles, Memory::Gpu);
     m_sim.dead_list
-        = m_device.malloc(sizeof(uint32_t) * kMaxNumParticles + sizeof(int32_t), Memory::Gpu);
-    m_sim.alive_list = m_device.malloc(sizeof(uint32_t) * kMaxNumParticles, Memory::Gpu);
+        = gpu::malloc(m_device, sizeof(uint32_t) * kMaxNumParticles + sizeof(int32_t), Memory::Gpu);
+    m_sim.alive_list = gpu::malloc(m_device, sizeof(uint32_t) * kMaxNumParticles, Memory::Gpu);
     m_sim.options    = {
            .spawn_pos         = geometry::float3(0, 0, 0),
            .spawn_radius      = 0.5f,
@@ -138,7 +145,7 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
 
     // Imgui setup
 
-    m_texture_heap = m_device.create_texture_heap(1024);
+    m_texture_heap = gpu::create_texture_heap(m_device, 1024);
     loon::imgui::Init({
         .device                    = m_device,
         .queue                     = m_queue,
@@ -151,54 +158,60 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
 
 
     // Reset the particle sim
-    auto cmd = m_queue.start_command_recording();
-    cmd.set_pipeline(m_reset_sim_pipeline);
+    auto cmd = gpu::queue_start_command_recording(m_queue);
+    gpu::cmd_set_pipeline(cmd, m_reset_sim_pipeline);
     GpuPtr args = m_ring_buffer.append(m_frame_idx,
                          SimGpu{.options   = m_sim.options,
                                 .dead_list = {
-                                    .indices = m_device.get_device_pointer(m_sim.dead_list),
+                                    .indices = gpu::get_device_pointer(m_device,m_sim.dead_list),
                                 },
-                                .particles =m_device.get_device_pointer(m_sim.particle_buffer),
+                                .particles =gpu::get_device_pointer(m_device,m_sim.particle_buffer),
                             });
 
-    cmd.dispatch(args, {kMaxNumParticles / 64, 1, 1});
-    cmd.barrier(StageFlags::Compute, StageFlags::Compute);
-    m_queue.submit(cmd);
+    gpu::cmd_dispatch(cmd, args, {kMaxNumParticles / 64, 1, 1});
+    gpu::cmd_barrier(cmd, StageFlags::Compute, StageFlags::Compute);
+    gpu::cmd_finalize(cmd);
+    gpu::queue_submit(m_queue, cmd);
 
-    m_device.wait_for_device_idle();
+    gpu::device_wait_for_idle(m_device);
 }
 
 ParticleEmitter::~ParticleEmitter() {
-    m_device.wait_for_device_idle();
+    gpu::device_wait_for_idle(m_device);
     loon::imgui::Shutdown();
+    m_ring_buffer = RingBuffer();
+    destroy_device(m_device);
 }
 
 
 void ParticleEmitter::recreate_swapchain(uint32_t width, uint32_t height) {
-    m_device.wait_for_device_idle();
-    m_device.unconfigure_surface();
-    m_device.configure_surface({
-        .format       = m_swapchain_format,
-        .usages       = loon::gpu::UsageFlags::ColorAttachment,
-        .width        = width,
-        .height       = height,
-        .present_mode = PresentMode::Fifo,
-    });
+    gpu::device_wait_for_idle(m_device);
+    gpu::unconfigure_surface(m_device);
+    gpu::configure_surface(m_device,
+                           {
+                               .format       = m_swapchain_format,
+                               .usages       = loon::gpu::UsageFlags::ColorAttachment,
+                               .width        = width,
+                               .height       = height,
+                               .present_mode = PresentMode::Fifo,
+                           });
     m_swapchain_width  = width;
     m_swapchain_height = height;
 
     // Recreate depth buffer as well
-    if (m_depth_texture) { m_device.free(m_depth_texture); }
-    m_depth_texture = m_device.create_texture({
-        .type       = TextureType::Tex2D,
-        .dimensions = {.x = width, .y = height, .z = 1},
-        .format     = loon::gpu::Format::Depth32Float,
-        .usage      = loon::gpu::UsageFlags::DepthStencilAttachment,
-    });
+    if (m_depth_texture) { gpu::free(m_device, m_depth_texture); }
+    m_depth_texture
+        = gpu::create_texture(m_device,
+                              {
+                                  .type       = TextureType::Tex2D,
+                                  .dimensions = {.x = width, .y = height, .z = 1},
+                                  .format     = loon::gpu::Format::Depth32Float,
+                                  .usage      = loon::gpu::UsageFlags::DepthStencilAttachment,
+                              });
 }
 
 void ParticleEmitter::Update(const WindowState& window) {
-    auto surface_texture = m_device.get_current_texture();
+    auto surface_texture = gpu::get_current_texture(m_device);
     if (surface_texture.status == SurfaceStatus::OutOfDate
         || surface_texture.status == SurfaceStatus::Suboptimal) {
         recreate_swapchain(window.width, window.height);
@@ -233,11 +246,11 @@ void ParticleEmitter::Update(const WindowState& window) {
     GpuPtr sim_args = m_ring_buffer.append(m_frame_idx,
                          SimGpu{.options   = m_sim.options,
                                 .dead_list = {
-                                    .indices = m_device.get_device_pointer(m_sim.dead_list),
+                                    .indices = gpu::get_device_pointer(m_device,m_sim.dead_list),
                                 },
-                                .particles = m_device.get_device_pointer(m_sim.particle_buffer),
+                                .particles = gpu::get_device_pointer(m_device,m_sim.particle_buffer),
                                 .indirect_args = indirect_args,
-                                .alive_list = m_device.get_device_pointer(m_sim.alive_list),
+                                .alive_list = gpu::get_device_pointer(m_device,m_sim.alive_list),
                             });
 
     GpuPtr vertex_args = m_ring_buffer.append(m_frame_idx, DrawSimArgs {
@@ -250,40 +263,45 @@ void ParticleEmitter::Update(const WindowState& window) {
         },
         .camera_right_worldspace = {1,0,0},
         .camera_up_worldspace = {0,1,0},
-        .particles = m_device.get_device_pointer(m_sim.particle_buffer),
-        .alive_list = m_device.get_device_pointer(m_sim.alive_list),
+        .particles = gpu::get_device_pointer(m_device,m_sim.particle_buffer),
+        .alive_list = gpu::get_device_pointer(m_device,m_sim.alive_list),
     });
 
     uint16_t indices[]   = {0, 1, 2, 2, 1, 3};
     GpuPtr   indices_ptr = m_ring_buffer.append(m_frame_idx, indices);
 
     // Rendering here.
-    auto cmd = m_queue.start_command_recording();
+    auto cmd = gpu::queue_start_command_recording(m_queue);
 
 
-    cmd.set_pipeline(m_emitter_pipeline);
-    cmd.dispatch(sim_args, Dimension3D{.x = kMaxNumParticles / 64, .y = 1, .z = 1});
-    cmd.barrier(StageFlags::Compute, StageFlags::Compute);
+    gpu::cmd_set_pipeline(cmd, m_emitter_pipeline);
+    gpu::cmd_dispatch(cmd, sim_args, Dimension3D{.x = kMaxNumParticles / 64, .y = 1, .z = 1});
+    gpu::cmd_barrier(cmd, StageFlags::Compute, StageFlags::Compute);
 
-    cmd.set_pipeline(m_update_sim_pipeline);
-    cmd.dispatch(sim_args, Dimension3D{.x = kMaxNumParticles / 64, .y = 1, .z = 1});
-    cmd.barrier(StageFlags::Compute, StageFlags::VertexShader, {}, HazardFlags::DrawArguments);
+    gpu::cmd_set_pipeline(cmd, m_update_sim_pipeline);
+    gpu::cmd_dispatch(cmd, sim_args, Dimension3D{.x = kMaxNumParticles / 64, .y = 1, .z = 1});
+    gpu::cmd_barrier(cmd,
+                     StageFlags::Compute,
+                     StageFlags::VertexShader,
+                     {},
+                     HazardFlags::DrawArguments);
 
     // Render particles
-    cmd.barrier(StageFlags::RasterColorOut,
-                StageFlags::PixelShader | StageFlags::RasterColorOut,
-                {TextureTransition{
-                     .texture    = surface_texture.texture,
-                     .old_layout = Layout::DontCare,
-                     .new_layout = Layout::Attachment,
-                 },
-                 TextureTransition{
-                     .texture    = m_depth_texture,
-                     .old_layout = Layout::DontCare,
-                     .new_layout = Layout::Attachment,
-                 }});
+    gpu::cmd_barrier(cmd,
+                     StageFlags::RasterColorOut,
+                     StageFlags::PixelShader | StageFlags::RasterColorOut,
+                     {TextureTransition{
+                          .texture    = surface_texture.texture,
+                          .old_layout = Layout::DontCare,
+                          .new_layout = Layout::Attachment,
+                      },
+                      TextureTransition{
+                          .texture    = m_depth_texture,
+                          .old_layout = Layout::DontCare,
+                          .new_layout = Layout::Attachment,
+                      }});
 
-    cmd.begin_render_pass({
+    gpu::cmd_begin_render_pass(cmd,{
         .color_attachments = RenderAttachment {
             .texture = surface_texture.texture,
             .load_op = LoadOp::Clear,
@@ -298,27 +316,29 @@ void ParticleEmitter::Update(const WindowState& window) {
         },
         .render_area = {.width = m_swapchain_width, .height = m_swapchain_height,},
     });
-    cmd.set_depth_stencil_state(m_depth_stencil_state);
-    cmd.set_pipeline(m_render_particle_pipeline);
-    cmd.draw_indexed_instanced_indirect(vertex_args, 0, indices_ptr, indirect_args);
+    gpu::cmd_set_depth_stencil_state(cmd, m_depth_stencil_state);
+    gpu::cmd_set_pipeline(cmd, m_render_particle_pipeline);
+    gpu::cmd_draw_indexed_instanced_indirect(cmd, vertex_args, 0, indices_ptr, indirect_args);
 
-    cmd.set_texture_heap(m_texture_heap);
+    gpu::cmd_set_texture_heap(cmd, m_texture_heap);
     loon::imgui::Render(cmd);
-    cmd.end_render_pass();
+    gpu::cmd_end_render_pass(cmd);
 
-    cmd.barrier(StageFlags::RasterColorOut,
-                StageFlags::RasterColorOut,
-                TextureTransition{
-                    .texture    = surface_texture.texture,
-                    .old_layout = Layout::Attachment,
-                    .new_layout = Layout::Present,
-                });
-    m_queue.submit(cmd);
+    gpu::cmd_barrier(cmd,
+                     StageFlags::RasterColorOut,
+                     StageFlags::RasterColorOut,
+                     TextureTransition{
+                         .texture    = surface_texture.texture,
+                         .old_layout = Layout::Attachment,
+                         .new_layout = Layout::Present,
+                     });
+    gpu::cmd_finalize(cmd);
+    gpu::queue_submit(m_queue, cmd);
 
-    const auto status = m_device.present(m_queue);
+    const auto status = gpu::present(m_device, m_queue);
     if (status == SurfaceStatus::OutOfDate || status == SurfaceStatus::Suboptimal) {
         recreate_swapchain(window.width, window.height);
     }
 
-    m_queue.process_events();
+    gpu::queue_process_events(m_queue);
 }

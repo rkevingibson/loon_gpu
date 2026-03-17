@@ -29,26 +29,3 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(vma)
 
-### MoltenVK
-
-if(APPLE)
-
-FetchContent_Declare(
-    moltenvk
-    URL https://github.com/KhronosGroup/MoltenVK/releases/download/v1.4.0/MoltenVK-macos.tar
-    URL_HASH SHA256=f4feaf6a4988352de8e6d49874ccc1cd6a45021e3cb476e8531bef7ecc73e93a
-)
-FetchContent_MakeAvailable(moltenvk)
-
-add_library(moltenvk SHARED IMPORTED GLOBAL)
-target_include_directories(moltenvk INTERFACE ${moltenvk_SOURCE_DIR}/MoltenVK/include )
-set_target_properties(
-        moltenvk
-        PROPERTIES
-            IMPORTED_IMPLIB ${moltenvk_SOURCE_DIR}/MoltenVK/dylib/macOS/libMoltenVK.dylib
-)
-target_link_directories(moltenvk 
-    INTERFACE ${moltenvk_SOURCE_DIR}/MoltenVK/dylib/macOS)
-    
-endif()
-

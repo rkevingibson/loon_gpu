@@ -101,8 +101,8 @@ class Span {
     constexpr const T* cbegin() const noexcept { return begin(); }
     constexpr const T* cend() const noexcept { return end(); }
 
-    Span<unsigned char> as_bytes() {
-        return Span<unsigned char>((unsigned char*)m_ptr, m_len * sizeof(T));
+    Span<const uint8_t> as_bytes() const {
+        return Span<const uint8_t>((const uint8_t*)m_ptr, m_len * sizeof(T));
     }
 
     template <typename U>
@@ -206,9 +206,9 @@ struct Handle {
     constexpr bool operator==(const Handle& other) { return other.h == h; }
 };
 
-class Device;
-class Queue;
-class CommandBuffer;
+typedef struct DeviceImpl*        Device;
+typedef struct QueueImpl*         Queue;
+typedef struct CommandBufferImpl* CommandBuffer;
 struct Pipeline;
 struct Buffer;
 struct Texture;
@@ -263,7 +263,17 @@ enum class Op : uint8_t {
     NotEqual,
     GreaterEqual,
     Always,
+};
+
+enum class StencilOp : uint8_t {
     Keep,
+    Zero,
+    Replace,
+    IncrementClamp,
+    DecrementClamp,
+    Invert,
+    IncrementWrap,
+    DecrementWrap,
 };
 
 enum class Blend : uint8_t {
@@ -494,6 +504,14 @@ enum class SamplerAddressing : uint8_t {
     Mirrored,
 };
 
+enum class ErrorType : uint8_t {
+    NoError,
+    Validation,
+    OutOfMemory,
+    Internal,
+    Unknown,
+};
+
 // Custom allocation callback - essentially a realloc function but not exactly
 // the same as the C version.
 // - ptr is null iff old_size is 0
@@ -506,6 +524,7 @@ typedef MemoryBlock (*ProcAllocatorCallback)(void*    userdata,
                                              uint32_t old_size,
                                              uint32_t new_size);
 typedef void (*ProcLogCallback)(LogLevel lvl, Span<const char> message, void* userdata);
+typedef void (*ProcErrorCallback)(ErrorType type, Span<const char> message, void* userdata);
 
 // MARK: Structs
 
@@ -532,11 +551,11 @@ struct Color {
 };
 
 struct Stencil {
-    Op      test          = Op::Always;
-    Op      fail_op       = Op::Keep;
-    Op      pass_op       = Op::Keep;
-    Op      depth_fail_op = Op::Keep;
-    uint8_t reference     = 0;
+    Op        test          = Op::Always;
+    StencilOp fail_op       = StencilOp::Keep;
+    StencilOp pass_op       = StencilOp::Keep;
+    StencilOp depth_fail_op = StencilOp::Keep;
+    uint8_t   reference     = 0;
 };
 
 struct SamplerDesc {
@@ -546,7 +565,7 @@ struct SamplerDesc {
     float             max_anisotropy = 0.0f;
 };
 
-static constexpr SamplerDesc kDefaultSamplers[] = {SamplerDesc{
+inline constexpr SamplerDesc kDefaultSamplers[] = {SamplerDesc{
     .coord          = SamplerCoords::Normalized,
     .filter         = SamplerFilter::Linear,
     .address        = SamplerAddressing::ClampToEdge,
@@ -577,7 +596,7 @@ struct DepthStencilDesc {
     uint8_t    stencil_read_mask       = 0xff;
     uint8_t    stencil_write_mask      = 0xff;
     Stencil    stencil_front;
-    Stencil    stencil_bsack;
+    Stencil    stencil_back;
 };
 
 struct BlendDesc {
@@ -591,20 +610,18 @@ struct BlendDesc {
 };
 
 struct ColorTarget {
-    Format  format     = Format::None;
-    uint8_t write_mask = 0xf;
+    Format    format     = Format::None;
+    BlendDesc blendstate = {};
 };
 
 struct RasterDesc {
-    Topology                topology                     = Topology::TriangleList;
-    Cull                    cull                         = Cull::None;
-    bool                    alpha_to_coverage            = false;
-    bool                    support_dual_source_blending = false;
-    uint8_t                 sample_count                 = 1;
-    Format                  depth_format                 = Format::None;
-    Format                  stencil_format               = Format::None;
-    Span<const ColorTarget> color_targets                = {};
-    BlendDesc               blendstate                   = {};
+    Topology                topology          = Topology::TriangleList;
+    Cull                    cull              = Cull::None;
+    bool                    alpha_to_coverage = false;
+    uint8_t                 sample_count      = 1;
+    Format                  depth_format      = Format::None;
+    Format                  stencil_format    = Format::None;
+    Span<const ColorTarget> color_targets     = {};
 };
 
 struct RenderAttachment {
@@ -645,8 +662,8 @@ struct TextureSizeAlign {
 };
 
 struct ShaderSource {
-    Span<uint8_t>    spirv;
-    Span<const char> entry_point;
+    Span<const uint8_t> spirv;
+    Span<const char>    entry_point;
 };
 
 struct SurfaceCapabilities {
@@ -695,167 +712,128 @@ struct alignas(8) DrawIndexedIndirectArgs {
     uint32_t first_instance;
 };
 
-///
-// The main GPU logical device.
-// This is a reference-counted object,
-///
-class Device {
-   public:
-    static Device create(const DeviceDesc& desc);
-    Device() = default;
-    ~Device();
-    Device(const Device&);
-    Device(Device&& other) : impl(std::exchange(other.impl, nullptr)) {}
-    Device& operator=(const Device&);
-    Device& operator=(Device&& other) {
-        impl = std::exchange(other.impl, impl);
-        return *this;
-    }
 
-    void wait_for_device_idle();
+Device create_device(const DeviceDesc&);
+void   destroy_device(Device d);
 
-    // Surface:
-    SurfaceCapabilities get_surface_capabilities();
-    bool                configure_surface(const SurfaceConfiguration& config);
-    void                unconfigure_surface();
-    SurfaceTextureInfo  get_current_texture();
-    SurfaceStatus       present(Queue queue);
+void device_wait_for_idle(Device d);
 
-    // Buffers:
-    Handle<Buffer> malloc(size_t bytes, Memory memory = Memory::Default);
-    Handle<Buffer> malloc(size_t bytes, size_t align, Memory memory = Memory::Default);
-    void           free(Handle<Buffer> buffer);
-    GpuPtr         get_device_pointer(Handle<Buffer> buffer);
-    void*          get_host_pointer(Handle<Buffer> buffer);
+// Surface:
+SurfaceCapabilities get_surface_capabilities(Device d);
+bool                configure_surface(Device d, const SurfaceConfiguration& config);
+void                unconfigure_surface(Device d);
+SurfaceTextureInfo  get_current_texture(Device d);
+SurfaceStatus       present(Device d, Queue queue);
 
-    // Textures:
-    Handle<Texture>     create_texture(const TextureDesc& desc);
-    Handle<TextureHeap> create_texture_heap(size_t size);
-    void                free(Handle<Texture>);
-    void                free(Handle<TextureHeap>);
+// Buffers:
+Handle<Buffer> malloc(Device d, size_t bytes, Memory memory = Memory::Default);
+Handle<Buffer> malloc(Device d, size_t bytes, size_t align, Memory memory = Memory::Default);
+void           free(Device d, Handle<Buffer> buffer);
+GpuPtr         get_device_pointer(Device d, Handle<Buffer> buffer);
+void*          get_host_pointer(Device d, Handle<Buffer> buffer);
 
-    TextureView add_texture_view_to_heap(Handle<TextureHeap>, const TextureViewDesc& desc);
-    void        remove_texture_view_from_heap(Handle<TextureHeap>, TextureView);
+// Textures:
+TextureSizeAlign get_texture_size_align(Device d, const TextureDesc& desc);
 
-    // Pipelines
-    Handle<Pipeline> create_compute_pipeline(ShaderSource compute);
-    Handle<Pipeline> create_graphics_pipeline(ShaderSource      vertex,
-                                              ShaderSource      fragment,
-                                              const RasterDesc& desc);
-    void             free(Handle<Pipeline> pipeline);
+// Create a new new texture with the provided descriptor. If location != 0, then the texture is
+// allocated at that location in Gpu memory. Note that textures can only be created in memory
+// allocated with Memory::Gpu - no host-visible textures can be created. If location == 0,
+// memory is allocated for the texture.
+Handle<Texture>     create_texture(Device d, const TextureDesc& desc, GpuPtr location = 0);
+Handle<TextureHeap> create_texture_heap(Device d, size_t size);
+void                free(Device d, Handle<Texture>);
+void                free(Device d, Handle<TextureHeap>);
 
-    // State objects
-    Handle<DepthStencilState> create_depth_stencil_state(DepthStencilDesc desc);
-    void                      free_depth_stencil_state(Handle<DepthStencilState> state);
+TextureView add_texture_view_to_heap(Device d, Handle<TextureHeap>, const TextureViewDesc& desc);
+void        remove_texture_view_from_heap(Device d, Handle<TextureHeap>, TextureView);
 
-    // Queue
-    Queue get_queue(QueueType type = QueueType::Default);
+// Pipelines
+Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource compute);
+Handle<Pipeline> create_graphics_pipeline(Device            d,
+                                          ShaderSource      vertex,
+                                          ShaderSource      fragment,
+                                          const RasterDesc& desc);
+void             free(Device d, Handle<Pipeline> pipeline);
 
-    // Semaphores
-    Handle<Semaphore> create_semaphore(uint64_t initValue);
-    void              wait_semaphore(Handle<Semaphore> sema, uint64_t value);
-    void              free(Handle<Semaphore> sema);
+// State objects
+Handle<DepthStencilState> create_depth_stencil_state(Device d, const DepthStencilDesc& desc);
+void                      free_depth_stencil_state(Device d, Handle<DepthStencilState> state);
 
-   private:
-    struct Impl;
-    Impl* impl = nullptr;
-    friend class CommandBuffer;
-    friend class Queue;
+// Semaphores
+Handle<Semaphore> create_semaphore(Device d, uint64_t initValue);
+void              wait_semaphore(Device d, Handle<Semaphore> sema, uint64_t value);
+void              free(Device d, Handle<Semaphore> sema);
 
-    Device(Impl* impl) : impl{impl} {};
-};
+// Queue Functions
+Queue         get_queue(Device d, QueueType type = QueueType::Default);
+CommandBuffer queue_start_command_recording(Queue q);
+void          queue_submit(Queue                     q,
+                           Span<const CommandBuffer> command_buffers,
+                           Span<const SemaphoreInfo> wait_semaphores   = {},
+                           Span<const SemaphoreInfo> signal_semaphores = {});
+void          queue_cancel(Queue q, Span<const Handle<CommandBuffer>> command_buffers);
+void          queue_on_submitted_work_completed(Queue q, Function<void>&& fn);
+void          queue_process_events(Queue q);
 
-class Queue {
-   public:
-    Queue()                        = default;
-    Queue(const Queue&)            = default;
-    Queue& operator=(const Queue&) = default;
 
-    CommandBuffer start_command_recording();
-    void          submit(Span<const CommandBuffer> command_buffers,
-                         Span<const SemaphoreInfo> wait_semaphores   = {},
-                         Span<const SemaphoreInfo> signal_semaphores = {});
-    void          cancel(Span<const Handle<CommandBuffer>> command_buffers);
-    void          on_submitted_work_completed(Function<void>&& fn);
-    void          process_events();
-
-   private:
-    void* queue;
-    void* device;
-    friend class Device::Impl;
-    Queue(void* q, void* d) : queue(q), device(d) {}
-};
-
-class CommandBuffer {
-   public:
-    CommandBuffer()                                = default;
-    CommandBuffer(const CommandBuffer&)            = default;
-    CommandBuffer& operator=(const CommandBuffer&) = default;
-
-    // Commands
-    void memcpy(GpuPtr destGpu, GpuPtr srcGpu, size_t size);
-    void copy_to_texture(GpuPtr src, Handle<Texture> texture, const BufferToTextureCopyInfo& info);
-    void copy_from_texture(GpuPtr destGpu, GpuPtr srcGpu, Handle<Texture> texture);
-
-    void set_texture_heap(Handle<TextureHeap> heap);
-
-    void barrier(StageFlags                    before,
+// CommandBuffer
+void cmd_memcpy(CommandBuffer cmd, GpuPtr destGpu, GpuPtr srcGpu, size_t size);
+void cmd_copy_to_texture(CommandBuffer                  cmd,
+                         GpuPtr                         src,
+                         Handle<Texture>                texture,
+                         const BufferToTextureCopyInfo& info);
+void cmd_copy_from_texture(CommandBuffer   cmd,
+                           GpuPtr          destGpu,
+                           GpuPtr          srcGpu,
+                           Handle<Texture> texture);
+void cmd_set_texture_heap(CommandBuffer cmd, Handle<TextureHeap> heap);
+void cmd_barrier(CommandBuffer                 cmd,
+                 StageFlags                    before,
                  StageFlags                    after,
                  Span<const TextureTransition> image_transitions = {},
                  HazardFlags                   hazards           = HazardFlags(0));
-
-    void set_pipeline(Handle<Pipeline> pipeline);
-    void set_depth_stencil_state(Handle<DepthStencilState> state);
-    void set_scissor_rect(const Rect2D& rect);
-
-    void dispatch(GpuPtr dataGpu, const Dimension3D& gridDimensions);
-    void dispatch_indirect(GpuPtr dataGpu, GpuPtr gridDimensionsGpu);
-
-    void begin_render_pass(RenderPassDesc desc);
-    void end_render_pass();
-
-    void draw(GpuPtr   vertexDataGpu,
-              GpuPtr   fragmentDataGpu,
-              uint32_t vertexCount,
-              uint32_t instanceCount);
-    void draw_indexed_instanced(GpuPtr   vertexDataGpu,
-                                GpuPtr   pixelDataGpu,
-                                GpuPtr   indicesGpu,
-                                uint32_t indexCount,
-                                uint32_t instanceCount);
-    void draw_indexed_instanced_indirect(GpuPtr vertexDataGpu,
-                                         GpuPtr pixelDataGpu,
-                                         GpuPtr indicesGpu,
-                                         GpuPtr argsGpu);
-    void draw_indexed_instanced_indirect_multi(GpuPtr   vertexDataGpu,
-                                               GpuPtr   pixelDataGpu,
-                                               GpuPtr   indicesGpu,
-                                               GpuPtr   argsGpu,
-                                               GpuPtr   drawCountGpu,
-                                               uint32_t maxDraws);
-
-   private:
-    void set_compute_ptr(GpuPtr dataGpu);
-    void set_graphics_ptrs(GpuPtr vertexDataGpu, GpuPtr fragmentDataGpu);
-
-    friend class Queue;
-    CommandBuffer(void* buffer, void* device) : buffer{buffer}, device(device) {};
-    void* buffer;
-    void* device;
-};
+void cmd_set_pipeline(CommandBuffer cmd, Handle<Pipeline> pipeline);
+void cmd_set_depth_stencil_state(CommandBuffer cmd, Handle<DepthStencilState> state);
+void cmd_set_scissor_rect(CommandBuffer cmd, const Rect2D& rect);
+void cmd_dispatch(CommandBuffer cmd, GpuPtr dataGpu, const Dimension3D& gridDimensions);
+void cmd_dispatch_indirect(CommandBuffer cmd, GpuPtr dataGpu, GpuPtr gridDimensionsGpu);
+void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc);
+void cmd_end_render_pass(CommandBuffer cmd);
+void cmd_draw(CommandBuffer cmd,
+              GpuPtr        vertexDataGpu,
+              GpuPtr        fragmentDataGpu,
+              uint32_t      vertexCount,
+              uint32_t      instanceCount);
+void cmd_draw_indexed_instanced(CommandBuffer cmd,
+                                GpuPtr        vertexDataGpu,
+                                GpuPtr        pixelDataGpu,
+                                GpuPtr        indicesGpu,
+                                uint32_t      indexCount,
+                                uint32_t      instanceCount);
+void cmd_draw_indexed_instanced_indirect(CommandBuffer cmd,
+                                         GpuPtr        vertexDataGpu,
+                                         GpuPtr        pixelDataGpu,
+                                         GpuPtr        indicesGpu,
+                                         GpuPtr        argsGpu);
+void cmd_draw_indexed_instanced_indirect_multi(CommandBuffer cmd,
+                                               GpuPtr        vertexDataGpu,
+                                               GpuPtr        pixelDataGpu,
+                                               GpuPtr        indicesGpu,
+                                               GpuPtr        argsGpu,
+                                               GpuPtr        drawCountGpu,
+                                               uint32_t      maxDraws);
+void cmd_finalize(CommandBuffer cmd);
 
 extern template class Span<const char>;
 extern template class Span<uint8_t>;
-extern template class Span<const gpu::SamplerDesc>;
-extern template class Span<const gpu::ColorTarget>;
-extern template class Span<const gpu::RenderAttachment>;
-extern template class Span<const gpu::Format>;
-extern template class Span<const gpu::PresentMode>;
-extern template class Span<const gpu::CommandBuffer>;
-extern template class Span<const gpu::SemaphoreInfo>;
-extern template class Span<const Handle<gpu::CommandBuffer>>;
-extern template class Span<const gpu::TextureTransition>;
-extern template class Function<void>;
+extern template class Span<const SamplerDesc>;
+extern template class Span<const ColorTarget>;
+extern template class Span<const RenderAttachment>;
+extern template class Span<const Format>;
+extern template class Span<const PresentMode>;
+extern template class Span<const CommandBuffer>;
+extern template class Span<const SemaphoreInfo>;
+extern template class Span<const TextureTransition>;
 extern template class Function<void>;
 
 }  // namespace loon::gpu
