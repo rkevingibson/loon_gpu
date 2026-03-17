@@ -878,10 +878,29 @@ SurfaceStatus present(Device d, Queue queue);
 
 /// @{
 
+/**
+ * @brief Allocate memory with the specified size and type.
+ *
+ */
 GpuPtr malloc(Device d, size_t bytes, Memory memory = Memory::Default);
+
+/**
+ * @brief Allocate memory with the specified size, alignment and type.
+ *
+ */
 GpuPtr malloc(Device d, size_t bytes, size_t align, Memory memory = Memory::Default);
-void   free(Device d, GpuPtr ptr);
-void*  get_host_pointer(Device d, GpuPtr ptr);
+
+/**
+ * @brief Free a pointer allocated with malloc
+ *
+ */
+void free(Device d, GpuPtr ptr);
+
+/**
+ * @brief Get the corresponding CPU-side pointer for a GPU pointer.
+ *
+ */
+void* get_host_pointer(Device d, GpuPtr ptr);
 
 /**
  * @brief Get the texture size align object
