@@ -46,6 +46,26 @@ target_include_directories(
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
 
+if (APPLE AND NOT LOON_GPU_USE_KOSMICKRISP)
+
+target_sources(
+    loon_gpu 
+    PRIVATE 
+    src/mtl/loon_gpu.cpp
+    src/mtl/gpu_to_mtl.cpp
+)
+target_link_libraries(loon_gpu PRIVATE metal-cpp)
+
+target_link_libraries(loon_gpu
+    PRIVATE
+    "-framework Foundation"
+    "-framework Metal"
+    "-framework QuartzCore"
+    "-framework CoreGraphics"
+    )
+
+set (TARGETS loon_gpu metal-cpp)
+else()
 set(SOURCES
     src/vk/loon_gpu.cpp
     src/vk/vma_usage.cpp
@@ -67,6 +87,7 @@ target_compile_definitions(
 )
 
 set (TARGETS loon_gpu volk VulkanMemoryAllocator)
+endif()
 
 if (LOON_GPU_WERROR)
     if (MSVC)
