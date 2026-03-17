@@ -478,7 +478,7 @@ static SurfaceCreationResult create_surface(VkInstance instance, const DeviceDes
             .hinstance = (HINSTANCE)desc.native_instance_handle,
             .hwnd      = (HWND)desc.native_window_handle,
         };
-        result = vkCreateWin32SurfaceKHR(m_instance, &surface_info, nullptr, &surface);
+        result = vkCreateWin32SurfaceKHR(instance, &surface_info, nullptr, &surface);
 #elif defined(VK_USE_PLATFORM_XLIB_KHR)
         const VkXlibSurfaceCreateInfoKHR surface_info{
             .sType  = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR,
@@ -754,14 +754,14 @@ static MemoryRequirements get_memory_requirements(const VolkDeviceTable& api, Vk
     // and depth images. For Default and Readback, we only need to meet the requirements of
     // buffer allocation, since we don't support making textures on those memory types.
 
-    return MemoryRequirements{.buffer_mem_requirements = buffer_requirements,
-                              .gpu_mem_requirements    = VkMemoryRequirements{
+    return MemoryRequirements{.gpu_mem_requirements    = VkMemoryRequirements{
                                      .size           = 0,
                                      .alignment      = alignment,
                                      .memoryTypeBits = buffer_requirements.memoryTypeBits
                                                     & color_image_requirements.memoryTypeBits
                                                     & depth_image_requirements.memoryTypeBits,
                               },
+                            .buffer_mem_requirements = buffer_requirements,
                             .result = VK_SUCCESS,};
 }
 
