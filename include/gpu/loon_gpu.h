@@ -20,7 +20,7 @@
     }
 
 #define LOON_BITWISE_ASSIGNMENT_OP(name, op)                                                       \
-    inline constexpr name operator op##=(name lhs, name rhs) {                                     \
+    inline constexpr name operator op## = (name lhs, name rhs) {                                   \
         lhs = lhs op rhs;                                                                          \
         return lhs;                                                                                \
     }
@@ -37,6 +37,7 @@
 namespace loon::gpu {
 
 constexpr size_t kMaxTextureHeapSize = 32ull * 1024;
+constexpr size_t kMaxNumSamplers     = 4000;
 constexpr size_t kMaxNumTextureHeaps = 1024;
 
 template <class T>
@@ -217,6 +218,7 @@ struct Semaphore;
 
 using GpuPtr      = uint64_t;
 using TextureView = uint64_t;
+using Sampler     = uint64_t;
 
 // MARK: Enums
 
@@ -564,13 +566,10 @@ struct SamplerDesc {
     float             max_anisotropy = 0.0f;
 };
 
-inline constexpr SamplerDesc kDefaultSamplers[] = {SamplerDesc{
-    .coord          = SamplerCoords::Normalized,
-    .filter         = SamplerFilter::Linear,
-    .address        = SamplerAddressing::ClampToEdge,
-    .max_anisotropy = 1.0f,
-}};
-
+/**
+ * @brief Descriptor for initializing a device.
+ *
+ */
 struct DeviceDesc {
     GpuPreference gpu_preference = GpuPreference::Discrete;
 
@@ -582,8 +581,6 @@ struct DeviceDesc {
     LogLevel              log_level      = LogLevel::Off;
     ProcAllocatorCallback alloc_callback = nullptr;
     void*                 alloc_userdata = nullptr;
-
-    Span<const SamplerDesc> samplers = kDefaultSamplers;
 };
 
 struct DepthStencilDesc {
@@ -644,6 +641,12 @@ struct TextureDesc {
     uint32_t    sample_count = 1;
     Format      format       = Format::None;
     UsageFlags  usage        = UsageFlags::None;
+};
+
+struct TextureHeapDesc {
+    uint32_t texture_count    = 0;
+    uint32_t rw_texture_count = 0;
+    uint32_t sampler_count    = 0;
 };
 
 struct TextureViewDesc {
@@ -738,12 +741,18 @@ TextureSizeAlign get_texture_size_align(Device d, const TextureDesc& desc);
 // allocated with Memory::Gpu - no host-visible textures can be created. If location == 0,
 // memory is allocated for the texture.
 Handle<Texture>     create_texture(Device d, const TextureDesc& desc, GpuPtr location = 0);
-Handle<TextureHeap> create_texture_heap(Device d, size_t size);
-void                free(Device d, Handle<Texture>);
-void                free(Device d, Handle<TextureHeap>);
+Handle<TextureHeap> create_texture_heap(Device d, const TextureHeapDesc& desc);
+
+void free(Device d, Handle<Texture>);
+void free(Device d, Handle<TextureHeap>);
+void free(Device d, Handle<Sampler>);
 
 TextureView add_texture_view_to_heap(Device d, Handle<TextureHeap>, const TextureViewDesc& desc);
+TextureView add_rw_texture_view_to_heap(Device d, Handle<TextureHeap>, const TextureViewDesc& desc);
+Sampler     add_sampler_to_heap(Device d, Handle<TextureHeap>, const SamplerDesc& sampler);
 void        remove_texture_view_from_heap(Device d, Handle<TextureHeap>, TextureView);
+void        remove_rw_texture_view_from_heap(Device d, Handle<TextureHeap>, TextureView);
+void        remove_sampler_from_heap(Device d, Handle<TextureHeap>, Sampler);
 
 // Pipelines
 Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource compute);
@@ -824,7 +833,6 @@ void cmd_finalize(CommandBuffer cmd);
 
 extern template class Span<const char>;
 extern template class Span<uint8_t>;
-extern template class Span<const SamplerDesc>;
 extern template class Span<const ColorTarget>;
 extern template class Span<const RenderAttachment>;
 extern template class Span<const Format>;

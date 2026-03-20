@@ -26,6 +26,7 @@ struct ImGui_ImplLoon_Data {
     gpu::Format                         depth_format;
     gpu::Handle<gpu::TextureHeap>       texture_heap;
     gpu::Handle<gpu::DepthStencilState> depth_stencil_state;
+    gpu::Sampler                        sampler;
     uint32_t                            num_frames_in_flight;
     ShaderLoader*                       shader_loader;
 
@@ -118,7 +119,6 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
                                                 .texture = backend_tex->texture,
                                                 .format  = loon::gpu::Format::RGBA8Unorm,
                                             });
-
         // Store identifiers
         // Because invalid tex id == 0, we add one here and subtract on retrieval.
         tex->SetTexID((ImTextureID)backend_tex->tex_heap_idx + 1);
@@ -228,7 +228,9 @@ static bool CreateDeviceObjects() {
         },
       });
 
-    // Create depth-stencil State?
+    bd->sampler = gpu::add_sampler_to_heap(bd->device, bd->texture_heap, SamplerDesc{});
+
+    // Create depth-stencil State
     bd->depth_stencil_state
         = gpu::create_depth_stencil_state(bd->device,
                                           DepthStencilDesc{
@@ -246,6 +248,9 @@ void InvalidateDeviceObjects() {
     // Destroy GPU resources, pipelines, etc.
     gpu::free(bd->device, bd->pipelineState);
     bd->pipelineState.h = 0;
+    gpu::free_depth_stencil_state(bd->device, bd->depth_stencil_state);
+    bd->depth_stencil_state.h = 0;
+    gpu::remove_sampler_from_heap(bd->device, bd->texture_heap, bd->sampler);
 
     // Destroy all textures
     for (ImTextureData* tex : ImGui::GetPlatformIO().Textures)
@@ -331,6 +336,16 @@ struct alignas(64) VertexInput {
     gpu::GpuPtr vertex_buffer;
 };
 
+struct alignas(64) FragmentInput {
+    gpu::TextureView texture;
+    gpu::Sampler     sampler;
+};
+
+struct DrawArgs {
+    VertexInput   vert;
+    FragmentInput frag;
+};
+
 static gpu::GpuPtr AlignAddress(gpu::GpuPtr size, gpu::GpuPtr alignment) {
     return (size + alignment - 1) & ~(alignment - 1);
 }
@@ -366,7 +381,7 @@ void Render(gpu::CommandBuffer cmd) {
     for (const ImDrawList* draw_list : draw_data->CmdLists) {
         num_draws += draw_list->CmdBuffer.size();
     }
-    const size_t args_size            = AlignAddress(sizeof(VertexInput) * num_draws, 64);
+    const size_t args_size            = AlignAddress(sizeof(DrawArgs) * num_draws, 64);
     const size_t required_buffer_size = vertex_data_size + index_data_size + args_size;
 
     if (required_buffer_size == 0) { return; }
@@ -390,7 +405,7 @@ void Render(gpu::CommandBuffer cmd) {
         idx_dst += draw_list->IdxBuffer.Size;
     }
 
-    VertexInput* draw_args = (VertexInput*)(buffer_host + vertex_data_size + index_data_size);
+    DrawArgs* draw_args = (DrawArgs*)(buffer_host + vertex_data_size + index_data_size);
 
     // Setup desired state
 
@@ -453,21 +468,25 @@ void Render(gpu::CommandBuffer cmd) {
                 gpu::GpuPtr vertex_buf = global_vtx_ptr + (pcmd->VtxOffset * sizeof(ImDrawVert));
                 gpu::GpuPtr index_buf  = global_idx_ptr + (pcmd->IdxOffset * sizeof(ImDrawIdx));
 
-                *draw_args = {
-                    .scale         = scale,
-                    .translate     = translate,
-                    .padding       = {0, 0},
-                    .vertex_buffer = vertex_buf,
-                };
+                *draw_args = DrawArgs{.vert{
+                                  .scale         = scale,
+                                  .translate     = translate,
+                                  .padding       = {0, 0},
+                                  .vertex_buffer = vertex_buf,
+                              },
+                              .frag = {
+                                  .texture = tex_id,
+                                  .sampler = bd->sampler,
+                              },};
 
                 gpu::cmd_draw_indexed_instanced(cmd,
                                                 args_ptr,
-                                                tex_id,
+                                                args_ptr + offsetof(DrawArgs, frag),
                                                 index_buf,
                                                 pcmd->ElemCount,
                                                 1);
 
-                args_ptr += sizeof(VertexInput);
+                args_ptr += sizeof(DrawArgs);
                 draw_args++;
             }
         }

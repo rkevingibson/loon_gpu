@@ -1,3 +1,5 @@
+import loon;
+
 struct CameraData {
     float4x4 projection;
     float4x4 cameraFromWorld;
@@ -21,9 +23,14 @@ struct VertexStageOutput
     float2 uv;
 };
 
+struct FragmentInput {
+    DescriptorHandle<Texture2D> texture;
+    DescriptorHandle<SamplerState> sampler;
+};
+
 struct Args {
     InputData* vert;
-    DescriptorHandle<Texture2D> texture;
+    FragmentInput* frag;
 };
 
 [[vk::push_constant]] uniform Args args;
@@ -42,10 +49,8 @@ VertexStageOutput vertexMain(uint32_t vertexIdx : SV_VertexID)
 }
 
 [shader("fragment")]
-float4 fragmentMain(VertexStageOutput vertex ) : SV_Target
+float4 fragmentMain(VertexStageOutput vertex) : SV_Target
 {
-    // Declaring a sampler locally works:
-    let kSampler = DescriptorHandle<SamplerState>(uint2(0, 0));
-    float4 out_color = args.texture.Sample(kSampler, vertex.uv);
+    float4 out_color = args.frag->texture.Sample(args.frag->sampler, vertex.uv);
     return out_color;
 }

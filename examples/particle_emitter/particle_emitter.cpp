@@ -145,7 +145,11 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
 
     // Imgui setup
 
-    m_texture_heap = gpu::create_texture_heap(m_device, 1024);
+    m_texture_heap = gpu::create_texture_heap(m_device,
+                                              {
+                                                  .texture_count = 1024,
+                                                  .sampler_count = 1,
+                                              });
     loon::imgui::Init({
         .device                    = m_device,
         .queue                     = m_queue,

@@ -18,9 +18,14 @@ struct VertexStageOutput
     float2 uv;
 };
 
+struct FragInput {
+    DescriptorHandle<Texture2D> texture;
+    DescriptorHandle<SamplerState> sampler;
+};
+
 struct Args {
     VertexInput* vert;
-    DescriptorHandle<Texture2D> frag;
+    FragInput* frag;
 };
 
 [[vk::push_constant]] uniform Args args;
@@ -41,7 +46,6 @@ VertexStageOutput vertex_main(uint32_t vertexIdx : SV_VertexID)
 [shader("fragment")]
 float4 fragment_main(VertexStageOutput vertex) : SV_Target
 {
-    const DescriptorHandle<SamplerState> kDefaultSampler = DescriptorHandle<SamplerState>(uint2(0, 0));
-    let sample = args.frag.Sample(kDefaultSampler, vertex.uv);
+    let sample = args.frag->texture.Sample(args.frag->sampler, vertex.uv);
     return vertex.color * sample;
 }

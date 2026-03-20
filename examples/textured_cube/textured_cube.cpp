@@ -64,8 +64,10 @@ struct CameraInfo {
 };
 
 struct ShaderArgs {
-    CameraInfo camera;
-    MeshGpu    mesh;
+    CameraInfo  camera;
+    MeshGpu     mesh;
+    TextureView texture;
+    Sampler     sampler;
 };
 
 static Format select_surface_format(const loon::gpu::SurfaceCapabilities& surface_capabilities) {
@@ -141,12 +143,18 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
             .usage      = UsageFlags(UsageFlags::Sampled | UsageFlags::TransferDst),
         });
 
-    m_texture_heap = gpu::create_texture_heap(m_device, 1024);
-    m_color_view   = gpu::add_texture_view_to_heap(
-        m_device,
-        m_texture_heap,
-        {.texture = m_color_texture, .format = Format::RGBA8UnormSrgb});
-
+    m_texture_heap = gpu::create_texture_heap(m_device,
+                                              {
+                                                  .texture_count = 1024,
+                                                  .sampler_count = 1,
+                                              });
+    m_color_view   = gpu::add_texture_view_to_heap(m_device,
+                                                 m_texture_heap,
+                                                   {
+                                                       .texture = m_color_texture,
+                                                       .format  = Format::RGBA8UnormSrgb,
+                                                 });
+    m_sampler      = gpu::add_sampler_to_heap(m_device, m_texture_heap, SamplerDesc{});
 
     // Copy over the geometry to the geometry buffer
     void* dst = gpu::get_host_pointer(m_device, m_constant_buffer);
@@ -251,7 +259,9 @@ void TexturedCube::Update(const WindowState& window) {
                                 .rotated_local(normalized({1, 0.5, 0}),
                                                 radians_from_degrees((float)(m_frame_idx % 360)))
                                 .to_matrix(),
-        }
+        },
+        .texture = m_color_view,
+        .sampler = m_sampler,
     };
 
     auto cmd = gpu::queue_start_command_recording(m_queue);
@@ -293,7 +303,7 @@ void TexturedCube::Update(const WindowState& window) {
 
     gpu::cmd_draw_indexed_instanced(cmd,
                                     argsGpu,
-                                    m_color_view,
+                                    argsGpu + offsetof(ShaderArgs, texture),
                                     m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
                                     Cube::kNumIndices,
                                     1);

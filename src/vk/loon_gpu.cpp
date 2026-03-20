@@ -15,7 +15,6 @@
 namespace loon::gpu {
 template class Span<const char>;
 template class Span<uint8_t>;
-template class Span<const SamplerDesc>;
 template class Span<const ColorTarget>;
 template class Span<const RenderAttachment>;
 template class Span<const Format>;
@@ -24,6 +23,10 @@ template class Span<const CommandBuffer>;
 template class Span<const SemaphoreInfo>;
 template class Span<const TextureTransition>;
 template class Function<void>;
+
+static constexpr uint32_t kBindingSlotSamplers      = 0;
+static constexpr uint32_t kBindingSlotSampledImages = 2;
+static constexpr uint32_t kBindingSlotRWImages      = 3;
 
 static constexpr const char* kRequiredDeviceExtensions[] = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME,
@@ -51,9 +54,14 @@ struct Texture {
 };
 
 struct TextureHeap {
-    VkDescriptorSet     vk_descriptor_set;
-    TwoLevelBitset      bitset;
+    VkDescriptorSet vk_descriptor_set;
+    TwoLevelBitset  sampler_bitset;
+    TwoLevelBitset  sampled_image_bitset;
+    TwoLevelBitset  rw_image_bitset;
+
+    Vector<VkSampler>   samplers;
     Vector<VkImageView> image_views;
+    Vector<VkImageView> rw_image_views;
 };
 
 struct Semaphore {
@@ -257,7 +265,6 @@ struct DeviceImpl {
     SlotMap<Semaphore>         m_semaphore_pool;
     SlotMap<Pipeline>          m_pipeline_pool;
 
-    Vector<VkSampler> m_immutable_samplers;
     Vector<GpuPtrMap> m_ptr_map;
     QueueImpl         m_queues[static_cast<size_t>(QueueType::ValidCount)];
 };
@@ -509,32 +516,40 @@ static SurfaceCreationResult create_surface(VkInstance instance, const DeviceDes
 
 static VkDescriptorSetLayout create_descriptor_layout(VkDevice               device,
                                                       const VolkDeviceTable& api,
-                                                      uint32_t               size,
-                                                      Span<const VkSampler>  samplers) {
+                                                      uint32_t               num_images,
+                                                      uint32_t               num_samplers) {
+    const auto flags = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT
+                       | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
+                       | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT;
     VkDescriptorBindingFlags descVariableFlag[] = {
-        0,
-        VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
-            | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
-            | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT,
+        flags,
+        flags,
+        flags,
     };
 
     VkDescriptorSetLayoutBindingFlagsCreateInfo binding_flags{
         .sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
-        .bindingCount  = 2,
+        .bindingCount  = 3,
         .pBindingFlags = descVariableFlag};
 
     VkDescriptorSetLayoutBinding bindings[] = {
         {
-            .binding            = 0,
+            .binding            = kBindingSlotSamplers,
             .descriptorType     = VK_DESCRIPTOR_TYPE_SAMPLER,
-            .descriptorCount    = static_cast<uint32_t>(samplers.size()),
+            .descriptorCount    = num_samplers,
             .stageFlags         = VK_SHADER_STAGE_ALL,
-            .pImmutableSamplers = samplers.data(),
+            .pImmutableSamplers = nullptr,
         },
         {
-            .binding         = 2,
+            .binding         = kBindingSlotSampledImages,
             .descriptorType  = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-            .descriptorCount = size,
+            .descriptorCount = num_images,
+            .stageFlags      = VK_SHADER_STAGE_ALL,
+        },
+        {
+            .binding         = kBindingSlotRWImages,
+            .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            .descriptorCount = num_images,
             .stageFlags      = VK_SHADER_STAGE_ALL,
         },
     };
@@ -543,7 +558,7 @@ static VkDescriptorSetLayout create_descriptor_layout(VkDevice               dev
         .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
         .pNext        = &binding_flags,
         .flags        = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
-        .bindingCount = 2,
+        .bindingCount = 3,
         .pBindings    = bindings,
     };
 
@@ -607,12 +622,9 @@ static VkPipelineLayout create_default_compute_layout(VkDevice               dev
     return result == VK_SUCCESS ? pipeline_layout : VK_NULL_HANDLE;
 }
 
-static Vector<VkSampler> create_immutable_samplers(Allocator               alloc,
-                                                   const VolkDeviceTable&  api,
-                                                   VkDevice                device,
-                                                   Span<const SamplerDesc> sampler_descs) {
-    auto samplers = Vector<VkSampler>(alloc);
-
+static VkSampler create_sampler(const VolkDeviceTable& api,
+                                VkDevice               device,
+                                const SamplerDesc&     sampler_desc) {
     constexpr auto bridge_filter = [](SamplerFilter f) {
         switch (f) {
             case SamplerFilter::Nearest: return VK_FILTER_NEAREST;
@@ -638,34 +650,28 @@ static Vector<VkSampler> create_immutable_samplers(Allocator               alloc
         return VK_SAMPLER_ADDRESS_MODE_MAX_ENUM;
     };
 
-    for (const auto& sampler_desc : sampler_descs) {
-        const VkSamplerCreateInfo sampler_info{
-            .sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-            .pNext                   = nullptr,
-            .flags                   = 0,
-            .magFilter               = bridge_filter(sampler_desc.filter),
-            .minFilter               = bridge_filter(sampler_desc.filter),
-            .mipmapMode              = bridge_mip_mode(sampler_desc.filter),
-            .addressModeU            = bridge_address(sampler_desc.address),
-            .addressModeV            = bridge_address(sampler_desc.address),
-            .addressModeW            = bridge_address(sampler_desc.address),
-            .anisotropyEnable        = (sampler_desc.max_anisotropy != 0.0f),
-            .maxAnisotropy           = sampler_desc.max_anisotropy,
-            .compareEnable           = VK_FALSE,
-            .minLod                  = -1000.0f,
-            .maxLod                  = VK_LOD_CLAMP_NONE,
-            .borderColor             = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
-            .unnormalizedCoordinates = sampler_desc.coord == SamplerCoords::Pixel,
-        };
+    const VkSamplerCreateInfo sampler_info{
+        .sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .pNext                   = nullptr,
+        .flags                   = 0,
+        .magFilter               = bridge_filter(sampler_desc.filter),
+        .minFilter               = bridge_filter(sampler_desc.filter),
+        .mipmapMode              = bridge_mip_mode(sampler_desc.filter),
+        .addressModeU            = bridge_address(sampler_desc.address),
+        .addressModeV            = bridge_address(sampler_desc.address),
+        .addressModeW            = bridge_address(sampler_desc.address),
+        .anisotropyEnable        = (sampler_desc.max_anisotropy != 0.0f),
+        .maxAnisotropy           = sampler_desc.max_anisotropy,
+        .compareEnable           = VK_FALSE,
+        .minLod                  = -1000.0f,
+        .maxLod                  = VK_LOD_CLAMP_NONE,
+        .borderColor             = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
+        .unnormalizedCoordinates = sampler_desc.coord == SamplerCoords::Pixel,
+    };
 
-        VkSampler sampler;
-        if (api.vkCreateSampler(device, &sampler_info, nullptr, &sampler) != VK_SUCCESS) {
-            return {};
-        }
-
-        samplers.push_back(sampler);
-    }
-    return samplers;
+    VkSampler sampler = VK_NULL_HANDLE;
+    api.vkCreateSampler(device, &sampler_info, nullptr, &sampler);
+    return sampler;
 }
 
 static MemoryRequirements get_memory_requirements(const VolkDeviceTable& api, VkDevice device) {
@@ -862,6 +868,7 @@ static LogicalDeviceCreateResult create_logical_device(
     vulkan_12_features.scalarBlockLayout    = true;
     vulkan_12_features.runtimeDescriptorArray                       = true;
     vulkan_12_features.descriptorBindingSampledImageUpdateAfterBind = true;
+    vulkan_12_features.descriptorBindingStorageImageUpdateAfterBind = true;
     vulkan_12_features.descriptorBindingPartiallyBound              = true;
     vulkan_12_features.descriptorBindingUpdateUnusedWhilePending    = true;
     vulkan_12_features.descriptorBindingVariableDescriptorCount     = true;
@@ -947,21 +954,12 @@ Device create_device(const DeviceDesc& desc) {
         vma    = vma_result.allocator;
     }
 
-    Vector<VkSampler> immutable_samplers;
-    if (result == VK_SUCCESS) {
-        immutable_samplers = create_immutable_samplers(alloc, api, logical_device, desc.samplers);
-        result             = desc.samplers.size() == immutable_samplers.size() ? VK_SUCCESS
-                                                                               : VK_ERROR_INITIALIZATION_FAILED;
-    }
-
     VkDescriptorSetLayout default_descriptor_layout;
     VkPipelineLayout      default_graphics_layout;
     VkPipelineLayout      default_compute_layout;
     if (result == VK_SUCCESS) {
-        default_descriptor_layout = create_descriptor_layout(logical_device,
-                                                             api,
-                                                             kMaxTextureHeapSize,
-                                                             immutable_samplers);
+        default_descriptor_layout
+            = create_descriptor_layout(logical_device, api, kMaxTextureHeapSize, kMaxNumSamplers);
         default_graphics_layout
             = create_default_graphics_layout(logical_device, api, default_descriptor_layout);
         default_compute_layout
@@ -978,10 +976,14 @@ Device create_device(const DeviceDesc& desc) {
         VkDescriptorPoolSize pool_sizes[] = {
             {
                 .type            = VK_DESCRIPTOR_TYPE_SAMPLER,
-                .descriptorCount = immutable_samplers.size(),
+                .descriptorCount = kMaxNumSamplers,
             },
             {
                 .type            = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+                .descriptorCount = kMaxTextureHeapSize,
+            },
+            {
+                .type            = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                 .descriptorCount = kMaxTextureHeapSize,
             },
         };
@@ -992,7 +994,7 @@ Device create_device(const DeviceDesc& desc) {
             .flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT
                      | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
             .maxSets       = kMaxNumTextureHeaps,
-            .poolSizeCount = 2,
+            .poolSizeCount = sizeof(pool_sizes) / sizeof(VkDescriptorPoolSize),
             .pPoolSizes    = pool_sizes,
         };
 
@@ -1080,6 +1082,11 @@ Device create_device(const DeviceDesc& desc) {
                                            d->m_api.vkDestroyImageView(d->m_device, v, nullptr);
                                        }
                                    }
+                                   for (auto s : h->samplers) {
+                                    if (s != VK_NULL_HANDLE) {
+                                        d->m_api.vkDestroySampler(d->m_device, s, nullptr);
+                                    }
+                                   }
                                    h->~TextureHeap();
                                }),
         .m_depth_stencil_pool
@@ -1096,7 +1103,6 @@ Device create_device(const DeviceDesc& desc) {
                                 d->m_api.vkDestroyPipeline(d->m_device, p->vk_pipeline, nullptr);
                                 p->~Pipeline();
                             }),
-        .m_immutable_samplers = std::move(immutable_samplers),
         .m_ptr_map            = Vector<GpuPtrMap>(alloc),
     };
 }
@@ -1120,8 +1126,6 @@ void destroy_device(Device d) {
     d->m_texture_heap_pool.clear();
     d->m_semaphore_pool.clear();
     d->m_pipeline_pool.clear();
-
-    for (auto& s : d->m_immutable_samplers) { d->m_api.vkDestroySampler(d->m_device, s, nullptr); }
 
     d->m_api.vkDestroyDescriptorPool(d->m_device, d->m_descriptor_pool, nullptr);
     d->m_api.vkDestroyDescriptorSetLayout(d->m_device, d->m_default_descriptor_layout, nullptr);
@@ -1663,18 +1667,10 @@ Handle<Texture> create_texture(Device d, const TextureDesc& desc, GpuPtr locatio
     return handle;
 }
 
-Handle<TextureHeap> create_texture_heap(Device d, size_t size) {
-    const uint32_t                                           descriptor_count = size;
-    const VkDescriptorSetVariableDescriptorCountAllocateInfo allocate_info    = {
-           .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO,
-           .pNext = nullptr,
-           .descriptorSetCount = 1,
-           .pDescriptorCounts  = &descriptor_count,
-    };
-
+Handle<TextureHeap> create_texture_heap(Device d, const TextureHeapDesc& desc) {
     VkDescriptorSetAllocateInfo info{
         .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        .pNext              = &allocate_info,
+        .pNext              = nullptr,
         .descriptorPool     = d->m_descriptor_pool,
         .descriptorSetCount = 1,
         .pSetLayouts        = &d->m_default_descriptor_layout,
@@ -1684,9 +1680,16 @@ Handle<TextureHeap> create_texture_heap(Device d, size_t size) {
     chk(d, d->m_api.vkAllocateDescriptorSets(d->m_device, &info, &set));
 
     const auto handle = d->m_texture_heap_pool.emplace(TextureHeap{
-        .vk_descriptor_set = set,
-        .bitset            = TwoLevelBitset(d->m_allocator, size),
-        .image_views       = Vector<VkImageView>(d->m_allocator, VkImageView{0}, size),
+        .vk_descriptor_set    = set,
+        .sampler_bitset       = TwoLevelBitset(d->m_allocator, desc.sampler_count),
+        .sampled_image_bitset = TwoLevelBitset(d->m_allocator, desc.texture_count),
+        .rw_image_bitset      = TwoLevelBitset(d->m_allocator, desc.rw_texture_count),
+
+        .samplers
+        = Vector<VkSampler>(d->m_allocator, VkSampler{VK_NULL_HANDLE}, desc.sampler_count),
+        .image_views = Vector<VkImageView>(d->m_allocator, VkImageView{0}, desc.texture_count),
+        .rw_image_views
+        = Vector<VkImageView>(d->m_allocator, VkImageView{0}, desc.rw_texture_count),
     });
 
     return {handle};
@@ -1722,7 +1725,7 @@ TextureView add_texture_view_to_heap(Device                 d,
         return -1;
     }
 
-    uint32_t free_slot                  = texture_heap.bitset.set_leading_zero();
+    uint32_t free_slot                  = texture_heap.sampled_image_bitset.set_leading_zero();
     texture_heap.image_views[free_slot] = image_view;
 
     const VkDescriptorImageInfo image_info{
@@ -1735,7 +1738,7 @@ TextureView add_texture_view_to_heap(Device                 d,
         .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
         .pNext            = nullptr,
         .dstSet           = texture_heap.vk_descriptor_set,
-        .dstBinding       = 2,
+        .dstBinding       = kBindingSlotSampledImages,
         .dstArrayElement  = free_slot,
         .descriptorCount  = 1,
         .descriptorType   = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
@@ -1748,13 +1751,99 @@ TextureView add_texture_view_to_heap(Device                 d,
     return free_slot;
 }
 
+
+TextureView add_rw_texture_view_to_heap(Device                 d,
+                                        Handle<TextureHeap>    heap,
+                                        const TextureViewDesc& desc) {
+    auto& texture_heap = d->m_texture_heap_pool[heap];
+    auto  texture      = d->m_texture_pool[desc.texture];
+
+    const VkImageViewCreateInfo info {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .pNext = nullptr,
+        .flags      = 0,
+        .image      = texture.vk_image,
+        .viewType   = texture.vk_type,
+        .format     = bridge(desc.format),
+        .components = {VK_COMPONENT_SWIZZLE_IDENTITY,
+                        VK_COMPONENT_SWIZZLE_IDENTITY,
+                        VK_COMPONENT_SWIZZLE_IDENTITY,
+                        VK_COMPONENT_SWIZZLE_IDENTITY,},
+        .subresourceRange = {
+        .aspectMask = aspects_for_format(desc.format),
+        .baseMipLevel = desc.base_mip,
+        .levelCount = desc.mip_count,
+        .baseArrayLayer = desc.base_layer,
+        .layerCount = desc.layer_count,
+        },
+    };
+    VkImageView image_view;
+    if (!chk(d, d->m_api.vkCreateImageView(d->m_device, &info, nullptr, &image_view))) {
+        return -1;
+    }
+
+    uint32_t free_slot                     = texture_heap.rw_image_bitset.set_leading_zero();
+    texture_heap.rw_image_views[free_slot] = image_view;
+
+    const VkDescriptorImageInfo image_info{
+        .sampler     = VK_NULL_HANDLE,
+        .imageView   = image_view,
+        .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+    };
+
+    const VkWriteDescriptorSet write{
+        .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .pNext            = nullptr,
+        .dstSet           = texture_heap.vk_descriptor_set,
+        .dstBinding       = kBindingSlotRWImages,
+        .dstArrayElement  = free_slot,
+        .descriptorCount  = 1,
+        .descriptorType   = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+        .pImageInfo       = &image_info,
+        .pBufferInfo      = nullptr,
+        .pTexelBufferView = nullptr,
+    };
+    d->m_api.vkUpdateDescriptorSets(d->m_device, 1, &write, 0, nullptr);
+
+    return free_slot;
+}
+
+Sampler add_sampler_to_heap(Device d, Handle<TextureHeap> heap, const SamplerDesc& desc) {
+    auto& texture_heap = d->m_texture_heap_pool[heap];
+
+    VkSampler sampler = create_sampler(d->m_api, d->m_device, desc);
+    if (sampler == VK_NULL_HANDLE) { log(d, LogLevel::Error, "Failed to create sampler"_sv); }
+
+    uint32_t free_slot               = texture_heap.sampler_bitset.set_leading_zero();
+    texture_heap.samplers[free_slot] = sampler;
+    const VkDescriptorImageInfo image_info{
+        .sampler   = sampler,
+        .imageView = VK_NULL_HANDLE,
+    };
+
+    const VkWriteDescriptorSet write{
+        .sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .pNext            = nullptr,
+        .dstSet           = texture_heap.vk_descriptor_set,
+        .dstBinding       = kBindingSlotSamplers,
+        .dstArrayElement  = free_slot,
+        .descriptorCount  = 1,
+        .descriptorType   = VK_DESCRIPTOR_TYPE_SAMPLER,
+        .pImageInfo       = &image_info,
+        .pBufferInfo      = nullptr,
+        .pTexelBufferView = nullptr,
+    };
+    d->m_api.vkUpdateDescriptorSets(d->m_device, 1, &write, 0, nullptr);
+    return 0;
+}
+
 void free(Device d, Handle<Texture> t) {
     d->m_texture_pool.erase(t);
 }
 
 void remove_texture_view_from_heap(Device d, Handle<TextureHeap> heap, TextureView idx) {
     auto& texture_heap = d->m_texture_heap_pool[heap];
-    texture_heap.bitset.clear_bit(idx);
+    texture_heap.sampled_image_bitset.clear_bit(idx);
 
     d->m_api.vkDestroyImageView(d->m_device, texture_heap.image_views[idx], nullptr);
     texture_heap.image_views[idx] = 0;
@@ -1780,6 +1869,23 @@ void remove_texture_view_from_heap(Device d, Handle<TextureHeap> heap, TextureVi
     //     .pTexelBufferView = nullptr,
     // };
     // d->m_api.vkUpdateDescriptorSets(d->m_device, 1, &write, 0, nullptr);
+}
+
+void remove_rw_texture_view_from_heap(Device d, Handle<TextureHeap> heap, TextureView idx) {
+    auto& texture_heap = d->m_texture_heap_pool[heap];
+    texture_heap.rw_image_bitset.clear_bit(idx);
+
+    d->m_api.vkDestroyImageView(d->m_device, texture_heap.rw_image_views[idx], nullptr);
+    texture_heap.rw_image_views[idx] = 0;
+}
+
+void remove_sampler_from_heap(Device d, Handle<TextureHeap> heap, Sampler s) {
+    auto& texture_heap = d->m_texture_heap_pool[heap];
+    texture_heap.sampler_bitset.clear_bit(s);
+
+    d->m_api.vkDestroySampler(d->m_device, texture_heap.samplers[s], nullptr);
+    texture_heap.samplers[s] = 0;
+    // TODO: Update the descriptor set?
 }
 
 void free(Device d, Handle<TextureHeap> heap) {
@@ -2061,6 +2167,10 @@ void free(Device d, Handle<Pipeline> pipeline) {
 Handle<DepthStencilState> create_depth_stencil_state(Device d, const DepthStencilDesc& desc) {
     auto h = d->m_depth_stencil_pool.emplace(DepthStencilState{desc});
     return h;
+}
+
+void free_depth_stencil_state(Device d, Handle<DepthStencilState> state) {
+    d->m_depth_stencil_pool.erase(state);
 }
 
 // MARK: Queue

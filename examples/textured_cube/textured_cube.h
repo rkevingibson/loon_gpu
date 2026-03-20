@@ -32,4 +32,5 @@ class TexturedCube : public Example {
     Handle<TextureHeap> m_texture_heap;
     Handle<Texture>     m_color_texture;
     TextureView         m_color_view;
+    Sampler             m_sampler;
 };
