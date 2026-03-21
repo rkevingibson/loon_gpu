@@ -245,12 +245,16 @@ void ManyCubes::Update(const WindowState& window) {
     ImGui::Begin("Cubes!");
     ImGui::SliderInt("Cubes x", &m_grid_width, 1, 1000);
     ImGui::SliderInt("Cubes y", &m_grid_height, 1, 1000);
-    ImGui::LabelText("Timing", "CPU: %zu us", m_frame_time_average);
+    ImGui::LabelText("Timing", "CPU: %lld us", m_frame_time_average);
 
     ImGui::PlotLines("Frame time",
                      m_frame_time_ms,
                      kFrameTimeWindow,
-                     m_frame_idx % kFrameTimeWindow, 0, 0.0f, 1000.f/60.f, ImVec2(0, 80.f));
+                     m_frame_idx % kFrameTimeWindow,
+                     0,
+                     0.0f,
+                     1000.f / 60.f,
+                     ImVec2(0, 80.f));
 
     ImGui::End();
     m_frame_idx++;
@@ -261,10 +265,10 @@ void ManyCubes::Update(const WindowState& window) {
     GpuPtr camera = m_ring_buffer.append(
         m_frame_idx,
         CameraData{
-            .projection = geometry::projection({.view_width  = (float)window.width,
-                                                .view_height = (float)window.height,
-                                                .y_fov       = geometry::radians_from_degrees(30.f),
-                                                .depth_far   = 0.5f}),
+            .projection        = geometry::projection({.view_width  = (float)window.width,
+                                                       .view_height = (float)window.height,
+                                                       .y_fov       = geometry::radians_from_degrees(30.f),
+                                                       .depth_far   = 0.5f}),
             .camera_from_world = geometry::transform3d::identity()
                                      .translated({0, 2, -8})
                                      .rotated_local({1, 0, 0}, radians_from_degrees(-30))
@@ -330,9 +334,10 @@ void ManyCubes::Update(const WindowState& window) {
                 VertArgs{
                     .world_from_mesh
                     = transform3d::identity()
-                          .translated({4.f * (float)(x - m_grid_width/2), 0, -4.f * (float)y})
-                          .rotated_local(normalized({1, 0.5, 0}),
-                                         radians_from_degrees((float)((30*x + 10*y + m_frame_idx) % 360)))
+                          .translated({4.f * (float)(x - m_grid_width / 2), 0, -4.f * (float)y})
+                          .rotated_local(
+                              normalized({1, 0.5, 0}),
+                              radians_from_degrees((float)((30 * x + 10 * y + m_frame_idx) % 360)))
                           .to_matrix(),
                     .camera   = camera,
                     .position = m_vertex_ptr,

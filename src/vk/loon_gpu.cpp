@@ -3003,6 +3003,7 @@ void cmd_draw_indexed_instanced(CommandBuffer cmd,
                                          indices.buffer,
                                          indices.offset,
                                          VK_INDEX_TYPE_UINT16);
+        cmd->current_idx_buffer = indicesGpu;
     }
     impl->m_api.vkCmdDrawIndexed(cmd->buffer, indexCount, instanceCount, 0, 0, 0);
 }
@@ -3015,11 +3016,14 @@ void cmd_draw_indexed_instanced_indirect(CommandBuffer cmd,
     auto impl = cmd->device;
     ;
     cmd_set_graphics_ptrs(cmd, vertexDataGpu, pixelDataGpu);
-    const auto indices = buffer_and_offset_from_ptr(impl, indicesGpu);
-    impl->m_api.vkCmdBindIndexBuffer(cmd->buffer,
-                                     indices.buffer,
-                                     indices.offset,
-                                     VK_INDEX_TYPE_UINT16);
+    if (indicesGpu != cmd->current_idx_buffer) {
+        const auto indices = buffer_and_offset_from_ptr(impl, indicesGpu);
+        impl->m_api.vkCmdBindIndexBuffer(cmd->buffer,
+                                         indices.buffer,
+                                         indices.offset,
+                                         VK_INDEX_TYPE_UINT16);
+        cmd->current_idx_buffer = indicesGpu;
+    }
 
     const auto args = buffer_and_offset_from_ptr(impl, argsGpu);
     impl->m_api.vkCmdDrawIndexedIndirect(cmd->buffer,
@@ -3038,11 +3042,14 @@ void cmd_draw_indexed_instanced_indirect_multi(CommandBuffer cmd,
                                                uint32_t      maxDraws) {
     auto impl = cmd->device;
     cmd_set_graphics_ptrs(cmd, vertexDataGpu, pixelDataGpu);
-    const auto indices = buffer_and_offset_from_ptr(impl, indicesGpu);
-    impl->m_api.vkCmdBindIndexBuffer(cmd->buffer,
-                                     indices.buffer,
-                                     indices.offset,
-                                     VK_INDEX_TYPE_UINT16);
+    if (indicesGpu != cmd->current_idx_buffer) {
+        const auto indices = buffer_and_offset_from_ptr(impl, indicesGpu);
+        impl->m_api.vkCmdBindIndexBuffer(cmd->buffer,
+                                         indices.buffer,
+                                         indices.offset,
+                                         VK_INDEX_TYPE_UINT16);
+        cmd->current_idx_buffer = indicesGpu;
+    }
 
     const auto args  = buffer_and_offset_from_ptr(impl, argsGpu);
     const auto count = buffer_and_offset_from_ptr(impl, drawCountGpu);
