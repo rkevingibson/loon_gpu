@@ -159,6 +159,8 @@ struct CommandBufferImpl {
     Queue           queue;
     CommandPool*    pool = nullptr;
     VkCommandBuffer buffer;
+
+    GpuPtr current_idx_buffer = 0;
 };
 
 struct CommandPool {
@@ -2995,11 +2997,13 @@ void cmd_draw_indexed_instanced(CommandBuffer cmd,
                                 uint32_t      instanceCount) {
     auto impl = cmd->device;
     cmd_set_graphics_ptrs(cmd, vertexDataGpu, fragmentDataGpu);
-    const auto indices = buffer_and_offset_from_ptr(impl, indicesGpu);
-    impl->m_api.vkCmdBindIndexBuffer(cmd->buffer,
-                                     indices.buffer,
-                                     indices.offset,
-                                     VK_INDEX_TYPE_UINT16);
+    if (indicesGpu != cmd->current_idx_buffer) {
+        const auto indices = buffer_and_offset_from_ptr(impl, indicesGpu);
+        impl->m_api.vkCmdBindIndexBuffer(cmd->buffer,
+                                         indices.buffer,
+                                         indices.offset,
+                                         VK_INDEX_TYPE_UINT16);
+    }
     impl->m_api.vkCmdDrawIndexed(cmd->buffer, indexCount, instanceCount, 0, 0, 0);
 }
 

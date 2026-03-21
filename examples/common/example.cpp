@@ -7,8 +7,9 @@
 #if __APPLE__
 #    include <mach-o/dyld.h>
 #elif _WIN32
-extern "C"
-    __declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void*, char*, unsigned long);
+extern "C" __declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void*,
+                                                                            char*,
+                                                                            unsigned long);
 #endif
 
 #include <memory>
@@ -16,10 +17,12 @@ extern "C"
 
 #include "hello_cube/hello_cube.h"
 #include "hello_triangle/hello_triangle.h"
+#include "many_cubes/many_cubes.h"
 #include "particle_emitter/particle_emitter.h"
 #include "stb_image.h"
 #include "string_view.h"
 #include "textured_cube/textured_cube.h"
+
 
 static std::string get_executable_directory() {
 #if __APPLE__
@@ -62,6 +65,7 @@ std::unique_ptr<Example> create_example(ExampleName name, const WindowState& sta
         case ExampleName::HelloCube: return std::make_unique<HelloCube>(state);
         case ExampleName::TexturedCube: return std::make_unique<TexturedCube>(state);
         case ExampleName::ParticleEmitter: return std::make_unique<ParticleEmitter>(state);
+        case ExampleName::ManyCubes: return std::make_unique<ManyCubes>(state);
         default: return nullptr;
     }
 }

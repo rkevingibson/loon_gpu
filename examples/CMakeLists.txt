@@ -78,6 +78,7 @@ set(EXAMPLE_SOURCES
     hello_cube/hello_cube.cpp
     textured_cube/textured_cube.cpp
     particle_emitter/particle_emitter.cpp
+    many_cubes/many_cubes.cpp
 
     imgui/imgui_draw.cpp
     imgui/imgui_demo.cpp

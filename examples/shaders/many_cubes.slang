@@ -1,0 +1,52 @@
+import loon;
+
+struct CameraData {
+    float4x4 projection;
+    float4x4 cameraFromWorld;
+};
+
+struct VertexInput
+{
+    float4x4 worldFromMesh;
+    CameraData* camera;
+    float3* position;
+    float2* uvs;
+};
+
+struct VertexStageOutput
+{
+    float4 position : SV_Position;
+    float2 uv;
+};
+
+struct FragmentInput {
+    DescriptorHandle<Texture2D> texture;
+    DescriptorHandle<SamplerState> sampler;
+};
+
+struct Args {
+    VertexInput* vert;
+    FragmentInput* frag;
+};
+
+[[vk::push_constant]] uniform Args args;
+
+[shader("vertex")]
+VertexStageOutput vertexMain(uint32_t vertexIdx : SV_VertexID)
+{
+    VertexStageOutput output; 
+    CameraData* cam = args.vert->camera;
+
+    float4x4 mvp = mul(cam->projection, mul(cam->cameraFromWorld, args.vert->worldFromMesh));
+
+    output.position = mul(mvp,float4(args.vert->position[vertexIdx], 1.0));
+    output.uv = args.vert->uvs[vertexIdx];
+    return output;
+}
+
+[shader("fragment")]
+float4 fragmentMain(VertexStageOutput vertex) : SV_Target
+{
+    float4 out_color = args.frag->texture.Sample(args.frag->sampler, vertex.uv);
+    return out_color;
+}

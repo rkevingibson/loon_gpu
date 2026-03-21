@@ -167,7 +167,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
 
     ImGui_ImplWin32_Init(window);
 
-    ExampleName selected_example = ExampleName::ParticleEmitter;
+    ExampleName selected_example = ExampleName::ManyCubes;
 
     std::unique_ptr<Example> current_example = create_example(selected_example, window_state);
 

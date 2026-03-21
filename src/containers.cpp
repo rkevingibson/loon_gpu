@@ -56,7 +56,7 @@ void Label::set(const Allocator& backup_alloc, Span<const char> label) {
 }
 
 static constexpr uint32_t div_round_up(uint32_t n, uint32_t div) {
-    return (n - 1) / div + 1;
+    return n > 0 ? (n - 1) / div + 1 : 0;
 }
 
 static constexpr uint32_t num_entries(uint32_t n) {

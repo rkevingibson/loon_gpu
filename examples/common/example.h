@@ -33,6 +33,7 @@ enum class ExampleName {
     HelloCube,
     TexturedCube,
     ParticleEmitter,
+    ManyCubes,
 
     Count,
 };
