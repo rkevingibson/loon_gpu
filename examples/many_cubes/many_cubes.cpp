@@ -245,8 +245,9 @@ void ManyCubes::Update(const WindowState& window) {
     ImGui::Begin("Cubes!");
     ImGui::SliderInt("Cubes x", &m_grid_width, 1, 1000);
     ImGui::SliderInt("Cubes y", &m_grid_height, 1, 1000);
-    ImGui::LabelText("Timing", "CPU: %lld us", m_frame_time_average);
+    ImGui::Checkbox("Use instanced draw", &m_use_instanced_draws);
 
+    ImGui::LabelText("Timing", "CPU: %lld us", m_frame_time_average);
     ImGui::PlotLines("Frame time",
                      m_frame_time_ms,
                      kFrameTimeWindow,
@@ -327,32 +328,75 @@ void ManyCubes::Update(const WindowState& window) {
     gpu::cmd_set_pipeline(cmd, m_render_pipeline);
     gpu::cmd_set_texture_heap(cmd, m_texture_heap);
 
-    for (int x = 0; x < m_grid_width; ++x) {
-        for (int y = 0; y < m_grid_height; ++y) {
-            GpuPtr vert_args = m_ring_buffer.append(
-                m_frame_idx,
-                VertArgs{
-                    .world_from_mesh
-                    = transform3d::identity()
-                          .translated({4.f * (float)(x - m_grid_width / 2), 0, -4.f * (float)y})
-                          .rotated_local(
-                              normalized({1, 0.5, 0}),
-                              radians_from_degrees((float)((30 * x + 10 * y + m_frame_idx) % 360)))
-                          .to_matrix(),
-                    .camera   = camera,
-                    .position = m_vertex_ptr,
-                    .uvs      = m_vertex_ptr + sizeof(Cube::kPositions),
-                });
+    const auto grid_transform = [&](int x, int y) {
+        return transform3d::identity()
+            .translated({4.f * (float)(x - m_grid_width / 2), 0, -4.f * (float)y})
+            .rotated_local(normalized({1, 0.5, 0}),
+                           radians_from_degrees((float)((30 * x + 10 * y + m_frame_idx) % 360)))
+            .to_matrix();
+    };
 
-            gpu::cmd_draw_indexed_instanced(
-                cmd,
-                vert_args,
-                frag,
-                m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
-                Cube::kNumIndices,
-                1);
+    if (m_use_instanced_draws) {
+        GpuPtr   vert_args = ~0;
+        uint32_t num_cubes = 0;
+        for (int x = 0; x < m_grid_width; ++x) {
+            for (int y = 0; y < m_grid_height; ++y) {
+                GpuPtr tx = m_ring_buffer.append(m_frame_idx,
+                                                 VertArgs{
+                                                     .world_from_mesh = grid_transform(x, y),
+                                                     .camera          = camera,
+                                                     .position        = m_vertex_ptr,
+                                                     .uvs = m_vertex_ptr + sizeof(Cube::kPositions),
+                                                 });
+                ++num_cubes;
+                if (x == 0 && y == 0) { vert_args = tx; }
+
+                // We've wrapped around the ring buffer end, so submit a draw with whatever we've
+                // recorded so far.
+                if (tx < vert_args) {
+                    gpu::cmd_draw_indexed_instanced(
+                        cmd,
+                        vert_args,
+                        frag,
+                        m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
+                        Cube::kNumIndices,
+                        num_cubes);
+                    num_cubes = 0;
+                    vert_args = tx;
+                }
+            }
+        }
+        gpu::cmd_draw_indexed_instanced(
+            cmd,
+            vert_args,
+            frag,
+            m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
+            Cube::kNumIndices,
+            num_cubes);
+
+    } else {
+        for (int x = 0; x < m_grid_width; ++x) {
+            for (int y = 0; y < m_grid_height; ++y) {
+                GpuPtr vert_args
+                    = m_ring_buffer.append(m_frame_idx,
+                                           VertArgs{
+                                               .world_from_mesh = grid_transform(x, y),
+                                               .camera          = camera,
+                                               .position        = m_vertex_ptr,
+                                               .uvs = m_vertex_ptr + sizeof(Cube::kPositions),
+                                           });
+
+                gpu::cmd_draw_indexed_instanced(
+                    cmd,
+                    vert_args,
+                    frag,
+                    m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
+                    Cube::kNumIndices,
+                    1);
+            }
         }
     }
+
 
     loon::imgui::Render(cmd);
     gpu::cmd_end_render_pass(cmd);

@@ -37,11 +37,12 @@ class ManyCubes : public Example {
     loon::RingBuffer m_ring_buffer;
     uint64_t         m_frame_idx;
 
-    static constexpr int kFrameTimeWindow     = 300;
-    int64_t                 m_frame_time_us[kFrameTimeWindow] = {0};
-    float                   m_frame_time_ms[kFrameTimeWindow] = {0};
-    int64_t m_frame_time_average = 0;
+    static constexpr int kFrameTimeWindow                  = 300;
+    int64_t              m_frame_time_us[kFrameTimeWindow] = {0};
+    float                m_frame_time_ms[kFrameTimeWindow] = {0};
+    int64_t              m_frame_time_average              = 0;
 
-    int m_grid_width  = 32;
-    int m_grid_height = 32;
+    int  m_grid_width          = 32;
+    int  m_grid_height         = 32;
+    bool m_use_instanced_draws = false;
 };
