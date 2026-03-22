@@ -42,7 +42,7 @@ class ManyCubes : public Example {
     float                m_frame_time_ms[kFrameTimeWindow] = {0};
     int64_t              m_frame_time_average              = 0;
 
-    int  m_grid_width          = 32;
-    int  m_grid_height         = 32;
-    bool m_use_instanced_draws = false;
+    int  m_grid_width          = 500;
+    int  m_grid_height         = 500;
+    bool m_use_instanced_draws = true;
 };

@@ -348,7 +348,7 @@ void ManyCubes::Update(const WindowState& window) {
                                                      .position        = m_vertex_ptr,
                                                      .uvs = m_vertex_ptr + sizeof(Cube::kPositions),
                                                  });
-                ++num_cubes;
+
                 if (x == 0 && y == 0) { vert_args = tx; }
 
                 // We've wrapped around the ring buffer end, so submit a draw with whatever we've
@@ -364,15 +364,18 @@ void ManyCubes::Update(const WindowState& window) {
                     num_cubes = 0;
                     vert_args = tx;
                 }
+                ++num_cubes;
             }
         }
-        gpu::cmd_draw_indexed_instanced(
-            cmd,
-            vert_args,
-            frag,
-            m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
-            Cube::kNumIndices,
-            num_cubes);
+        if (num_cubes) {
+            gpu::cmd_draw_indexed_instanced(
+                cmd,
+                vert_args,
+                frag,
+                m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
+                Cube::kNumIndices,
+                num_cubes);
+        }
 
     } else {
         for (int x = 0; x < m_grid_width; ++x) {

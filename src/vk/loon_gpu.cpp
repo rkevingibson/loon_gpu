@@ -2459,10 +2459,11 @@ static CommandBufferImpl* get_command_buffer(Queue q, CommandPool* pool) {
             return nullptr;
         }
         pool->command_buffers.emplace_back(CommandBufferImpl{
-            .device = device,
-            .queue  = q,
-            .pool   = pool,
-            .buffer = buf,
+            .device             = device,
+            .queue              = q,
+            .pool               = pool,
+            .buffer             = buf,
+            .current_idx_buffer = 0,
         });
     }
 
@@ -2479,6 +2480,7 @@ CommandBuffer queue_start_command_recording(Queue q) {
 
     CommandBuffer buffer = get_command_buffer(q, pool);
     if (buffer) {
+        buffer->current_idx_buffer = 0;
         const VkCommandBufferBeginInfo begin_info{
             .sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
             .pNext            = nullptr,
