@@ -5,6 +5,7 @@ project(loon_gpu VERSION 0.01 LANGUAGES CXX)
 
 option(LOON_GPU_BUILD_EXAMPLES "Build examples" OFF)
 option(LOON_GPU_BUILD_TESTS "Build tests" OFF)
+option(LOON_GPU_BUILD_DOCS "Build documentation" OFF)
 option(LOON_GPU_WERROR "Treat warnings as errors" OFF)
 option(LOON_GPU_INSTALL "Install library" ON)
 
@@ -85,6 +86,11 @@ if (LOON_GPU_BUILD_EXAMPLES)
     message("Building Loon GPU examples")
     add_subdirectory(examples)
     list(APPEND TARGETS loon_gpu_examples)
+endif()
+
+if(LOON_GPU_BUILD_DOCS)
+    message("Building Loon GPU documentation")
+    add_subdirectory(docs)
 endif()
 
 if (LOON_GPU_INSTALL)

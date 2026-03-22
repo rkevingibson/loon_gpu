@@ -1,5 +1,5 @@
 {
-    "version": 3,
+  "version": 3,
   "configurePresets": [
     {
       "name": "Development-Base",
@@ -12,6 +12,7 @@
         "CMAKE_CONFIGURATION_TYPES": "Debug;RelWithDebInfo",
         "LOON_GPU_BUILD_EXAMPLES": "YES",
         "LOON_GPU_BUILD_TESTS": "YES",
+        "LOON_GPU_BUILD_DOCS": "YES",
         "LOON_GPU_WERROR": "YES",
         "LOON_GPU_INSTALL": "YES",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/install"
@@ -134,8 +135,8 @@
       "configurePreset": "Development MacOS"
     }
   ],
-    "cmakeMinimumRequired": {
-        "major": 3,
-        "minor": 23
-    }
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 23
+  }
 }

@@ -20,7 +20,7 @@
     }
 
 #define LOON_BITWISE_ASSIGNMENT_OP(name, op)                                                       \
-    inline constexpr name operator op## = (name lhs, name rhs) {                                   \
+    inline constexpr name operator op##=(name lhs, name rhs) {                                     \
         lhs = lhs op rhs;                                                                          \
         return lhs;                                                                                \
     }
@@ -39,7 +39,15 @@ namespace loon::gpu {
 constexpr size_t kMaxTextureHeapSize = 32ull * 1024;
 constexpr size_t kMaxNumSamplers     = 4000;
 constexpr size_t kMaxNumTextureHeaps = 1024;
-
+/**
+ * @brief A non-owning view class. Used heavily for passing array arguments.
+ * This is analogous to std::span, but included here for pre-c++20 support.
+ * Also supports initialization from an initializer list, or even a single object (a span of 1), if
+ * the span is a const view. This is very useful for creating spans of temporary objects for
+ * passing to functions, but you need to be careful - lifetimes of temporaries only last until the
+ * end of the statement they're in.
+ * @tparam T The type you have a view over
+ */
 template <class T>
 class Span {
     template <class U>
@@ -55,29 +63,55 @@ class Span {
    public:
     // Construct an empty Span
     constexpr Span() noexcept = default;
+
+    /**
+     * @brief Construct a span from a pointer and length.
+     *
+     */
     constexpr Span(T* ptr, size_t len) noexcept : m_ptr{ptr}, m_len{len} {}
+
+    /**
+     * @brief Construct a span from a pair of pointers. end is a pointer one-past-the-end.
+     *
+     */
     constexpr Span(T* begin, T* end) noexcept :
         m_ptr{begin}, m_len{static_cast<size_t>(end - begin)} {}
 
-    // Construct from fixed size array
+    /**
+     * @brief Construct a span from a C-style array. Length is automatically inferred.
+     */
     template <size_t N>
     constexpr Span(T (&a)[N]) noexcept : Span(a, N) {}
 
-    // Construct from an initializer list - only acceptable in the case where a Span is being
-    // passed as a function argument, otherwise the initializer list will not outlive the Span, and
-    // you end up with a dangling pointer.
-    // e.g. for a function void Process(rkg::span<const float> x);
-    // We can do Process({1, 2, 3});
-    // But not:
-    // Span args = {1,2,3}; // Dangling pointer after this line.
-    // Process(args);
+    /**
+     * @brief Construct from an initializer list.
+     * Only acceptable in the case where a Span is being passed as a function argument, otherwise
+     * the initializer list will not outlive the Span, and you end up with a dangling pointer. e.g.
+     * for a function void Process(rkg::span<const float> x);
+     * We can do
+     * ```
+     * Process({1, 2, 3});
+     * ```
+     * But not:
+     * ```
+     * Span args = {1,2,3}; // Dangling pointer after this line.
+     * Process(args);
+     * ```
+     */
     constexpr Span(std::initializer_list<T> v) noexcept REQUIRES(is_const<T>) :
         Span(v.begin(), v.size()) {}
 
-    // Construct from a single value - same rules as for initializer list, useful for passing one
-    // element to a function which takes a span
+    /**
+     * @brief Construct from a single value.
+     * Same rules as for initializer list, useful for passing one
+     * element to a function which takes a span.
+     */
     constexpr Span(const T& v) noexcept REQUIRES(is_const<T>) : Span(&v, 1) {}
 
+    /**
+     * @brief Construct span of const objects from const span of non-const objects.
+     *
+     */
     template <typename U>
     constexpr Span(const Span<U>& src) noexcept REQUIRES((is_const_of<U, T>)) :
         Span(src.data(), src.size()) {}
@@ -111,7 +145,7 @@ class Span {
         return Span<U>((U*)m_ptr, m_len * sizeof(T) / sizeof(U));
     }
 
-   protected:
+   private:
     T*     m_ptr{nullptr};
     size_t m_len{0};
 };
@@ -120,10 +154,12 @@ inline constexpr Span<const char> operator""_sv(const char* val, size_t len) {
     return Span<const char>(val, len);
 }
 
-// A lightweight replacement for std::function.
-// Tries to avoid heap allocations by being "fat", it can store reasonably sized lambdas without
-// allocating, and will fail statically if the lambda is too big.
-// Adapted from https://github.com/jlaumon/Bedrock/blob/main/Bedrock/Function.h
+/**
+ * @brief A lightweight replacement for std::function.
+ * Tries to avoid heap allocations by being "fat", it can store reasonably sized lambdas without
+ * allocating, and will fail statically if the lambda is too big. Adapted from
+ * https://github.com/jlaumon/Bedrock/blob/main/Bedrock/Function.h
+ */
 template <class Res, class... Args>
 class Function {
    public:
@@ -207,6 +243,13 @@ struct Handle {
     constexpr bool operator==(const Handle& other) { return other.h == h; }
 };
 
+/** @defgroup Device Device
+ */
+
+/**
+ * @brief Opaque object representing a logical GPU device.
+ *
+ */
 typedef struct DeviceImpl*        Device;
 typedef struct QueueImpl*         Queue;
 typedef struct CommandBufferImpl* CommandBuffer;
@@ -222,6 +265,10 @@ using Sampler     = uint64_t;
 
 // MARK: Enums
 
+/**
+ * @brief Logging level
+ *
+ */
 enum class LogLevel : uint8_t {
     Off,
     Error,
@@ -230,20 +277,28 @@ enum class LogLevel : uint8_t {
     Debug,
 };
 
+/**
+ * @brief Preferred GPU, used when creating a device.
+ *
+ */
 enum class GpuPreference : uint8_t {
     Discrete = 0,
     Integrated,
 };
 
+/**
+ * @brief Type of memory to allocate.
+ *
+ */
 enum class Memory : uint8_t {
-    Default,
-    Gpu,
-    Readback,
+    Default,   ///< CPU visible memory, optimized for writing to from the CPU and reading from GPU
+    Gpu,       ///< GPU-only memory, not visible from the CPU
+    Readback,  ///< CPU visible memory, optimized for reading from the CPU.
 };
 
 enum class Cull : uint8_t {
-    CCW,
-    CW,
+    CCW,  ///< Counter-clockwise
+    CW,   ///< Clockwise
     All,
     None,
 };
@@ -255,6 +310,10 @@ enum class DepthFlags : uint8_t {
 };
 LOON_DEFINE_BITWISE_OPS(DepthFlags);
 
+/**
+ * @brief Comparison operation for depth and stencil testing
+ *
+ */
 enum class Op : uint8_t {
     Never,
     Less,
@@ -266,6 +325,10 @@ enum class Op : uint8_t {
     Always,
 };
 
+/**
+ * @brief Operations for stencil buffers
+ *
+ */
 enum class StencilOp : uint8_t {
     Keep,
     Zero,
@@ -277,6 +340,10 @@ enum class StencilOp : uint8_t {
     DecrementWrap,
 };
 
+/**
+ * @brief Operations for color/alpha blending.
+ *
+ */
 enum class Blend : uint8_t {
     Add,
     Subtract,
@@ -285,6 +352,10 @@ enum class Blend : uint8_t {
     Max,
 };
 
+/**
+ * @brief Blend factors for color/alpha blending.
+ *
+ */
 enum class Factor : uint8_t {
     Zero,
     One,
@@ -294,6 +365,10 @@ enum class Factor : uint8_t {
     OneMinusSrcAlpha,
 };
 
+/**
+ * @brief Input primitive to be used for a render pass.
+ *
+ */
 enum class Topology : uint8_t {
     TriangleList,
     TriangleStrip,
@@ -309,6 +384,10 @@ enum class TextureType : uint8_t {
     TexCubeArray,
 };
 
+/**
+ * @brief Texture formats
+ *
+ */
 enum class Format : uint32_t {
     None                 = 0x00000000,
     R8Unorm              = 0x00000001,
@@ -466,9 +545,9 @@ enum class StoreOp : uint8_t {
 };
 
 enum class QueueType : uint8_t {
-    Default,
-    Compute,
-    Transfer,
+    Default,   ///< Queue capable of doing graphics, compute and transfer work
+    Compute,   ///< Dedicated compute-only queue
+    Transfer,  ///< Dedicated transfer-only queue
 
     ValidCount,
 };
@@ -490,7 +569,7 @@ enum class SurfaceStatus : uint8_t {
 };
 
 enum class SamplerCoords : uint8_t {
-    Normalized,
+    Normalized,  ///< Coordinates lie in [0,1] range
     Pixel,
 };
 
@@ -571,14 +650,23 @@ struct SamplerDesc {
  *
  */
 struct DeviceDesc {
-    GpuPreference gpu_preference = GpuPreference::Discrete;
+    GpuPreference gpu_preference
+        = GpuPreference::Discrete;  ///< Preferred GPU, if more than one valid device is available.
 
-    uintptr_t native_window_handle   = 0;
-    uintptr_t native_instance_handle = 0;
+    uintptr_t native_window_handle = 0;    ///< Handle for the platform-specific window. HWND on
+                                           ///< windows, CAMetalLayer* on MacOS, Window on XLib
+    uintptr_t native_instance_handle = 0;  ///< Handle for the platform-specific instance. HINSTANCE
+                                           ///< on windows, Display* on XLib. Ignored on MacOS.
 
-    ProcLogCallback       log_callback   = nullptr;
-    void*                 log_userdata   = nullptr;
-    LogLevel              log_level      = LogLevel::Off;
+    ///@{
+    /** @name Logging callback */
+    ProcLogCallback log_callback = nullptr;
+    void*           log_userdata = nullptr;
+    LogLevel        log_level    = LogLevel::Off;
+    ///@}
+
+    ///@{
+    /** @name Allocation callback */
     ProcAllocatorCallback alloc_callback = nullptr;
     void*                 alloc_userdata = nullptr;
 };
@@ -714,114 +802,510 @@ struct alignas(8) DrawIndexedIndirectArgs {
     uint32_t first_instance;
 };
 
-
+/**
+ * @addtogroup Device
+ * @{
+ */
+/**
+ * @brief Create a device object
+ *
+ * @return Opaque pointer to a device object.
+ */
 Device create_device(const DeviceDesc&);
-void   destroy_device(Device d);
 
+/**
+ * @brief Destroy a device object.
+ * Note: this will flush the gpu, and destroy any created resources.
+ */
+void destroy_device(Device d);
+
+/**
+ * @brief Block until any pending work on the GPU is completed.
+ *
+ * @param d
+ */
 void device_wait_for_idle(Device d);
 
-// Surface:
+/** @defgroup Surface Surface Management
+ *
+ * Surface management functions.
+ * While surfaces are strictly optional, there currently is some command buffer management that is
+ * tied to the frame loop implied by `present()` calls. See
+ * [github](https://github.com/rkevingibson/loon_gpu/issues/1) for details.
+ */
+
+/** @ingroup Surface
+ * @brief Get the surface capabilities for a device.
+ *
+ * @return SurfaceCapabilities
+ */
 SurfaceCapabilities get_surface_capabilities(Device d);
-bool                configure_surface(Device d, const SurfaceConfiguration& config);
-void                unconfigure_surface(Device d);
-SurfaceTextureInfo  get_current_texture(Device d);
-SurfaceStatus       present(Device d, Queue queue);
 
-// Buffers:
+
+/** @ingroup Surface
+ * @brief Configures the presentation surface.
+ * Must be called before `get_current_texture()`
+ * @return bool indicating if configuration succeeds. Errors will be logged.
+ */
+bool configure_surface(Device d, const SurfaceConfiguration& config);
+
+/** @ingroup Surface
+ * @brief Reset the surface configuration
+ *
+ * @param d
+ */
+void unconfigure_surface(Device d);
+
+/** @ingroup Surface
+ * @brief Get the current texture for presentation this frame.
+ * Should only be called once per frame, and as late in the frame as possible to maximize GPU
+ * utilization.
+ * @return SurfaceTextureInfo
+ */
+SurfaceTextureInfo get_current_texture(Device d);
+
+/** @ingroup Surface
+ * @brief Present the current surface image on the provided queue.
+ *
+ * @return SurfaceStatus
+ */
+SurfaceStatus present(Device d, Queue queue);
+
+/** @defgroup res Resources
+ *
+ * Resource Management Functions
+ */
+
+/// @{
+
+/**
+ * @brief Allocate memory with the specified size and type.
+ *
+ */
 GpuPtr malloc(Device d, size_t bytes, Memory memory = Memory::Default);
-GpuPtr malloc(Device d, size_t bytes, size_t align, Memory memory = Memory::Default);
-void   free(Device d, GpuPtr ptr);
-void*  get_host_pointer(Device d, GpuPtr ptr);
 
-// Textures:
+/**
+ * @brief Allocate memory with the specified size, alignment and type.
+ *
+ */
+GpuPtr malloc(Device d, size_t bytes, size_t align, Memory memory = Memory::Default);
+
+/**
+ * @brief Free a pointer allocated with malloc
+ *
+ */
+void free(Device d, GpuPtr ptr);
+
+/**
+ * @brief Get the corresponding CPU-side pointer for a GPU pointer.
+ *
+ */
+void* get_host_pointer(Device d, GpuPtr ptr);
+
+/**
+ * @brief Get the texture size align object
+ *
+ * @param d
+ * @param desc
+ * @return TextureSizeAlign
+ */
 TextureSizeAlign get_texture_size_align(Device d, const TextureDesc& desc);
 
-// Create a new new texture with the provided descriptor. If location != 0, then the texture is
-// allocated at that location in Gpu memory. Note that textures can only be created in memory
-// allocated with Memory::Gpu - no host-visible textures can be created. If location == 0,
-// memory is allocated for the texture.
-Handle<Texture>     create_texture(Device d, const TextureDesc& desc, GpuPtr location = 0);
+/**
+ * @brief Create a texture object.
+ * Create a new new texture with the provided descriptor. If location != 0, then the texture is
+ * allocated at that location in Gpu memory. Note that textures can only be created in memory
+ * allocated with Memory::Gpu - no host-visible textures can be created. If location == 0, memory is
+ * allocated for the texture.
+ * @param d
+ * @param desc
+ * @param location
+ * @return Handle<Texture>
+ */
+Handle<Texture> create_texture(Device d, const TextureDesc& desc, GpuPtr location = 0);
+
 Handle<TextureHeap> create_texture_heap(Device d, const TextureHeapDesc& desc);
 
+/**
+ * @brief
+ *
+ * @param d
+ */
 void free(Device d, Handle<Texture>);
+
+/**
+ * @brief
+ *
+ * @param d
+ */
 void free(Device d, Handle<TextureHeap>);
-void free(Device d, Handle<Sampler>);
 
+/**
+ * @brief
+ *
+ * @param d
+ * @param desc
+ * @return TextureView
+ */
 TextureView add_texture_view_to_heap(Device d, Handle<TextureHeap>, const TextureViewDesc& desc);
-TextureView add_rw_texture_view_to_heap(Device d, Handle<TextureHeap>, const TextureViewDesc& desc);
-Sampler     add_sampler_to_heap(Device d, Handle<TextureHeap>, const SamplerDesc& sampler);
-void        remove_texture_view_from_heap(Device d, Handle<TextureHeap>, TextureView);
-void        remove_rw_texture_view_from_heap(Device d, Handle<TextureHeap>, TextureView);
-void        remove_sampler_from_heap(Device d, Handle<TextureHeap>, Sampler);
 
-// Pipelines
+TextureView add_rw_texture_view_to_heap(Device d, Handle<TextureHeap>, const TextureViewDesc& desc);
+
+Sampler add_sampler_to_heap(Device d, Handle<TextureHeap>, const SamplerDesc& sampler);
+
+void remove_rw_texture_view_from_heap(Device d, Handle<TextureHeap>, TextureView);
+
+void remove_sampler_from_heap(Device d, Handle<TextureHeap>, Sampler);
+
+/**
+ * @brief
+ *
+ * @param d
+ */
+void remove_texture_view_from_heap(Device d, Handle<TextureHeap>, TextureView);
+
+
+// State objects
+/**
+ * @brief Create a depth stencil state object
+ *
+ * @param d
+ * @param desc
+ * @return Handle<DepthStencilState>
+ */
+Handle<DepthStencilState> create_depth_stencil_state(Device d, const DepthStencilDesc& desc);
+
+/**
+ * @brief
+ *
+ * @param d
+ * @param state
+ */
+void free_depth_stencil_state(Device d, Handle<DepthStencilState> state);
+
+/// @}
+
+/**
+ * @defgroup Pipelines Pipelines
+ *
+ * @brief Create GPU pipelines from shader source and descriptors.
+ *
+ */
+/// @{
+
+/**
+ * @brief Create a compute pipeline object
+ *
+ * @param d
+ * @param compute
+ * @return Handle<Pipeline>
+ */
 Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource compute);
+
+/**
+ * @brief Create a graphics pipeline object
+ *
+ * @param d
+ * @param vertex
+ * @param fragment
+ * @param desc
+ * @return Handle<Pipeline>
+ */
 Handle<Pipeline> create_graphics_pipeline(Device            d,
                                           ShaderSource      vertex,
                                           ShaderSource      fragment,
                                           const RasterDesc& desc);
-void             free(Device d, Handle<Pipeline> pipeline);
 
-// State objects
-Handle<DepthStencilState> create_depth_stencil_state(Device d, const DepthStencilDesc& desc);
-void                      free_depth_stencil_state(Device d, Handle<DepthStencilState> state);
+/**
+ * @brief
+ *
+ * @param d
+ * @param pipeline
+ */
+void free(Device d, Handle<Pipeline> pipeline);
 
-// Semaphores
+///@}
+
+/**
+ * @brief Create a semaphore object
+ *
+ * @param d
+ * @param initValue
+ * @return Handle<Semaphore>
+ */
 Handle<Semaphore> create_semaphore(Device d, uint64_t initValue);
-void              wait_semaphore(Device d, Handle<Semaphore> sema, uint64_t value);
-void              free(Device d, Handle<Semaphore> sema);
 
-// Queue Functions
-Queue         get_queue(Device d, QueueType type = QueueType::Default);
+/**
+ * @brief Block the current thread until the semaphore value is greater or equal than the provided
+ * value.
+ *
+ * @param d
+ * @param sema
+ * @param value
+ */
+void wait_semaphore(Device d, Handle<Semaphore> sema, uint64_t value);
+
+/**
+ * @brief Destroy the provided semaphore.
+ *
+ * @param d
+ * @param sema
+ */
+void free(Device d, Handle<Semaphore> sema);
+
+/**
+ * @}
+ *
+ */
+
+/**
+ * @defgroup queue Queue
+ * @brief A command queue for submitting work to the GPU.
+ * Queues are used to record and submit commands to the GPU.
+ * Commands submitted on different queues are not ordered with respect to each other, but commands
+ * submitted to a specific queue will start in submission order (though may complete or execute out
+ * of order). To synchronize between queues, use `Semaphores`.
+ * Note that generally queues are not thread safe - functions on queues should only be called on one
+ * thread at a time. The exception to this is `queue_start_command_recording()`, which can be safely
+ * called concurrently by multiple threads.
+ */
+/// @{
+
+/**
+ * @brief Get a queue from the device.
+ * Will do some initialization on the first call for a given `QueueType`, but subsequent calls will
+ * be fast.
+ *
+ * @return The requested queue, or nullptr if the queue type is not supported on the hardware.
+ */
+Queue get_queue(Device d, QueueType type = QueueType::Default);
+
+/**
+ * @brief Get a command buffer for the queue.
+ * Safe to call from multiple threads.
+ */
 CommandBuffer queue_start_command_recording(Queue q);
-void          queue_submit(Queue                     q,
-                           Span<const CommandBuffer> command_buffers,
-                           Span<const SemaphoreInfo> wait_semaphores   = {},
-                           Span<const SemaphoreInfo> signal_semaphores = {});
-void          queue_cancel(Queue q, Span<const Handle<CommandBuffer>> command_buffers);
-void          queue_on_submitted_work_completed(Queue q, Function<void>&& fn);
-void          queue_process_events(Queue q);
 
+/**
+ * @brief Submit a set of command buffers to the queue, synchronized with provided semaphores.
+ *
+ * @param q
+ * @param command_buffers
+ * @param wait_semaphores
+ * @param signal_semaphores
+ */
+void queue_submit(Queue                     q,
+                  Span<const CommandBuffer> command_buffers,
+                  Span<const SemaphoreInfo> wait_semaphores   = {},
+                  Span<const SemaphoreInfo> signal_semaphores = {});
 
-// CommandBuffer
+/**
+ * @brief
+ *
+ * @param q
+ * @param command_buffers
+ */
+void queue_cancel(Queue q, Span<const Handle<CommandBuffer>> command_buffers);
+
+/**
+ * @brief Enqueue a callback function that will be called when any currently submitted work is
+ * completed on this queue. Note that there are no background threads being created for this
+ * callback - the fn will not be called until `queue_process_events()` is called.
+ *
+ * @param q
+ * @param fn
+ */
+void queue_on_submitted_work_completed(Queue q, Function<void>&& fn);
+
+/**
+ * @brief Call any `queue_on_submitted_work_completed()` callbacks that are ready.
+ *
+ * @param q
+ */
+void queue_process_events(Queue q);
+
+/// @}
+
+/** @defgroup cmd Command Buffers
+ * Command Buffers represent a packet of commands that will be executed on a GPU.
+ * You get a command buffer by calling `queue_start_command_recording()`.
+ * Command buffers can be recorded in parallel, but functions that operate on command buffers are
+ * NOT synchronized - each command buffer should only be recorded by one thread at a time.
+ * Command buffers must be submitted to the same queue they are started on. Before submission,
+ * `cmd_finalize()` must be called.
+ */
+
+/// @{
+/**
+ * @brief Copy `size` bytes of memory from `src` to `dest`.
+ *
+ */
 void cmd_memcpy(CommandBuffer cmd, GpuPtr destGpu, GpuPtr srcGpu, size_t size);
+
+/**
+ * @brief Copy from gpu memory into a texture object.
+ *
+ * @param cmd
+ * @param src
+ * @param texture
+ * @param info
+ */
 void cmd_copy_to_texture(CommandBuffer                  cmd,
                          GpuPtr                         src,
                          Handle<Texture>                texture,
                          const BufferToTextureCopyInfo& info);
+
+/**
+ * @brief Copy from a texture to gpu memory.
+ *
+ * @param cmd
+ * @param destGpu
+ * @param srcGpu
+ * @param texture
+ */
 void cmd_copy_from_texture(CommandBuffer   cmd,
                            GpuPtr          destGpu,
                            GpuPtr          srcGpu,
                            Handle<Texture> texture);
+
+/**
+ * @brief
+ *
+ * @param cmd
+ * @param heap
+ */
 void cmd_set_texture_heap(CommandBuffer cmd, Handle<TextureHeap> heap);
+
+/**
+ * @brief
+ *
+ * @param cmd
+ * @param before
+ * @param after
+ * @param image_transitions
+ * @param hazards
+ */
 void cmd_barrier(CommandBuffer                 cmd,
                  StageFlags                    before,
                  StageFlags                    after,
                  Span<const TextureTransition> image_transitions = {},
                  HazardFlags                   hazards           = HazardFlags(0));
+
+/**
+ * @brief
+ *
+ * @param cmd
+ * @param pipeline
+ */
 void cmd_set_pipeline(CommandBuffer cmd, Handle<Pipeline> pipeline);
+
+/**
+ * @brief
+ *
+ * @param cmd
+ * @param state
+ */
 void cmd_set_depth_stencil_state(CommandBuffer cmd, Handle<DepthStencilState> state);
+
+/**
+ * @brief
+ *
+ * @param cmd
+ * @param rect
+ */
 void cmd_set_scissor_rect(CommandBuffer cmd, const Rect2D& rect);
+
+/**
+ * @brief
+ *
+ * @param cmd
+ * @param dataGpu
+ * @param gridDimensions
+ */
 void cmd_dispatch(CommandBuffer cmd, GpuPtr dataGpu, const Dimension3D& gridDimensions);
+
+/**
+ * @brief
+ *
+ * @param cmd
+ * @param dataGpu
+ * @param gridDimensionsGpu
+ */
 void cmd_dispatch_indirect(CommandBuffer cmd, GpuPtr dataGpu, GpuPtr gridDimensionsGpu);
+
+/**
+ * @brief
+ *
+ * @param cmd
+ * @param desc
+ */
 void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc);
+
+/**
+ * @brief
+ *
+ * @param cmd
+ */
 void cmd_end_render_pass(CommandBuffer cmd);
+
+/**
+ * @brief
+ *
+ * @param cmd
+ * @param vertexDataGpu
+ * @param fragmentDataGpu
+ * @param vertexCount
+ * @param instanceCount
+ */
 void cmd_draw(CommandBuffer cmd,
               GpuPtr        vertexDataGpu,
               GpuPtr        fragmentDataGpu,
               uint32_t      vertexCount,
               uint32_t      instanceCount);
+
+/**
+ * @brief
+ *
+ * @param cmd
+ * @param vertexDataGpu
+ * @param pixelDataGpu
+ * @param indicesGpu
+ * @param indexCount
+ * @param instanceCount
+ */
 void cmd_draw_indexed_instanced(CommandBuffer cmd,
                                 GpuPtr        vertexDataGpu,
                                 GpuPtr        pixelDataGpu,
                                 GpuPtr        indicesGpu,
                                 uint32_t      indexCount,
                                 uint32_t      instanceCount);
+
+/**
+ * @brief
+ *
+ * @param cmd
+ * @param vertexDataGpu
+ * @param pixelDataGpu
+ * @param indicesGpu
+ * @param argsGpu
+ */
 void cmd_draw_indexed_instanced_indirect(CommandBuffer cmd,
                                          GpuPtr        vertexDataGpu,
                                          GpuPtr        pixelDataGpu,
                                          GpuPtr        indicesGpu,
                                          GpuPtr        argsGpu);
+
+/**
+ * @brief
+ *
+ * @param cmd
+ * @param vertexDataGpu
+ * @param pixelDataGpu
+ * @param indicesGpu
+ * @param argsGpu
+ * @param drawCountGpu
+ * @param maxDraws
+ */
 void cmd_draw_indexed_instanced_indirect_multi(CommandBuffer cmd,
                                                GpuPtr        vertexDataGpu,
                                                GpuPtr        pixelDataGpu,
@@ -829,7 +1313,14 @@ void cmd_draw_indexed_instanced_indirect_multi(CommandBuffer cmd,
                                                GpuPtr        argsGpu,
                                                GpuPtr        drawCountGpu,
                                                uint32_t      maxDraws);
+
+/**
+ * @brief
+ *
+ * @param cmd
+ */
 void cmd_finalize(CommandBuffer cmd);
+/// @}
 
 extern template class Span<const char>;
 extern template class Span<uint8_t>;

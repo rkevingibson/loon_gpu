@@ -1,0 +1,14 @@
+# GPU Memory Management
+
+In Loon GPU, `GPUPtr` is the fundamental way of interacting with GPU memory - it represents a memory address on the GPU, and can be manipulated just like pointers on the CPU. You get a GPUPtr by calling `malloc()`, just like in C. You free GPU pointers with `free()`, just like in C.
+If you called malloc with `MemoryType::Default` or `MemoryType::Readback`, the gpu memory you got a pointer to is also mapped to a range of CPU-accessible memory. You can get a `void*` to that memory that you can write or read from using the `get_host_pointer()` function. Note that this function is relatively expensive, so the result should be cached rather than calling the function repeatedly - the pointer will not change for the lifetime of the allocation. Allocations made with `MemoryType::GPU` will return nullptr if passed to `get_host_pointer()`. 
+
+`GPUPtr`s can be passed into shaders directly - they are just pointers in Slang, or buffer_references in glsl. This lets you create data structures on the CPU that can easily match the layout on the GPU, simplifying code.
+
+You can also specify the location of textures by passing a `GPUPtr` to `create_texture()`. Note that textures can only be created on allocations with `MemoryType::GPU` - CPU-mapped textures are not supported, and functions like `cmd_copy_to_texture()`/`cmd_copy_from_texture()` should be used instead.
+
+## Vulkan implementation details
+
+Internally we're using the popular [Vulkan Memory Allocator (VMA) library](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) to handle allocations, but we're using it in a slightly unusual way. When malloc is called, we first create a `VmaAllocation`, and then a `VkBuffer`, bound to the entire memory range. We get the device address using `vkGetBufferDeviceAddress` and store it in a sorted list of (Address, Buffer) pairs, letting us do binary searches later on to go from an arbitary GpuPtr to the underlying buffer in a reasonably efficient way.
+
+When `create_texture()` is called with a non-null `location` parameter, we first map the `GPUPtr` to its underlying `VmaAllocation` and an offset, then use `vmaBindImageMemory2` to bind the `VkImage` to the memory at that location. In order to use this correctly and implement custom GPU memory allocators, `get_texture_size_align()` can be used to get memory requirements for a texture. To implement this, unfortunately requires creating a temporary `VkImage` object then calling `vkGetImageMemoryRequirements`, so this is not as fast as it could be, but in my testing a single call to `get_texture_size_align()` takes somewhere less than 10 microseconds, so should be fast enough for practical usecases given that texture creation is significantly more expensive.
