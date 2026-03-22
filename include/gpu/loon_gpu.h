@@ -911,16 +911,20 @@ void* get_host_pointer(Device d, GpuPtr ptr);
  */
 TextureSizeAlign get_texture_size_align(Device d, const TextureDesc& desc);
 
-// Create a new new texture with the provided descriptor. If location != 0, then the texture is
-// allocated at that location in Gpu memory. Note that textures can only be created in memory
-// allocated with Memory::Gpu - no host-visible textures can be created. If location == 0,
-// memory is allocated for the texture.
-Handle<Texture>     create_texture(Device d, const TextureDesc& desc, GpuPtr location = 0);
-Handle<TextureHeap> create_texture_heap(Device d, const TextureHeapDesc& desc);
+/**
+ * @brief Create a texture object.
+ * Create a new new texture with the provided descriptor. If location != 0, then the texture is
+ * allocated at that location in Gpu memory. Note that textures can only be created in memory
+ * allocated with Memory::Gpu - no host-visible textures can be created. If location == 0, memory is
+ * allocated for the texture.
+ * @param d
+ * @param desc
+ * @param location
+ * @return Handle<Texture>
+ */
+Handle<Texture> create_texture(Device d, const TextureDesc& desc, GpuPtr location = 0);
 
-void free(Device d, Handle<Texture>);
-void free(Device d, Handle<TextureHeap>);
-void free(Device d, Handle<Sampler>);
+Handle<TextureHeap> create_texture_heap(Device d, const TextureHeapDesc& desc);
 
 /**
  * @brief
@@ -944,11 +948,14 @@ void free(Device d, Handle<TextureHeap>);
  * @return TextureView
  */
 TextureView add_texture_view_to_heap(Device d, Handle<TextureHeap>, const TextureViewDesc& desc);
+
 TextureView add_rw_texture_view_to_heap(Device d, Handle<TextureHeap>, const TextureViewDesc& desc);
-Sampler     add_sampler_to_heap(Device d, Handle<TextureHeap>, const SamplerDesc& sampler);
-void        remove_texture_view_from_heap(Device d, Handle<TextureHeap>, TextureView);
-void        remove_rw_texture_view_from_heap(Device d, Handle<TextureHeap>, TextureView);
-void        remove_sampler_from_heap(Device d, Handle<TextureHeap>, Sampler);
+
+Sampler add_sampler_to_heap(Device d, Handle<TextureHeap>, const SamplerDesc& sampler);
+
+void remove_rw_texture_view_from_heap(Device d, Handle<TextureHeap>, TextureView);
+
+void remove_sampler_from_heap(Device d, Handle<TextureHeap>, Sampler);
 
 /**
  * @brief
