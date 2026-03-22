@@ -5,7 +5,7 @@ include(FetchContent)
 FetchContent_Declare(
     volk
     GIT_REPOSITORY https://github.com/zeux/volk.git
-    GIT_TAG vulkan-sdk-1.4.335
+    GIT_TAG vulkan-sdk-1.4.341
 )
 
 if(WIN32)
