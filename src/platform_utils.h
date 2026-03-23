@@ -33,16 +33,25 @@ bool    atomic_compare_exchange(int64_t* dst, int64_t* expected, int64_t desired
 // Mutex
 
 #if _WIN32
-using mutex = uintptr_t;
-#    define LOON_MUTEX_INIT {0}
+using mutex  = uintptr_t;
+using rwlock = uintptr_t;
+#    define LOON_MUTEX_INIT  {0}
+#    define LOON_RWLOCK_INIT {0}
 #elif __linux__ || __APPLE__
-using mutex = pthread_mutex_t;
-#    define LOON_MUTEX_INIT PTHREAD_MUTEX_INITIALIZER
+using mutex  = pthread_mutex_t;
+using rwlock = pthread_rwlock_t;
+#    define LOON_MUTEX_INIT  PTHREAD_MUTEX_INITIALIZER
+#    define LOON_RWLOCK_INIT PTHREAD_RWLOCK_INITIALIZER
 #endif
 
 void mutex_lock(mutex* mtx);
 void mutex_unlock(mutex* mtx);
 bool mutex_try_lock(mutex* mtx);
+
+void rwlock_lock_read(rwlock* l);
+void rwlock_unlock_read(rwlock* l);
+void rwlock_lock_write(rwlock* l);
+void rwlock_unlock_write(rwlock* l);
 
 // Bit manipulation
 

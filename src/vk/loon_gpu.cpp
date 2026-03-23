@@ -267,8 +267,10 @@ struct DeviceImpl {
     SlotMap<Semaphore>         m_semaphore_pool;
     SlotMap<Pipeline>          m_pipeline_pool;
 
+    rwlock            m_ptr_map_lock;
     Vector<GpuPtrMap> m_ptr_map;
-    QueueImpl         m_queues[static_cast<size_t>(QueueType::ValidCount)];
+
+    QueueImpl m_queues[static_cast<size_t>(QueueType::ValidCount)];
 };
 
 // MARK: Initialization
@@ -1105,6 +1107,7 @@ Device create_device(const DeviceDesc& desc) {
                                 d->m_api.vkDestroyPipeline(d->m_device, p->vk_pipeline, nullptr);
                                 p->~Pipeline();
                             }),
+        .m_ptr_map_lock = LOON_RWLOCK_INIT,
         .m_ptr_map            = Vector<GpuPtrMap>(alloc),
     };
 }
@@ -1527,16 +1530,21 @@ GpuPtr malloc(Device d, size_t bytes, size_t align, Memory memory) {
         .device_ptr    = device_ptr,
     });
 
+    rwlock_lock_write(&d->m_ptr_map_lock);
     const auto insertion_pos
         = lower_bound(d->m_ptr_map.begin(), d->m_ptr_map.end(), {.ptr = device_ptr});
     d->m_ptr_map.insert(insertion_pos, {.ptr = device_ptr, .buffer = handle});
+    rwlock_unlock_write(&d->m_ptr_map_lock);
 
     return device_ptr;
 }
 
 static BufferAndOffset buffer_and_offset_from_ptr(Device d, GpuPtr ptr) {
+    rwlock_lock_read(&d->m_ptr_map_lock);
     const auto  it = lower_bound(d->m_ptr_map.begin(), d->m_ptr_map.end(), GpuPtrMap{.ptr = ptr});
     const auto& b  = d->m_buffer_pool[it->buffer];
+    rwlock_unlock_read(&d->m_ptr_map_lock);
+
     return {
         .buffer = b.vk_buffer,
         .offset = static_cast<uint32_t>(ptr - b.device_ptr),
@@ -1546,14 +1554,18 @@ static BufferAndOffset buffer_and_offset_from_ptr(Device d, GpuPtr ptr) {
 
 
 void free(Device d, GpuPtr ptr) {
+    rwlock_lock_write(&d->m_ptr_map_lock);
     const auto it = lower_bound(d->m_ptr_map.begin(), d->m_ptr_map.end(), GpuPtrMap{.ptr = ptr});
     assert(it->ptr == ptr);  // Shouldn't free from another pointer in the same allocation.
     d->m_buffer_pool.erase(it->buffer);
+    rwlock_unlock_write(&d->m_ptr_map_lock);
 }
 
 void* get_host_pointer(Device d, GpuPtr ptr) {
+    rwlock_lock_read(&d->m_ptr_map_lock);
     const auto it = lower_bound(d->m_ptr_map.begin(), d->m_ptr_map.end(), GpuPtrMap{.ptr = ptr});
     auto&      buffer = d->m_buffer_pool[it->buffer];
+    rwlock_unlock_read(&d->m_ptr_map_lock);
     return (char*)buffer.host_ptr + (ptr - buffer.device_ptr);
 }
 
