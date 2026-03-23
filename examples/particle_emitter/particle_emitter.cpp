@@ -239,7 +239,7 @@ void ParticleEmitter::Update(const WindowState& window) {
 
     m_sim.options.rng_seed = rand();
     GpuPtr indirect_args   = m_ring_buffer.append(m_frame_idx,
-                                                loon::gpu::DrawIndexedIndirectArgs{
+                                                loon::gpu::DrawIndexedIndirectGpuArgs{
                                                       .index_count    = 6,
                                                       .instance_count = 0,
                                                       .first_index    = 0,
@@ -322,7 +322,13 @@ void ParticleEmitter::Update(const WindowState& window) {
     });
     gpu::cmd_set_depth_stencil_state(cmd, m_depth_stencil_state);
     gpu::cmd_set_pipeline(cmd, m_render_particle_pipeline);
-    gpu::cmd_draw_indexed_instanced_indirect(cmd, vertex_args, 0, indices_ptr, indirect_args);
+    gpu::cmd_draw_indexed_instanced_indirect(cmd,
+                                             {
+                                                 .vertexDataGpu   = vertex_args,
+                                                 .fragmentDataGpu = 0,
+                                                 .indicesGpu      = indices_ptr,
+                                                 .argsGpu         = indirect_args,
+                                             });
 
     gpu::cmd_set_texture_heap(cmd, m_texture_heap);
     loon::imgui::Render(cmd);

@@ -356,11 +356,14 @@ void ManyCubes::Update(const WindowState& window) {
                 if (tx < vert_args) {
                     gpu::cmd_draw_indexed_instanced(
                         cmd,
-                        vert_args,
-                        frag,
-                        m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
-                        Cube::kNumIndices,
-                        num_cubes);
+                        {
+                            .vertexDataGpu   = vert_args,
+                            .fragmentDataGpu = frag,
+                            .indicesGpu
+                            = m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
+                            .indexCount    = Cube::kNumIndices,
+                            .instanceCount = num_cubes,
+                        });
 
                     num_cubes = 0;
                     vert_args = tx;
@@ -371,11 +374,13 @@ void ManyCubes::Update(const WindowState& window) {
         if (num_cubes) {
             gpu::cmd_draw_indexed_instanced(
                 cmd,
-                vert_args,
-                frag,
-                m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
-                Cube::kNumIndices,
-                num_cubes);
+                {
+                    .vertexDataGpu   = vert_args,
+                    .fragmentDataGpu = frag,
+                    .indicesGpu      = m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
+                    .indexCount      = Cube::kNumIndices,
+                    .instanceCount   = num_cubes,
+                });
         }
 
     } else {
@@ -392,11 +397,12 @@ void ManyCubes::Update(const WindowState& window) {
 
                 gpu::cmd_draw_indexed_instanced(
                     cmd,
-                    vert_args,
-                    frag,
-                    m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
-                    Cube::kNumIndices,
-                    1);
+                    {
+                        .vertexDataGpu   = vert_args,
+                        .fragmentDataGpu = frag,
+                        .indicesGpu = m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
+                        .indexCount = Cube::kNumIndices,
+                    });
             }
         }
     }

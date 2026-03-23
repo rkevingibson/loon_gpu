@@ -3003,76 +3003,62 @@ void cmd_draw(CommandBuffer cmd,
     impl->m_api.vkCmdDraw(cmd->buffer, vertexCount, instanceCount, 0, 0);
 }
 
-void cmd_draw_indexed_instanced(CommandBuffer cmd,
-                                GpuPtr        vertexDataGpu,
-                                GpuPtr        fragmentDataGpu,
-                                GpuPtr        indicesGpu,
-                                uint32_t      indexCount,
-                                uint32_t      instanceCount) {
+void cmd_draw_indexed_instanced(CommandBuffer cmd, const DrawIndexedInstancedInfo& args) {
     auto impl = cmd->device;
-    cmd_set_graphics_ptrs(cmd, vertexDataGpu, fragmentDataGpu);
-    if (indicesGpu != cmd->current_idx_buffer) {
-        const auto indices = buffer_and_offset_from_ptr(impl, indicesGpu);
+    cmd_set_graphics_ptrs(cmd, args.vertexDataGpu, args.fragmentDataGpu);
+    if (args.indicesGpu != cmd->current_idx_buffer) {
+        const auto indices = buffer_and_offset_from_ptr(impl, args.indicesGpu);
         impl->m_api.vkCmdBindIndexBuffer(cmd->buffer,
                                          indices.buffer,
                                          indices.offset,
-                                         VK_INDEX_TYPE_UINT16);
-        cmd->current_idx_buffer = indicesGpu;
+                                         bridge(args.type));
+        cmd->current_idx_buffer = args.indicesGpu;
     }
-    impl->m_api.vkCmdDrawIndexed(cmd->buffer, indexCount, instanceCount, 0, 0, 0);
+    impl->m_api.vkCmdDrawIndexed(cmd->buffer, args.indexCount, args.instanceCount, 0, 0, 0);
 }
 
-void cmd_draw_indexed_instanced_indirect(CommandBuffer cmd,
-                                         GpuPtr        vertexDataGpu,
-                                         GpuPtr        pixelDataGpu,
-                                         GpuPtr        indicesGpu,
-                                         GpuPtr        argsGpu) {
+void cmd_draw_indexed_instanced_indirect(CommandBuffer cmd, const DrawIndexedIndirectInfo& args) {
     auto impl = cmd->device;
-    ;
-    cmd_set_graphics_ptrs(cmd, vertexDataGpu, pixelDataGpu);
-    if (indicesGpu != cmd->current_idx_buffer) {
-        const auto indices = buffer_and_offset_from_ptr(impl, indicesGpu);
+
+    cmd_set_graphics_ptrs(cmd, args.vertexDataGpu, args.fragmentDataGpu);
+    if (args.indicesGpu != cmd->current_idx_buffer) {
+        const auto indices = buffer_and_offset_from_ptr(impl, args.indicesGpu);
         impl->m_api.vkCmdBindIndexBuffer(cmd->buffer,
                                          indices.buffer,
                                          indices.offset,
-                                         VK_INDEX_TYPE_UINT16);
-        cmd->current_idx_buffer = indicesGpu;
+                                         bridge(args.type));
+        cmd->current_idx_buffer = args.indicesGpu;
     }
 
-    const auto args = buffer_and_offset_from_ptr(impl, argsGpu);
+    const auto gpu = buffer_and_offset_from_ptr(impl, args.argsGpu);
     impl->m_api.vkCmdDrawIndexedIndirect(cmd->buffer,
-                                         args.buffer,
-                                         args.offset,
+                                         gpu.buffer,
+                                         gpu.offset,
                                          1,
                                          sizeof(VkDrawIndexedIndirectCommand));
 }
 
-void cmd_draw_indexed_instanced_indirect_multi(CommandBuffer cmd,
-                                               GpuPtr        vertexDataGpu,
-                                               GpuPtr        pixelDataGpu,
-                                               GpuPtr        indicesGpu,
-                                               GpuPtr        argsGpu,
-                                               GpuPtr        drawCountGpu,
-                                               uint32_t      maxDraws) {
+void cmd_draw_indexed_instanced_indirect_multi(CommandBuffer                cmd,
+                                               const MultiDrawIndirectInfo& args) {
     auto impl = cmd->device;
-    cmd_set_graphics_ptrs(cmd, vertexDataGpu, pixelDataGpu);
-    if (indicesGpu != cmd->current_idx_buffer) {
-        const auto indices = buffer_and_offset_from_ptr(impl, indicesGpu);
+    cmd_set_graphics_ptrs(cmd, args.vertexDataGpu, args.pixelDataGpu);
+    if (args.indicesGpu != cmd->current_idx_buffer) {
+        const auto indices = buffer_and_offset_from_ptr(impl, args.indicesGpu);
         impl->m_api.vkCmdBindIndexBuffer(cmd->buffer,
                                          indices.buffer,
                                          indices.offset,
-                                         VK_INDEX_TYPE_UINT16);
-        cmd->current_idx_buffer = indicesGpu;
+                                         bridge(args.type));
+        cmd->current_idx_buffer = args.indicesGpu;
     }
 
-    const auto args  = buffer_and_offset_from_ptr(impl, argsGpu);
-    const auto count = buffer_and_offset_from_ptr(impl, drawCountGpu);
+    const auto gpu   = buffer_and_offset_from_ptr(impl, args.argsGpu);
+    const auto count = buffer_and_offset_from_ptr(impl, args.drawCountGpu);
     impl->m_api.vkCmdDrawIndexedIndirectCount(cmd->buffer,
-                                              args.buffer,
-                                              args.offset,
+                                              gpu.buffer,
+                                              gpu.offset,
                                               count.buffer,
                                               count.offset,
-                                              maxDraws,
+                                              args.maxDraws,
                                               sizeof(VkDrawIndexedIndirectCommand));
 }
 

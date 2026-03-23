@@ -20,7 +20,7 @@
     }
 
 #define LOON_BITWISE_ASSIGNMENT_OP(name, op)                                                       \
-    inline constexpr name operator op##=(name lhs, name rhs) {                                     \
+    inline constexpr name operator op## = (name lhs, name rhs) {                                   \
         lhs = lhs op rhs;                                                                          \
         return lhs;                                                                                \
     }
@@ -584,6 +584,11 @@ enum class SamplerAddressing : uint8_t {
     Mirrored,
 };
 
+enum class IndexType : uint8_t {
+    UInt16,
+    UInt32,
+};
+
 enum class ErrorType : uint8_t {
     NoError,
     Validation,
@@ -794,7 +799,34 @@ struct BufferToTextureCopyInfo {
     Dimension3D image_extent;
 };
 
-struct alignas(8) DrawIndexedIndirectArgs {
+struct DrawIndexedInstancedInfo {
+    GpuPtr    vertexDataGpu;
+    GpuPtr    fragmentDataGpu;
+    GpuPtr    indicesGpu;
+    uint32_t  indexCount;
+    uint32_t  instanceCount = 1;
+    IndexType type          = IndexType::UInt16;
+};
+
+struct DrawIndexedIndirectInfo {
+    GpuPtr    vertexDataGpu;
+    GpuPtr    fragmentDataGpu;
+    GpuPtr    indicesGpu;
+    GpuPtr    argsGpu;
+    IndexType type = IndexType::UInt16;
+};
+
+struct MultiDrawIndirectInfo {
+    GpuPtr    vertexDataGpu;
+    GpuPtr    pixelDataGpu;
+    GpuPtr    indicesGpu;
+    GpuPtr    argsGpu;
+    GpuPtr    drawCountGpu;
+    uint32_t  maxDraws;
+    IndexType type = IndexType::UInt16;
+};
+
+struct alignas(8) DrawIndexedIndirectGpuArgs {
     uint32_t index_count;
     uint32_t instance_count;
     uint32_t first_index;
@@ -1267,52 +1299,26 @@ void cmd_draw(CommandBuffer cmd,
  * @brief
  *
  * @param cmd
- * @param vertexDataGpu
- * @param pixelDataGpu
- * @param indicesGpu
- * @param indexCount
- * @param instanceCount
+ * @param args
  */
-void cmd_draw_indexed_instanced(CommandBuffer cmd,
-                                GpuPtr        vertexDataGpu,
-                                GpuPtr        pixelDataGpu,
-                                GpuPtr        indicesGpu,
-                                uint32_t      indexCount,
-                                uint32_t      instanceCount);
+void cmd_draw_indexed_instanced(CommandBuffer cmd, const DrawIndexedInstancedInfo& args);
 
 /**
  * @brief
  *
  * @param cmd
- * @param vertexDataGpu
- * @param pixelDataGpu
- * @param indicesGpu
- * @param argsGpu
+ * @param args
  */
-void cmd_draw_indexed_instanced_indirect(CommandBuffer cmd,
-                                         GpuPtr        vertexDataGpu,
-                                         GpuPtr        pixelDataGpu,
-                                         GpuPtr        indicesGpu,
-                                         GpuPtr        argsGpu);
+void cmd_draw_indexed_instanced_indirect(CommandBuffer cmd, const DrawIndexedIndirectInfo& args);
 
 /**
  * @brief
  *
  * @param cmd
- * @param vertexDataGpu
- * @param pixelDataGpu
- * @param indicesGpu
- * @param argsGpu
- * @param drawCountGpu
- * @param maxDraws
+ * @param args
  */
-void cmd_draw_indexed_instanced_indirect_multi(CommandBuffer cmd,
-                                               GpuPtr        vertexDataGpu,
-                                               GpuPtr        pixelDataGpu,
-                                               GpuPtr        indicesGpu,
-                                               GpuPtr        argsGpu,
-                                               GpuPtr        drawCountGpu,
-                                               uint32_t      maxDraws);
+void cmd_draw_indexed_instanced_indirect_multi(CommandBuffer                cmd,
+                                               const MultiDrawIndirectInfo& args);
 
 /**
  * @brief

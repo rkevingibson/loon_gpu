@@ -261,12 +261,14 @@ void HelloCube::Update(const WindowState& window) {
                                 });
     gpu::cmd_set_depth_stencil_state(cmd, m_depth_stencil_state);
     gpu::cmd_set_pipeline(cmd, m_render_pipeline);
-    gpu::cmd_draw_indexed_instanced(cmd,
-                                    m_constant_buffer + sizeof(ShaderArgs) * (m_frame_idx % 3),
-                                    0,
-                                    m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kColors),
-                                    36,
-                                    1);
+    gpu::cmd_draw_indexed_instanced(
+        cmd,
+        {
+            .vertexDataGpu   = m_constant_buffer + sizeof(ShaderArgs) * (m_frame_idx % 3),
+            .fragmentDataGpu = 0,
+            .indicesGpu      = m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kColors),
+            .indexCount      = 36,
+        });
 
     gpu::cmd_end_render_pass(cmd);
     gpu::cmd_barrier(cmd,

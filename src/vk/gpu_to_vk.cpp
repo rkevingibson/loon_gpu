@@ -412,4 +412,12 @@ VkImageLayout bridge(Layout layout) {
     return VK_IMAGE_LAYOUT_MAX_ENUM;
 }
 
+VkIndexType bridge(IndexType t) {
+    switch (t) {
+        case IndexType::UInt16: return VK_INDEX_TYPE_UINT16;
+        case IndexType::UInt32: return VK_INDEX_TYPE_UINT32;
+    }
+    return VK_INDEX_TYPE_MAX_ENUM;
+}
+
 }  // namespace loon::gpu

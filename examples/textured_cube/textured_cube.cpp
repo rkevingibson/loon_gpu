@@ -301,12 +301,14 @@ void TexturedCube::Update(const WindowState& window) {
     uint32_t args_offset = sizeof(ShaderArgs) * (m_frame_idx % 3);
     GpuPtr   argsGpu     = m_constant_buffer + args_offset;
 
-    gpu::cmd_draw_indexed_instanced(cmd,
-                                    argsGpu,
-                                    argsGpu + offsetof(ShaderArgs, texture),
-                                    m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
-                                    Cube::kNumIndices,
-                                    1);
+    gpu::cmd_draw_indexed_instanced(
+        cmd,
+        {
+            .vertexDataGpu   = argsGpu,
+            .fragmentDataGpu = argsGpu + offsetof(ShaderArgs, texture),
+            .indicesGpu      = m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
+            .indexCount      = Cube::kNumIndices,
+        });
 
     gpu::cmd_end_render_pass(cmd);
 

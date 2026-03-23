@@ -479,12 +479,14 @@ void Render(gpu::CommandBuffer cmd) {
                                   .sampler = bd->sampler,
                               },};
 
-                gpu::cmd_draw_indexed_instanced(cmd,
-                                                args_ptr,
-                                                args_ptr + offsetof(DrawArgs, frag),
-                                                index_buf,
-                                                pcmd->ElemCount,
-                                                1);
+                gpu::cmd_draw_indexed_instanced(
+                    cmd,
+                    {
+                        .vertexDataGpu   = args_ptr,
+                        .fragmentDataGpu = args_ptr + offsetof(DrawArgs, frag),
+                        .indicesGpu      = index_buf,
+                        .indexCount      = pcmd->ElemCount,
+                    });
 
                 args_ptr += sizeof(DrawArgs);
                 draw_args++;

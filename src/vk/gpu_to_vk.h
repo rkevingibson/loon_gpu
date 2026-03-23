@@ -22,5 +22,6 @@ VkAttachmentLoadOp                  bridge(LoadOp op);
 VkAttachmentStoreOp                 bridge(StoreOp op);
 VkCompareOp                         bridge(Op op);
 VkImageLayout                       bridge(Layout layout);
+VkIndexType                         bridge(IndexType t);
 
 };  // namespace loon::gpu
