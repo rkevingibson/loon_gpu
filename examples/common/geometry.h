@@ -41,6 +41,9 @@ struct transform3d {
     float3 origin;
 
     [[nodiscard]] static transform3d identity();
+    [[nodiscard]] static transform3d from_axis_angle_and_origin(const float3& axis,
+                                                                float         angle,
+                                                                const float3& origin);
     [[nodiscard]] static transform3d from_basis_and_origin(float3 basis[3], const float3& origin);
 
     [[nodiscard]] transform3d rotated(const float3& axis, float angle) const;

@@ -329,10 +329,10 @@ void ManyCubes::Update(const WindowState& window) {
     gpu::cmd_set_texture_heap(cmd, m_texture_heap);
 
     const auto grid_transform = [&](int x, int y) {
-        return transform3d::identity()
-            .translated({4.f * (float)(x - m_grid_width / 2), 0, -4.f * (float)y})
-            .rotated_local(normalized({1, 0.5, 0}),
-                           radians_from_degrees((float)((30 * x + 10 * y + m_frame_idx) % 360)))
+        return transform3d::from_axis_angle_and_origin(
+                   normalized({1, 0.5, 0}),
+                   radians_from_degrees((float)((30 * x + 10 * y + m_frame_idx) % 360)),
+                   {4.f * (float)(x - m_grid_width / 2), 0, -4.f * (float)y})
             .to_matrix();
     };
 

@@ -6,6 +6,36 @@ transform3d transform3d::identity() {
     return transform3d{.basis = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}, .origin = {0, 0, 0}};
 }
 
+transform3d transform3d::from_axis_angle_and_origin(const float3& axis,
+                                                    float         angle,
+                                                    const float3& origin) {
+    // This is just `rotated()` below, but special-cased where the rotating basis is the identity
+    // matrix.
+    const float  ca  = cosf(angle);
+    const float  sa  = sinf(angle);
+    const float  ca1 = (1.0f - ca);
+    const float3 x   = {
+        ca + ca1 * axis.x * axis.x,
+        sa * axis.z + ca1 * axis.x * axis.y,
+        sa * -axis.y + ca1 * axis.x * axis.z,
+    };
+    const float3 y = {
+        sa * -axis.z + ca1 * axis.y * axis.x,
+        ca + ca1 * axis.y * axis.y,
+        sa * axis.x + ca1 * axis.y * axis.z,
+    };
+    const float3 z = {
+        sa * axis.y + ca1 * axis.z * axis.x,
+        sa * -axis.x + ca1 * axis.z * axis.y,
+        ca + ca1 * axis.z * axis.z,
+    };
+
+    return {
+        .basis  = {x, y, z},
+        .origin = origin,
+    };
+}
+
 transform3d transform3d::from_basis_and_origin(float3 basis[3], const float3& origin) {
     return transform3d{.basis = {basis[0], basis[1], basis[2]}, .origin = origin};
 }
