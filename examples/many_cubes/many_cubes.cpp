@@ -243,8 +243,8 @@ void ManyCubes::Update(const WindowState& window) {
     loon::imgui::NewFrame();
 
     ImGui::Begin("Cubes!");
-    ImGui::SliderInt("Cubes x", &m_grid_width, 1, 1000);
-    ImGui::SliderInt("Cubes y", &m_grid_height, 1, 1000);
+    ImGui::SliderInt("Cubes x", &m_grid_width, 1, 500);
+    ImGui::SliderInt("Cubes y", &m_grid_height, 1, 500);
     ImGui::Checkbox("Use instanced draw", &m_use_instanced_draws);
 
     ImGui::LabelText("Timing", "CPU: %lld us", m_frame_time_average);
@@ -361,6 +361,7 @@ void ManyCubes::Update(const WindowState& window) {
                         m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
                         Cube::kNumIndices,
                         num_cubes);
+
                     num_cubes = 0;
                     vert_args = tx;
                 }

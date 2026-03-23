@@ -35,8 +35,8 @@ bool    atomic_compare_exchange(int64_t* dst, int64_t* expected, int64_t desired
 #if _WIN32
 using mutex  = uintptr_t;
 using rwlock = uintptr_t;
-#    define LOON_MUTEX_INIT  {0}
-#    define LOON_RWLOCK_INIT {0}
+#    define LOON_MUTEX_INIT  0
+#    define LOON_RWLOCK_INIT 0
 #elif __linux__ || __APPLE__
 using mutex  = pthread_mutex_t;
 using rwlock = pthread_rwlock_t;

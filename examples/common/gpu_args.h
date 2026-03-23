@@ -49,10 +49,8 @@ class RingBuffer {
 
 template <class T>
 gpu::GpuPtr RingBuffer::append(uint64_t frame_idx, const T& t) {
-    const uint32_t completed_frame_idx
-        = frame_idx > m_num_frames_in_flight ? (frame_idx - m_num_frames_in_flight) : 0;
-    while (m_allocated_ranges[m_allocated_range_tail & kAllocatedRangesMask].frame_idx
-           < completed_frame_idx) {
+    while (frame_idx - m_allocated_ranges[m_allocated_range_tail & kAllocatedRangesMask].frame_idx
+           > m_num_frames_in_flight) {
         m_allocated_range_tail++;  // Effectively "free" this range.
     }
 

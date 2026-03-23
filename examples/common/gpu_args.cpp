@@ -43,13 +43,15 @@ uint32_t RingBuffer::contiguous_free_space() const {
     const auto end   = m_allocated_ranges[m_allocated_range_head & kAllocatedRangesMask].end;
 
     const uint32_t size = m_mask + 1;
-    if ((start & m_mask) >= (end & m_mask)) {
-        // Empty space wraps around the ring buffer, so need to consider that
-        const uint32_t tail_size = size - (start & m_mask);
-        const uint32_t head_size = (end & m_mask);
-        return tail_size > head_size ? tail_size : head_size;
+    if ((start & m_mask) > (end & m_mask)) {
+        // Allocated space wraps around the ring buffer, so need to consider that
+        const uint32_t free_size = (start & m_mask) - (end & m_mask);
+        return free_size;
     } else {
-        return size - (end - start);
+        // Allocated space doesn't wrap, so free space wraps around.
+        const size_t tail_size = size - (end & m_mask);
+        const size_t head_size = start & m_mask;
+        return tail_size > head_size ? tail_size : head_size;
     }
 }
 
