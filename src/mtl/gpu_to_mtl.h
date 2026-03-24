@@ -14,5 +14,10 @@ MTL::BlendOperation         bridge(Blend op);
 MTL::BlendFactor            bridge(Factor f);
 MTL::CompareFunction        bridge(Op op);
 MTL::StencilOperation       bridge(StencilOp op);
+MTL::LoadAction             bridge(LoadOp op);
+MTL::StoreAction            bridge(StoreOp op);
+MTL::SamplerMinMagFilter    bridge_minmag(SamplerFilter f);
+MTL::SamplerMipFilter       bridge_mip(SamplerFilter f);
+MTL::SamplerAddressMode     bridge(SamplerAddressing a);
 
 }  // namespace loon::gpu

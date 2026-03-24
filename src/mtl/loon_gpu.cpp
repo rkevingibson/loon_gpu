@@ -29,20 +29,48 @@ template class Span<const Handle<gpu::CommandBuffer>>;
 template class Span<const gpu::TextureTransition>;
 template class Function<void>;
 
+template <class T, class CompareFn>
+static constexpr auto lower_bound = [](T* first, T* last, const T& value) {
+    CompareFn compare;
+    T*        it;
+    size_t    count = last - first;
+    while (count > 0) {
+        const size_t step = count / 2;
+        it                = first + step;
+        if (compare(*it, value)) {
+            first = ++it;
+            count -= step + 1;
+        } else {
+            count = step;
+        }
+    }
+    return first;
+};
+
 struct Buffer {
     MTL::Buffer* buffer;
     MTL::Heap*   heap;
-    void*        host_ptr;
-    GpuPtr       device_ptr;
 };
 
 struct Texture {
     MTL::Texture* texture;
 };
 
+struct SamplerMapping {
+    Sampler            sampler;
+    MTL::SamplerState* state;
+};
+
+struct SamplerMappingCompare {
+    constexpr bool operator()(const SamplerMapping& a, const SamplerMapping& b) {
+        return a.sampler > b.sampler;
+    }
+};
+
 struct TextureHeap {
-    MTL::TextureViewPool* pool = nullptr;
-    TwoLevelBitset        bitset;
+    MTL::TextureViewPool*  pool = nullptr;
+    TwoLevelBitset         bitset;
+    Vector<SamplerMapping> sampler_lookup;
 };
 
 struct Pipeline {
@@ -80,10 +108,12 @@ struct Surface {
 
 struct CommandPool;
 struct CommandBufferImpl {
-    MTL4::CommandBuffer* command_buffer = nullptr;
-    Queue                queue;
-    CommandPool*         pool;
-    Device               device;
+    MTL4::CommandBuffer*         command_buffer = nullptr;
+    Queue                        queue;
+    CommandPool*                 pool;
+    Device                       device;
+    MTL4::ComputeCommandEncoder* compute_encoder = nullptr;
+    MTL4::RenderCommandEncoder*  render_encoder  = nullptr;
 };
 
 struct CommandPool {
@@ -128,33 +158,17 @@ struct ThreadLocalState {
 };
 
 struct BufferAndOffset {
-    MTL::Buffer* buffer;
-    MTL::Heap*   heap;
-    uint32_t     offset;
+    Buffer*  buffer;
+    uint32_t offset;
 };
-
 
 struct GpuPtrMap {
     GpuPtr         ptr;
     Handle<Buffer> buffer;
 };
-static constexpr auto kPtrMapCompare
-    = [](const GpuPtrMap& a, const GpuPtrMap& b) -> bool { return a.ptr > b.ptr; };
 
-static constexpr auto lower_bound = [](GpuPtrMap* first, GpuPtrMap* last, const GpuPtrMap& value) {
-    GpuPtrMap* it;
-    size_t     count = last - first;
-    while (count > 0) {
-        const size_t step = count / 2;
-        it                = first + step;
-        if (kPtrMapCompare(*it, value)) {
-            first = ++it;
-            count -= step + 1;
-        } else {
-            count = step;
-        }
-    }
-    return first;
+struct PtrMapCompare {
+    constexpr bool operator()(const GpuPtrMap& a, const GpuPtrMap& b) { return a.ptr > b.ptr; }
 };
 
 struct DeviceImpl {
@@ -180,6 +194,7 @@ struct DeviceImpl {
     SlotMap<Pipeline>          m_pipeline_pool;
     SlotMap<DepthStencilState> m_depth_stencil_state_pool;
     SlotMap<Semaphore>         m_semaphore_pool;
+    rwlock                     m_ptr_map_lock = LOON_RWLOCK_INIT;
     Vector<GpuPtrMap>          m_ptr_map;
 };
 
@@ -295,6 +310,37 @@ Device create_device(const DeviceDesc& desc) {
     };
 }
 
+void destroy_device(Device d) {
+    device_wait_for_idle(d);
+    unconfigure_surface(d);
+
+    auto& q = d->m_queue;
+    if (q.command_queue) {
+        for (auto& p : q.command_superpool.pools) {
+            if (p.allocator) { p.allocator->release(); }
+            for (uint32_t i = 0; i < p.command_buffers.size(); ++i) {
+                p.command_buffers[i].command_buffer->release();
+            }
+        }
+
+        q.callback_event->release();
+    }
+
+    d->m_semaphore_pool.clear();
+    d->m_depth_stencil_state_pool.clear();
+    d->m_pipeline_pool.clear();
+    d->m_texture_heap_pool.clear();
+    d->m_texture_pool.clear();
+    d->m_buffer_pool.clear();
+
+    d->m_residency_set->release();
+    d->m_options->release();
+    d->m_compiler->release();
+    d->m_device->release();
+
+    tls_free(d->m_tls_key);
+}
+
 void device_wait_for_idle(Device d) {
     // TODO: Not sure how to implement this one.
 }
@@ -359,11 +405,11 @@ SurfaceStatus present(Device d, Queue queue) {
 
 // MARK: Buffers:
 
-Handle<Buffer> malloc(Device d, size_t bytes, Memory memory) {
+GpuPtr malloc(Device d, size_t bytes, Memory memory) {
     return malloc(d, bytes, 64, memory);
 }
 
-Handle<Buffer> malloc(Device d, size_t bytes, size_t align, Memory memory) {
+GpuPtr malloc(Device d, size_t bytes, size_t align, Memory memory) {
     MTL::HeapDescriptor* heap_info = MTL::HeapDescriptor::alloc()->init();
     heap_info->setType(MTL::HeapTypePlacement);
     heap_info->setStorageMode(memory == Memory::Gpu ? MTL::StorageModePrivate
@@ -381,34 +427,50 @@ Handle<Buffer> malloc(Device d, size_t bytes, size_t align, Memory memory) {
 
     auto handle = d->m_buffer_pool.emplace({
         .buffer = buffer,
+        .heap   = heap,
     });
     d->m_residency_set->addAllocation(heap);
     d->m_residency_set->commit();
     // TODO: Can i reduce the frenquency of commits at all?
 
-    return handle;
-}
+    rwlock_lock_write(&d->m_ptr_map_lock);
+    const auto insertion_pos = lower_bound<GpuPtrMap, PtrMapCompare>(d->m_ptr_map.begin(),
+                                                                     d->m_ptr_map.end(),
+                                                                     {.ptr = buffer->gpuAddress()});
+    d->m_ptr_map.insert(insertion_pos, {.ptr = buffer->gpuAddress(), .buffer = handle});
+    rwlock_unlock_write(&d->m_ptr_map_lock);
 
-void free(Device d, Handle<Buffer> buffer) {
-    d->m_buffer_pool.erase(buffer);
-}
-
-GpuPtr get_device_pointer(Device d, Handle<Buffer> buffer) {
-    return d->m_buffer_pool[buffer].buffer->gpuAddress();
-}
-
-void* get_host_pointer(Device d, Handle<Buffer> buffer) {
-    return d->m_buffer_pool[buffer].buffer->contents();
+    return buffer->gpuAddress();
 }
 
 BufferAndOffset buffer_and_offset_from_ptr(Device d, GpuPtr ptr) {
-    const auto  it = lower_bound(d->m_ptr_map.begin(), d->m_ptr_map.end(), GpuPtrMap{.ptr = ptr});
-    const auto& b  = d->m_buffer_pool[it->buffer];
+    rwlock_lock_read(&d->m_ptr_map_lock);
+    const auto it = lower_bound<GpuPtrMap, PtrMapCompare>(d->m_ptr_map.begin(),
+                                                          d->m_ptr_map.end(),
+                                                          GpuPtrMap{.ptr = ptr});
+    auto       b  = &d->m_buffer_pool[it->buffer];
+    rwlock_unlock_read(&d->m_ptr_map_lock);
+
     return {
-        .buffer = b.buffer,
-        .offset = static_cast<uint32_t>(ptr - b.device_ptr),
-        .heap   = b.heap,
+        .buffer = b,
+        .offset = static_cast<uint32_t>(ptr - b->buffer->gpuAddress()),
     };
+}
+
+void* get_host_pointer(Device d, GpuPtr ptr) {
+    auto info = buffer_and_offset_from_ptr(d, ptr);
+    return info.buffer->buffer->contents();
+}
+
+void free(Device d, GpuPtr ptr) {
+    rwlock_lock_write(&d->m_ptr_map_lock);
+    const auto it = lower_bound<GpuPtrMap, PtrMapCompare>(d->m_ptr_map.begin(),
+                                                          d->m_ptr_map.end(),
+                                                          GpuPtrMap{.ptr = ptr});
+    assert(it->ptr == ptr);  // Shouldn't free from another pointer in the same allocation.
+    d->m_buffer_pool.erase(it->buffer);
+    d->m_ptr_map.erase(it, it + 1);
+    rwlock_unlock_write(&d->m_ptr_map_lock);
 }
 
 // MARK: Textures
@@ -448,7 +510,7 @@ Handle<Texture> create_texture(Device d, const TextureDesc& desc, GpuPtr locatio
     if (location != 0) {
         // Specify location, use the mtlheap from the buffer
         auto memory = buffer_and_offset_from_ptr(d, location);
-        texture     = memory.heap->newTexture(info, memory.offset);
+        texture     = memory.buffer->heap->newTexture(info, memory.offset);
     } else {
         texture = d->m_device->newTexture(info);
         d->m_residency_set->addAllocation(texture);
@@ -456,22 +518,21 @@ Handle<Texture> create_texture(Device d, const TextureDesc& desc, GpuPtr locatio
     }
 
     info->release();
-
-
     auto handle = d->m_texture_pool.emplace({.texture = texture});
     return handle;
 }
 
-Handle<TextureHeap> create_texture_heap(Device d, size_t size) {
+Handle<TextureHeap> create_texture_heap(Device d, const TextureHeapDesc& desc) {
     auto view_pool_descriptor = MTL::ResourceViewPoolDescriptor::alloc();
-    view_pool_descriptor->setResourceViewCount(size);
+    view_pool_descriptor->setResourceViewCount(desc.texture_count);
 
     auto texture_view_pool = d->m_device->newTextureViewPool(view_pool_descriptor, nullptr);
     view_pool_descriptor->release();
 
     const auto handle = d->m_texture_heap_pool.emplace(TextureHeap{
-        .pool   = texture_view_pool,
-        .bitset = TwoLevelBitset(d->m_allocator, size),
+        .pool           = texture_view_pool,
+        .bitset         = TwoLevelBitset(d->m_allocator, desc.texture_count),
+        .sampler_lookup = Vector<SamplerMapping>(d->m_allocator),
     });
     return handle;
 }
@@ -507,6 +568,49 @@ void remove_texture_view_from_heap(Device d, Handle<TextureHeap> h, TextureView 
     heap.bitset.clear_bit(index);
 }
 
+Sampler add_sampler_to_heap(Device d, Handle<TextureHeap> h, const SamplerDesc& sampler) {
+    auto& heap = d->m_texture_heap_pool[h];
+
+    MTL::SamplerDescriptor* desc = MTL::SamplerDescriptor::alloc()->init();
+    desc->setNormalizedCoordinates(sampler.coord == SamplerCoords::Normalized);
+    auto filter = bridge_minmag(sampler.filter);
+    desc->setMagFilter(filter);
+    desc->setMinFilter(filter);
+    desc->setMipFilter(bridge_mip(sampler.filter));
+    auto addressing = bridge(sampler.address);
+    desc->setRAddressMode(addressing);
+    desc->setSAddressMode(addressing);
+    desc->setTAddressMode(addressing);
+    desc->setMaxAnisotropy((uint32_t)sampler.max_anisotropy);
+    auto sampler_state = d->m_device->newSamplerState(desc);
+    desc->release();
+
+    Sampler result = sampler_state->gpuResourceID()._impl;
+    // Need to add to some list so we can free it easily. For now using a sorted list, could be a
+    // hash map if we expect a lot of creation/freeing.
+    const auto insertion_pos
+        = lower_bound<SamplerMapping, SamplerMappingCompare>(heap.sampler_lookup.begin(),
+                                                             heap.sampler_lookup.end(),
+                                                             {.sampler = result});
+    heap.sampler_lookup.insert(insertion_pos,
+                               {
+                                   .sampler = result,
+                                   .state   = sampler_state,
+                               });
+
+    return result;
+}
+
+void remove_sampler_from_heap(Device d, Handle<TextureHeap> h, Sampler s) {
+    auto& heap = d->m_texture_heap_pool[h];
+
+    const auto it = lower_bound<SamplerMapping, SamplerMappingCompare>(heap.sampler_lookup.begin(),
+                                                                       heap.sampler_lookup.end(),
+                                                                       {.sampler = s});
+    assert(it->sampler == s);
+    it->state->release();
+    heap.sampler_lookup.erase(it, it + 1);
+}
 
 // MARK: Pipelines
 Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource compute) {
@@ -676,7 +780,7 @@ Handle<DepthStencilState> create_depth_stencil_state(Device d, const DepthStenci
     });
 }
 
-void free(Device d, Handle<DepthStencilState> state) {
+void free_depth_stencil_state(Device d, Handle<DepthStencilState> state) {
     d->m_depth_stencil_state_pool.erase(state);
 }
 
@@ -851,14 +955,37 @@ void queue_process_events(Queue q) {
 
 // MARK: CommandBuffer
 
+static bool is_in_compute_pass(CommandBuffer cmd) {
+    return (cmd->compute_encoder != nullptr);
+}
+
+static bool is_in_render_pass(CommandBuffer cmd) {
+    return (cmd->render_encoder != nullptr);
+}
+
+static MTL4::ComputeCommandEncoder* get_compute_encoder(CommandBuffer cmd) {
+    assert(!is_in_render_pass(cmd));
+    if (!cmd->compute_encoder) {
+        cmd->compute_encoder = cmd->command_buffer->computeCommandEncoder();
+    }
+
+    return cmd->compute_encoder;
+}
+
+static void end_compute_pass(CommandBuffer cmd) {
+    assert(is_in_compute_pass(cmd));
+    cmd->compute_encoder->endEncoding();
+    cmd->compute_encoder->release();
+    cmd->compute_encoder = nullptr;
+}
+
 void cmd_memcpy(CommandBuffer cmd, GpuPtr destGpu, GpuPtr srcGpu, size_t size) {
     auto d = cmd->device;
 
-    auto encoder = cmd->command_buffer->computeCommandEncoder();
+    auto encoder = get_compute_encoder(cmd);
     auto src     = buffer_and_offset_from_ptr(d, srcGpu);
     auto dst     = buffer_and_offset_from_ptr(d, destGpu);
-    encoder->copyFromBuffer(src.buffer, src.offset, dst.buffer, dst.offset, size);
-    encoder->endEncoding();
+    encoder->copyFromBuffer(src.buffer->buffer, src.offset, dst.buffer->buffer, dst.offset, size);
 }
 
 void cmd_copy_to_texture(CommandBuffer                  cmd,
@@ -867,7 +994,7 @@ void cmd_copy_to_texture(CommandBuffer                  cmd,
                          const BufferToTextureCopyInfo& info) {
     auto d = cmd->device;
 
-    auto encoder = cmd->command_buffer->computeCommandEncoder();
+    auto encoder = get_compute_encoder(cmd);
     auto src     = buffer_and_offset_from_ptr(d, srcGpu);
 
     // TODO: I need more info here than I'm currently getting, need an API change.
@@ -889,45 +1016,108 @@ void cmd_barrier(CommandBuffer                 cmd,
                  Span<const TextureTransition> image_transitions,
                  HazardFlags                   hazards) {
     auto d = cmd->device;
-
-    // cmd->
 }
 
-void cmd_set_pipeline(CommandBuffer cmd, Handle<Pipeline> pipeline) {}
+void cmd_set_pipeline(CommandBuffer cmd, Handle<Pipeline> pipeline) {
+    auto& p = cmd->device->m_pipeline_pool[pipeline];
+    assert((is_in_render_pass(cmd) && p.render_pipeline)
+           || (is_in_compute_pass(cmd) && p.compute_pipeline));
+    if (is_in_render_pass(cmd)) {
+        cmd->render_encoder->setRenderPipelineState(p.render_pipeline);
+        // TODO: Cull mode
+    } else {
+        cmd->compute_encoder->setComputePipelineState(p.compute_pipeline);
+    }
+}
 
-void cmd_set_depth_stencil_state(CommandBuffer cmd, Handle<DepthStencilState> state) {}
+void cmd_set_depth_stencil_state(CommandBuffer cmd, Handle<DepthStencilState> state) {
+    assert(is_in_render_pass(cmd));
+    auto& d = cmd->device->m_depth_stencil_state_pool[state];
+    cmd->render_encoder->setDepthStencilState(d.state);
+}
 
-void cmd_set_scissor_rect(CommandBuffer cmd, const Rect2D& rect) {}
+void cmd_set_scissor_rect(CommandBuffer cmd, const Rect2D& rect) {
+    assert(is_in_render_pass(cmd));
+
+    cmd->render_encoder->setScissorRect(MTL::ScissorRect{
+        .x      = rect.offset_x,
+        .y      = rect.offset_y,
+        .width  = rect.width,
+        .height = rect.height,
+    });
+}
 
 void cmd_dispatch(CommandBuffer cmd, GpuPtr dataGpu, const Dimension3D& gridDimensions) {}
 
 void cmd_dispatch_indirect(CommandBuffer cmd, GpuPtr dataGpu, GpuPtr gridDimensionsGpu) {}
 
-void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {}
-void cmd_end_render_pass(CommandBuffer cmd) {}
+void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
+    assert(!is_in_render_pass(cmd));
+    if (is_in_compute_pass(cmd)) { end_compute_pass(cmd); }
+
+    auto                        d    = cmd->device;
+    MTL4::RenderPassDescriptor* pass = MTL4::RenderPassDescriptor::alloc()->init();
+
+    uint32_t attachment_idx   = 0;
+    auto     pass_attachments = pass->colorAttachments();
+    for (const auto& c : desc.color_attachments) {
+        MTL::RenderPassColorAttachmentDescriptor* attachment
+            = MTL::RenderPassColorAttachmentDescriptor::alloc()->init();
+        auto& tex = d->m_texture_pool[c.texture];
+        attachment->setTexture(tex.texture);
+        attachment->setLoadAction(bridge(c.load_op));
+        attachment->setStoreAction(bridge(c.store_op));
+        attachment->setClearColor(
+            MTL::ClearColor(c.clear_color.r, c.clear_color.g, c.clear_color.b, c.clear_color.a));
+        pass_attachments->setObject(attachment, attachment_idx);
+        attachment_idx++;
+    }
+
+    if (desc.depth_attachment.texture) {
+        MTL::RenderPassDepthAttachmentDescriptor* depth_desc
+            = MTL::RenderPassDepthAttachmentDescriptor::alloc()->init();
+        auto& depth_tex = d->m_texture_pool[desc.depth_attachment.texture];
+        depth_desc->setTexture(depth_tex.texture);
+        depth_desc->setLoadAction(bridge(desc.depth_attachment.load_op));
+        depth_desc->setStoreAction(bridge(desc.depth_attachment.store_op));
+        depth_desc->setClearDepth(desc.depth_attachment.clear_color.r);
+        pass->setDepthAttachment(depth_desc);
+        depth_desc->release();
+    }
+
+    cmd->command_buffer->renderCommandEncoder(pass);
+    pass->release();
+}
+
+void cmd_end_render_pass(CommandBuffer cmd) {
+    assert(is_in_render_pass(cmd));
+    cmd->render_encoder->endEncoding();
+    cmd->render_encoder->release();
+    cmd->render_encoder = nullptr;
+}
 
 void cmd_draw(CommandBuffer cmd,
               GpuPtr        vertexDataGpu,
               GpuPtr        fragmentDataGpu,
               uint32_t      vertexCount,
-              uint32_t      instanceCount) {}
-void cmd_draw_indexed_instanced(CommandBuffer cmd,
-                                GpuPtr        vertexDataGpu,
-                                GpuPtr        pixelDataGpu,
-                                GpuPtr        indicesGpu,
-                                uint32_t      indexCount,
-                                uint32_t      instanceCount) {}
-void cmd_draw_indexed_instanced_indirect(CommandBuffer cmd,
-                                         GpuPtr        vertexDataGpu,
-                                         GpuPtr        pixelDataGpu,
-                                         GpuPtr        indicesGpu,
-                                         GpuPtr        argsGpu) {}
-void cmd_draw_indexed_instanced_indirect_multi(CommandBuffer cmd,
-                                               GpuPtr        vertexDataGpu,
-                                               GpuPtr        pixelDataGpu,
-                                               GpuPtr        indicesGpu,
-                                               GpuPtr        argsGpu,
-                                               GpuPtr        drawCountGpu,
-                                               uint32_t      maxDraws) {}
+              uint32_t      instanceCount) {
+    assert(is_in_render_pass(cmd));
+
+
+    cmd->render_encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, 0, vertexCount, instanceCount);
+}
+
+void cmd_draw_indexed_instanced(CommandBuffer cmd, const DrawIndexedInstancedInfo& args) {}
+
+void cmd_draw_indexed_instanced_indirect(CommandBuffer cmd, const DrawIndexedIndirectInfo& args) {}
+
+void cmd_draw_indexed_instanced_indirect_multi(CommandBuffer                cmd,
+                                               const MultiDrawIndirectInfo& args) {}
+
+void cmd_finalize(CommandBuffer cmd) {
+    assert(!is_in_render_pass(cmd));
+    if (is_in_compute_pass(cmd)) { end_compute_pass(cmd); }
+    cmd->command_buffer->endCommandBuffer();
+}
 
 }  // namespace loon::gpu

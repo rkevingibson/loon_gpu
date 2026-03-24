@@ -191,4 +191,42 @@ MTL::StencilOperation bridge(StencilOp op) {
     }
 }
 
+MTL::LoadAction bridge(LoadOp op) {
+    switch (op) {
+        case LoadOp::Undefined: return MTL::LoadActionDontCare;
+        case LoadOp::Load: return MTL::LoadActionLoad;
+        case LoadOp::Clear: return MTL::LoadActionClear;
+    }
+}
+
+MTL::StoreAction bridge(StoreOp op) {
+    switch (op) {
+        case StoreOp::Undefined: return MTL::StoreActionDontCare;
+        case StoreOp::Store: return MTL::StoreActionStore;
+        case StoreOp::Discard: return MTL::StoreActionDontCare;
+    }
+}
+
+MTL::SamplerMinMagFilter bridge_minmag(SamplerFilter f) {
+    switch (f) {
+        case SamplerFilter::Nearest: return MTL::SamplerMinMagFilterNearest;
+        case SamplerFilter::Linear: return MTL::SamplerMinMagFilterLinear;
+    }
+}
+
+MTL::SamplerMipFilter bridge_mip(SamplerFilter f) {
+    switch (f) {
+        case SamplerFilter::Nearest: return MTL::SamplerMipFilterNearest;
+        case SamplerFilter::Linear: return MTL::SamplerMipFilterLinear;
+    }
+}
+
+MTL::SamplerAddressMode bridge(SamplerAddressing a) {
+    switch (a) {
+        case SamplerAddressing::ClampToEdge: return MTL::SamplerAddressModeClampToEdge;
+        case SamplerAddressing::Repeat: return MTL::SamplerAddressModeRepeat;
+        case SamplerAddressing::Mirrored: return MTL::SamplerAddressModeMirrorRepeat;
+    }
+}
+
 }  // namespace loon::gpu

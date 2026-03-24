@@ -119,10 +119,6 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
                                                 .texture = backend_tex->texture,
                                                 .format  = loon::gpu::Format::RGBA8Unorm,
                                             });
-<<<<<<< HEAD
-=======
-
->>>>>>> 0eaa7ce (Switching the WIP metal backend over to the C-api. Need to fix the vulkan impl.)
         // Store identifiers
         // Because invalid tex id == 0, we add one here and subtract on retrieval.
         tex->SetTexID((ImTextureID)backend_tex->tex_heap_idx + 1);
