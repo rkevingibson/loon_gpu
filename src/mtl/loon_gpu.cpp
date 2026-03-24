@@ -62,6 +62,7 @@ struct Semaphore {
 struct Surface {
     CA::MetalLayer*    metal_layer;
     CA::MetalDrawable* current_drawable = nullptr;
+    uint64_t           frame_idx        = 0;
 
     // Formats from
     // https://developer.apple.com/documentation/quartzcore/cametallayer/pixelformat?language=objc
@@ -113,7 +114,6 @@ struct QueueImpl {
 
     Device device = nullptr;
 };
-
 
 struct ThreadLocalState {
     constexpr static size_t kArenaSize = 256ll * 1024;
@@ -336,9 +336,10 @@ SurfaceTextureInfo get_current_texture(Device d) {
     }
 
     d->m_surface.current_drawable = drawable;
-    MTL::Texture*   tex           = drawable->texture();
-    Handle<Texture> handle        = d->m_texture_pool.emplace({
-               .texture = tex,
+    d->m_surface.frame_idx++;
+    MTL::Texture*   tex    = drawable->texture();
+    Handle<Texture> handle = d->m_texture_pool.emplace({
+        .texture = tex,
     });
 
     return SurfaceTextureInfo{
