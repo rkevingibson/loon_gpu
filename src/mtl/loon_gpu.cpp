@@ -944,8 +944,7 @@ void queue_submit(Queue                     q,
 
     Span<MTL4::CommandBuffer*> commands;
     for (auto cmd : command_buffers) {
-        MTL4::CommandBuffer* buf = reinterpret_cast<MTL4::CommandBuffer*>(cmd->command_buffer);
-        buf->endCommandBuffer();
+        MTL4::CommandBuffer* buf = cmd->command_buffer;
         commands = concat(&arena, commands, buf);
     }
     q->command_queue->commit(commands.data(), commands.size());
