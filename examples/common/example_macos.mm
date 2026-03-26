@@ -1,6 +1,7 @@
 
 #import "example.h"
-#include "imgui/imgui.h"
+#import "gpu/loon_gpu.h"
+#import "imgui/imgui.h"
 #import <AppKit/AppKit.h>
 #import <Foundation/Foundation.h>
 
@@ -42,8 +43,9 @@
         .native_instance_handle = 0,
         .width = 1200,
         .height = 800,
-        .shader_loader =
-            std::make_unique<ShaderLoader>(file_paths.shader_directory.c_str()),
+        .shader_loader = std::make_unique<ShaderLoader>(
+            file_paths.shader_directory.c_str(),
+            loon::gpu::device_backend() == loon::gpu::Backend::Metal),
         .file_paths = file_paths,
     };
 
@@ -56,7 +58,7 @@
 
     ImGui::StyleColorsDark();
 
-    self->selected_example = ExampleName::TexturedCube;
+    self->selected_example = ExampleName::HelloTriangle;
   }
 
   return self;

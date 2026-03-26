@@ -109,6 +109,7 @@ struct Surface {
 struct CommandPool;
 struct CommandBufferImpl {
     MTL4::CommandBuffer*         command_buffer = nullptr;
+    MTL4::ArgumentTable*         argument_table = nullptr;
     Queue                        queue;
     CommandPool*                 pool;
     Device                       device;
@@ -117,7 +118,8 @@ struct CommandBufferImpl {
 };
 
 struct CommandPool {
-    MTL4::CommandAllocator*         allocator = nullptr;
+    MTL4::CommandAllocator*         allocator      = nullptr;
+    MTL4::ArgumentTable*            argument_table = nullptr;
     SegmentArray<CommandBufferImpl> command_buffers;  // In theory
     uint64_t                        buffer_free_idx = 0;
     uint64_t                        frame_idx       = 0;
@@ -341,8 +343,18 @@ void destroy_device(Device d) {
     tls_free(d->m_tls_key);
 }
 
+Backend device_backend() {
+    return Backend::Metal;
+}
+
 void device_wait_for_idle(Device d) {
-    // TODO: Not sure how to implement this one.
+    // NOTE: If work is being submitted concurrently, this won't behave correctly - it technically
+    // only waits until any currently submitted work is done.
+    auto& q = d->m_queue;
+    if (q.command_queue) {
+        q.command_queue->signalEvent(q.callback_event, q.timeline_value);
+        q.callback_event->waitUntilSignaledValue(q.timeline_value++, UINT64_MAX);
+    }
 }
 
 // MARK: Surface functions
@@ -423,7 +435,7 @@ GpuPtr malloc(Device d, size_t bytes, size_t align, Memory memory) {
     heap_info->release();
 
     MTL::Buffer* buffer = heap->newBuffer(bytes, 0, 0);
-    if (!buffer) { return {}; }
+    if (!buffer) { return 0; }
 
     auto handle = d->m_buffer_pool.emplace({
         .buffer = buffer,
@@ -802,7 +814,6 @@ void free(Device d, Handle<Semaphore> sema) {
     d->m_semaphore_pool.erase(sema);
 }
 
-
 // MARK: Queue
 
 static void reset_command_pool(CommandPool* pool) {
@@ -828,13 +839,21 @@ static CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
                                 + (frame_idx % CommandSuperpool::kPoolsPerGroup)];
 
         if (pool->allocator == nullptr) {
+            auto argument_table_desc = MTL4::ArgumentTableDescriptor::alloc()->init();
+            argument_table_desc->setMaxBufferBindCount(2);
+            argument_table_desc->setInitializeBindings(false);
+            argument_table_desc->setMaxSamplerStateBindCount(0);
+            argument_table_desc->setMaxTextureBindCount(0);
             // Initialize the command pool here.
             *pool = CommandPool{
-                .allocator       = queue->device->m_device->newCommandAllocator(),
+                .allocator = queue->device->m_device->newCommandAllocator(),
+                .argument_table
+                = queue->device->m_device->newArgumentTable(argument_table_desc, nullptr),
                 .command_buffers = SegmentArray<CommandBufferImpl>(queue->device->m_allocator),
                 .buffer_free_idx = 0,
                 .frame_idx       = 0,
             };
+            argument_table_desc->release();
         } else if (pool->frame_idx != frame_idx) {
             // Last time this was used was on a different frame, so reset the pool.
             reset_command_pool(pool);
@@ -867,6 +886,7 @@ static CommandBufferImpl* get_command_buffer(Queue q, CommandPool* pool) {
     if (pool->command_buffers.size() <= pool->buffer_free_idx) {
         pool->command_buffers.emplace_back(CommandBufferImpl{
             .command_buffer = device->m_device->newCommandBuffer(),
+            .argument_table = pool->argument_table,
             .queue          = q,
             .pool           = pool,
             .device         = device,
@@ -899,7 +919,11 @@ CommandBuffer queue_start_command_recording(Queue q) {
     if (pool == nullptr) { return nullptr; }
 
     CommandBuffer buffer = get_command_buffer(q, pool);
-    if (buffer) {}
+    if (buffer) {
+        buffer->command_buffer->beginCommandBuffer(pool->allocator);
+        buffer->compute_encoder = nullptr;
+        buffer->render_encoder  = nullptr;
+    }
     return buffer;
 }
 
@@ -1085,7 +1109,7 @@ void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
         depth_desc->release();
     }
 
-    cmd->command_buffer->renderCommandEncoder(pass);
+    cmd->render_encoder = cmd->command_buffer->renderCommandEncoder(pass);
     pass->release();
 }
 
@@ -1096,6 +1120,13 @@ void cmd_end_render_pass(CommandBuffer cmd) {
     cmd->render_encoder = nullptr;
 }
 
+static void set_graphics_ptrs(CommandBuffer cmd, GpuPtr vertexDataGpu, GpuPtr fragmentDataGpu) {
+    cmd->argument_table->setAddress(vertexDataGpu, 0);
+    cmd->argument_table->setAddress(fragmentDataGpu, 1);
+    cmd->render_encoder->setArgumentTable(cmd->argument_table,
+                                          MTL::RenderStageVertex | MTL::RenderStageFragment);
+}
+
 void cmd_draw(CommandBuffer cmd,
               GpuPtr        vertexDataGpu,
               GpuPtr        fragmentDataGpu,
@@ -1103,16 +1134,47 @@ void cmd_draw(CommandBuffer cmd,
               uint32_t      instanceCount) {
     assert(is_in_render_pass(cmd));
 
-
+    set_graphics_ptrs(cmd, vertexDataGpu, fragmentDataGpu);
     cmd->render_encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, 0, vertexCount, instanceCount);
 }
 
-void cmd_draw_indexed_instanced(CommandBuffer cmd, const DrawIndexedInstancedInfo& args) {}
+void cmd_draw_indexed_instanced(CommandBuffer cmd, const DrawIndexedInstancedInfo& args) {
+    assert(is_in_render_pass(cmd));
 
-void cmd_draw_indexed_instanced_indirect(CommandBuffer cmd, const DrawIndexedIndirectInfo& args) {}
+    set_graphics_ptrs(cmd, args.vertexDataGpu, args.fragmentDataGpu);
+
+    // TODO: Topology comes from RasterDesc in the current bound pipeline.
+
+    const uint32_t index_buffer_size
+        = args.indexCount * (args.type == IndexType::UInt16 ? sizeof(uint16_t) : sizeof(uint32_t));
+    cmd->render_encoder->drawIndexedPrimitives(
+        MTL::PrimitiveTypeTriangle,
+        args.indexCount,
+        args.type == IndexType::UInt16 ? MTL::IndexTypeUInt16 : MTL::IndexTypeUInt32,
+        args.indicesGpu,
+        index_buffer_size,
+        args.instanceCount);
+}
+
+void cmd_draw_indexed_instanced_indirect(CommandBuffer cmd, const DrawIndexedIndirectInfo& args) {
+    assert(is_in_render_pass(cmd));
+
+    set_graphics_ptrs(cmd, args.vertexDataGpu, args.fragmentDataGpu);
+
+    cmd->render_encoder->drawIndexedPrimitives(
+        MTL::PrimitiveTypeTriangle,
+        args.type == IndexType::UInt16 ? MTL::IndexTypeUInt16 : MTL::IndexTypeUInt32,
+        args.indicesGpu,
+        UINT32_MAX,  // TODO: Is this fine? Don't have access to the size otherwise without looking
+                     // up the allocation for this.
+        args.argsGpu);
+}
 
 void cmd_draw_indexed_instanced_indirect_multi(CommandBuffer                cmd,
-                                               const MultiDrawIndirectInfo& args) {}
+                                               const MultiDrawIndirectInfo& args) {
+    // Multidraw not supported on metal.
+    assert(false);
+}
 
 void cmd_finalize(CommandBuffer cmd) {
     assert(!is_in_render_pass(cmd));

@@ -1154,6 +1154,10 @@ void destroy_device(Device d) {
     allocator.free({.ptr = d, .len = sizeof(DeviceImpl)});
 }
 
+Backend device_backend() {
+    return Backend::Vulkan;
+}
+
 void device_wait_for_idle(Device d) {
     chk(d, d->m_api.vkDeviceWaitIdle(d->m_device));
 }

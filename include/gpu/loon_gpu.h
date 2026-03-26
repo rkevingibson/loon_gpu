@@ -20,7 +20,7 @@
     }
 
 #define LOON_BITWISE_ASSIGNMENT_OP(name, op)                                                       \
-    inline constexpr name operator op## = (name lhs, name rhs) {                                   \
+    inline constexpr name operator op##=(name lhs, name rhs) {                                     \
         lhs = lhs op rhs;                                                                          \
         return lhs;                                                                                \
     }
@@ -284,6 +284,15 @@ enum class LogLevel : uint8_t {
 enum class GpuPreference : uint8_t {
     Discrete = 0,
     Integrated,
+};
+
+/**
+ * @brief
+ *
+ */
+enum class Backend {
+    Vulkan,
+    Metal,
 };
 
 /**
@@ -850,6 +859,13 @@ Device create_device(const DeviceDesc&);
  * Note: this will flush the gpu, and destroy any created resources.
  */
 void destroy_device(Device d);
+
+/**
+ * @brief Get the current backend for the device.
+ * Currently this is statically determined, but in the future we may support selection at device
+ * creation.
+ */
+Backend device_backend();
 
 /**
  * @brief Block until any pending work on the GPU is completed.

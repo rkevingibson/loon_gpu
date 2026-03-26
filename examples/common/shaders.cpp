@@ -15,7 +15,7 @@ void ShaderModuleDeleter::operator()(ShaderModuleImpl* p) {
     delete p;
 };
 
-std::vector<uint32_t> get_spirv(ShaderModuleImpl* module, const char* entry_point_name) {
+std::vector<uint8_t> get_spirv(ShaderModuleImpl* module, const char* entry_point_name) {
     auto                       m = module->module;
     Slang::ComPtr<IEntryPoint> entry_point{};
     auto result = m->findEntryPointByName(entry_point_name, entry_point.writeRef());
@@ -66,14 +66,15 @@ std::vector<uint32_t> get_spirv(ShaderModuleImpl* module, const char* entry_poin
         return {};
     }
 
-    const uint32_t* begin = reinterpret_cast<const uint32_t*>(code->getBufferPointer());
-    const size_t    size  = code->getBufferSize() / sizeof(uint32_t);
-    return std::vector<uint32_t>(begin, begin + size);
+    const uint8_t* begin = reinterpret_cast<const uint8_t*>(code->getBufferPointer());
+    const size_t   size  = code->getBufferSize();
+    return std::vector<uint8_t>(begin, begin + size);
 }
 
 class ShaderLoader::Impl {
    public:
-    Impl(std::string_view search_path) : m_search_path(search_path) {
+    Impl(std::string_view search_path, bool use_metal) :
+        m_search_path(search_path), m_use_metal(use_metal) {
         SlangGlobalSessionDesc desc = {};
         createGlobalSession(&desc, m_global_session.writeRef());
 
@@ -97,10 +98,13 @@ class ShaderLoader::Impl {
         SessionDesc session_desc{};
         TargetDesc  target_description{};
         target_description.structureSize = sizeof(TargetDesc);
-        // target_description.format        = SLANG_METAL;
-        target_description.format  = SLANG_SPIRV;
-        target_description.profile = m_global_session->findProfile("spirv_1_6");
-        target_description.flags   = 0;
+        if (m_use_metal) {
+            target_description.format = SLANG_METAL;
+        } else {
+            target_description.format  = SLANG_SPIRV;
+            target_description.profile = m_global_session->findProfile("spirv_1_6");
+        }
+        target_description.flags = 0;
 
         CompilerOptionEntry options[]
             = {{
@@ -150,10 +154,11 @@ class ShaderLoader::Impl {
     Slang::ComPtr<IGlobalSession> m_global_session;
     Slang::ComPtr<ISession>       m_session;
     std::string                   m_search_path;
+    bool                          m_use_metal;
 };
 
-ShaderLoader::ShaderLoader(std::string_view search_path) {
-    m_impl = std::make_unique<Impl>(search_path);
+ShaderLoader::ShaderLoader(std::string_view search_path, bool use_metal) {
+    m_impl = std::make_unique<Impl>(search_path, use_metal);
 }
 
 ShaderLoader::~ShaderLoader() = default;

@@ -15,11 +15,11 @@ struct ShaderModuleDeleter {
 };
 using ShaderModule = std::unique_ptr<ShaderModuleImpl, ShaderModuleDeleter>;
 
-std::vector<uint32_t> get_spirv(ShaderModuleImpl* module, const char* entry_point);
+std::vector<uint8_t> get_spirv(ShaderModuleImpl* module, const char* entry_point);
 
 class ShaderLoader {
    public:
-    ShaderLoader(std::string_view search_path);
+    ShaderLoader(std::string_view search_path, bool use_metal = false);
     ~ShaderLoader();
 
     ShaderModule load_module(std::string_view module_name);
