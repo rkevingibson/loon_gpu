@@ -2968,9 +2968,9 @@ void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
 
     VkViewport viewport{
         .x        = 0,
-        .y        = 0,
+        .y        = (float)desc.render_area.height,
         .width    = (float)desc.render_area.width,
-        .height   = (float)desc.render_area.height,
+        .height   = -(float)desc.render_area.height,
         .minDepth = 0,
         .maxDepth = 1.0,
     };

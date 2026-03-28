@@ -107,7 +107,7 @@ float4x4 projection(const ProjectionInfo& info) {
     const float aspect_ratio = info.view_height / info.view_width;
     const float fov          = 1.f / std::tanf(info.y_fov);
     const float sx           = aspect_ratio * fov;
-    const float sy           = fov;
+    const float sy           = -fov;
     if (std::isinf(f)) {
         return float4x4{
             .columns = {{sx, 0,0,0}, {0,sy, 0,0}, {0.f, 0.f, 0.f, -1.f}, {0, 0, n, 0.f},},

@@ -11,7 +11,7 @@ struct VertexStageOutput
 [shader("vertex")]
 VertexStageOutput vertexMain(uint32_t vertexIdx : SV_VertexID)
 {
-    const float2 verts[3] = {float2(0, -0.5), float2(0.5, 0.5), float2(-0.5,0.5)};
+    const float2 verts[3] = {float2(0, 0.5), float2(0.5, -0.5), float2(-0.5,-0.5)};
     const float3 colors[3] = {float3(1,0,0), float3(0,1,0), float3(0,0,1)};
     const float2 uv = verts[vertexIdx % 3];
     const float4 p = float4(uv, 0.5 , 1);

@@ -427,10 +427,10 @@ void Render(gpu::CommandBuffer cmd) {
 
     ImVec2 scale;
     scale[0] = 2.0f / draw_data->DisplaySize.x;
-    scale[1] = 2.0f / draw_data->DisplaySize.y;
+    scale[1] = -2.0f / draw_data->DisplaySize.y;
     ImVec2 translate;
     translate[0] = -1.0f - draw_data->DisplayPos.x * scale[0];
-    translate[1] = -1.0f - draw_data->DisplayPos.y * scale[1];
+    translate[1] = 1.0f - draw_data->DisplayPos.y * scale[1];
 
     ImVec2 clip_off   = draw_data->DisplayPos;
     ImVec2 clip_scale = draw_data->FramebufferScale;
