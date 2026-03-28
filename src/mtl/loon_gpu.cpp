@@ -90,6 +90,7 @@ struct Semaphore {
 struct Surface {
     CA::MetalLayer*    metal_layer;
     CA::MetalDrawable* current_drawable = nullptr;
+    Handle<Texture>    current_texture  = {};
     uint64_t           frame_idx        = 0;
 
     // Formats from
@@ -235,8 +236,7 @@ Device create_device(const DeviceDesc& desc) {
     compiler_desc->release();
     auto options = MTL4::CompilerTaskOptions::alloc()->init();
 
-    // Is this a valid cast? We're being passed a CAMetalLayer, not the C++ wrapper. Not sure!
-    // At the very least I want to retain it.
+    // It seems like this is a valid cast from testing.
     auto surface_metal_layer = reinterpret_cast<CA::MetalLayer*>(desc.native_window_handle);
     surface_metal_layer->retain();
 
@@ -385,6 +385,7 @@ void unconfigure_surface(Device d) {
 
 SurfaceTextureInfo get_current_texture(Device d) {
     CA::MetalDrawable* drawable = d->m_surface.metal_layer->nextDrawable();
+    drawable->retain();
 
     if (!drawable) {
         return SurfaceTextureInfo{
@@ -392,13 +393,17 @@ SurfaceTextureInfo get_current_texture(Device d) {
             .status  = SurfaceStatus::Error,
         };
     }
+    d->m_queue.command_queue->wait(drawable);
 
     d->m_surface.current_drawable = drawable;
     d->m_surface.frame_idx++;
-    MTL::Texture*   tex    = drawable->texture();
-    Handle<Texture> handle = d->m_texture_pool.emplace({
-        .texture = tex,
+    MTL::Texture* tex = drawable->texture();
+
+    // TODO: Need to remove this when I present.
+    Handle<Texture> handle       = d->m_texture_pool.emplace({
+              .texture = tex,
     });
+    d->m_surface.current_texture = handle;
 
     return SurfaceTextureInfo{
         .texture = handle,
@@ -408,10 +413,10 @@ SurfaceTextureInfo get_current_texture(Device d) {
 
 SurfaceStatus present(Device d, Queue queue) {
     queue->command_queue->signalDrawable(d->m_surface.current_drawable);
-
     d->m_surface.current_drawable->present();
     d->m_surface.current_drawable->release();
     d->m_surface.current_drawable = nullptr;
+    d->m_texture_pool.erase(d->m_surface.current_texture);
     return SurfaceStatus::Success;
 }
 
@@ -945,7 +950,7 @@ void queue_submit(Queue                     q,
     Span<MTL4::CommandBuffer*> commands;
     for (auto cmd : command_buffers) {
         MTL4::CommandBuffer* buf = cmd->command_buffer;
-        commands = concat(&arena, commands, buf);
+        commands                 = concat(&arena, commands, buf);
     }
     q->command_queue->commit(commands.data(), commands.size());
 
@@ -998,7 +1003,6 @@ static MTL4::ComputeCommandEncoder* get_compute_encoder(CommandBuffer cmd) {
 static void end_compute_pass(CommandBuffer cmd) {
     assert(is_in_compute_pass(cmd));
     cmd->compute_encoder->endEncoding();
-    cmd->compute_encoder->release();
     cmd->compute_encoder = nullptr;
 }
 
@@ -1109,13 +1113,21 @@ void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
     }
 
     cmd->render_encoder = cmd->command_buffer->renderCommandEncoder(pass);
+
+    cmd->render_encoder->setViewport(MTL::Viewport{
+        .originX = 0,
+        .originY = 0,
+        .width   = (float)desc.render_area.width,
+        .height  = (float)desc.render_area.height,
+        .znear   = 0,
+        .zfar    = 1,
+    });
     pass->release();
 }
 
 void cmd_end_render_pass(CommandBuffer cmd) {
     assert(is_in_render_pass(cmd));
     cmd->render_encoder->endEncoding();
-    cmd->render_encoder->release();
     cmd->render_encoder = nullptr;
 }
 
@@ -1179,6 +1191,8 @@ void cmd_finalize(CommandBuffer cmd) {
     assert(!is_in_render_pass(cmd));
     if (is_in_compute_pass(cmd)) { end_compute_pass(cmd); }
     cmd->command_buffer->endCommandBuffer();
+
+    release_command_pool(cmd->queue, cmd->pool);
 }
 
 }  // namespace loon::gpu

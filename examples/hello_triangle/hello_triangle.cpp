@@ -119,7 +119,8 @@ void HelloTriangle::Update(const WindowState& window) {
                                        .load_op      = loon::gpu::LoadOp::Clear,
                                        .store_op     = loon::gpu::StoreOp::Store,
                                        .clear_color  = Color(0, 0, 0, 0),
-                                   }, .render_area = {.width = m_swapchain_width, .height = m_swapchain_height},});
+                                   }, .render_area = {.width = m_swapchain_width, .height =
+                                   m_swapchain_height},});
 
     gpu::cmd_set_pipeline(cmd, m_render_pipeline);
     gpu::cmd_draw(cmd, 0, 0, 3, 1);
@@ -142,6 +143,4 @@ void HelloTriangle::Update(const WindowState& window) {
     if (status == SurfaceStatus::OutOfDate || status == SurfaceStatus::Suboptimal) {
         recreate_swapchain(window.width, window.height);
     }
-
-    gpu::queue_process_events(m_queue);
 }
