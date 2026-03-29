@@ -439,7 +439,13 @@ GpuPtr malloc(Device d, size_t bytes, size_t align, Memory memory) {
     MTL::Heap* heap = d->m_device->newHeap(heap_info);
     heap_info->release();
 
-    MTL::Buffer* buffer = heap->newBuffer(bytes, 0, 0);
+    const MTL::ResourceOptions resource_options
+        = (memory == Memory::Gpu ? MTL::ResourceStorageModePrivate : MTL::ResourceStorageModeShared)
+          | (memory == Memory::Default ? MTL::ResourceCPUCacheModeWriteCombined
+                                       : MTL::ResourceCPUCacheModeDefaultCache);
+
+
+    MTL::Buffer* buffer = heap->newBuffer(bytes, resource_options, 0);
     if (!buffer) { return 0; }
 
     auto handle = d->m_buffer_pool.emplace({
@@ -580,7 +586,7 @@ TextureView add_texture_view_to_heap(Device d, Handle<TextureHeap> h, const Text
 void remove_texture_view_from_heap(Device d, Handle<TextureHeap> h, TextureView view) {
     auto&      heap = d->m_texture_heap_pool[h];
     const auto base = heap.pool->baseResourceID()._impl;
-    assert(view > base && view < base + heap.pool->resourceViewCount());
+    assert(view >= base && view < base + heap.pool->resourceViewCount());
     const auto index = view - heap.pool->baseResourceID()._impl;
     heap.bitset.clear_bit(index);
 }
@@ -1047,13 +1053,13 @@ void cmd_barrier(CommandBuffer                 cmd,
 
 void cmd_set_pipeline(CommandBuffer cmd, Handle<Pipeline> pipeline) {
     auto& p = cmd->device->m_pipeline_pool[pipeline];
-    assert((is_in_render_pass(cmd) && p.render_pipeline)
-           || (is_in_compute_pass(cmd) && p.compute_pipeline));
+    assert((is_in_render_pass(cmd) && p.render_pipeline) || p.compute_pipeline);
     if (is_in_render_pass(cmd)) {
         cmd->render_encoder->setRenderPipelineState(p.render_pipeline);
         // TODO: Cull mode
     } else {
-        cmd->compute_encoder->setComputePipelineState(p.compute_pipeline);
+        auto compute_encoder = get_compute_encoder(cmd);
+        compute_encoder->setComputePipelineState(p.compute_pipeline);
     }
 }
 
@@ -1109,7 +1115,6 @@ void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
         depth_desc->setStoreAction(bridge(desc.depth_attachment.store_op));
         depth_desc->setClearDepth(desc.depth_attachment.clear_color.r);
         pass->setDepthAttachment(depth_desc);
-        depth_desc->release();
     }
 
     cmd->render_encoder = cmd->command_buffer->renderCommandEncoder(pass);
