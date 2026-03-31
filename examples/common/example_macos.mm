@@ -58,7 +58,7 @@
 
     ImGui::StyleColorsDark();
 
-    self->selected_example = ExampleName::HelloTriangle;
+    self->selected_example = ExampleName::HelloCube;
   }
 
   return self;

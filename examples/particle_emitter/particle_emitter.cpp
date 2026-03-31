@@ -72,7 +72,7 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
     recreate_swapchain(window_state.width, window_state.height);
 
     // Load shaders and create render pipeline
-    ShaderModule shader = window_state.shader_loader->load_module("particle_emitter.slang");
+    ShaderModule shader               = window_state.shader_loader->load_module("particle_emitter");
     const auto   get_compute_pipeline = [&](loon::gpu::Span<const char> name) -> Handle<Pipeline> {
         const auto spirv = get_spirv(shader.get(), name.data());
         return gpu::create_compute_pipeline(

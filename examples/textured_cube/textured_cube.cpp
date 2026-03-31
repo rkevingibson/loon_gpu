@@ -98,19 +98,19 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
     recreate_swapchain(window_state.width, window_state.height);
 
     // Load shaders and create render pipeline
-    ShaderModule shader         = window_state.shader_loader->load_module("textured_cube.slang");
-    const auto   vertex_spirv   = get_spirv(shader.get(), "vertexMain");
-    const auto   fragment_spirv = get_spirv(shader.get(), "fragmentMain");
+    ShaderModule shader         = window_state.shader_loader->load_module("textured_cube");
+    const auto   vertex_spirv   = get_spirv(shader.get(), "vertex_main");
+    const auto   fragment_spirv = get_spirv(shader.get(), "fragment_main");
 
     m_render_pipeline = gpu::create_graphics_pipeline(
         m_device,
         {
             .spirv       = Span(vertex_spirv.data(), vertex_spirv.size()).as_bytes(),
-            .entry_point = "vertexMain"_sv,
+            .entry_point = "vertex_main"_sv,
         },
         {
             .spirv       = Span(fragment_spirv.data(), fragment_spirv.size()).as_bytes(),
-            .entry_point = "fragmentMain"_sv,
+            .entry_point = "fragment_main"_sv,
         },
         RasterDesc{
             .cull          = Cull::CW,

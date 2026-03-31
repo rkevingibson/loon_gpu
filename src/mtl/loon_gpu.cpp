@@ -641,11 +641,12 @@ Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource compute) {
                                                           compute.spirv.size(),
                                                           NS::UTF8StringEncoding,
                                                           false);
-    NS::String* entry_point   = NS::String::alloc()->init((void*)compute.entry_point.data(),
+
+    NS::String* entry_point = NS::String::alloc()->init((void*)compute.entry_point.data(),
                                                         compute.entry_point.size(),
                                                         NS::UTF8StringEncoding,
                                                         false);
-    NS::Error*  error         = nullptr;
+    NS::Error*  error       = nullptr;
 
     MTL4::LibraryDescriptor* lib_desc = MTL4::LibraryDescriptor::alloc()->init();
     lib_desc->setSource(shader_source);
@@ -688,7 +689,6 @@ Handle<Pipeline> create_graphics_pipeline(Device            d,
                                                              vertex.entry_point.size(),
                                                              NS::UTF8StringEncoding,
                                                              false);
-
     NS::String* frag_source      = NS::String::alloc()->init((void*)fragment.spirv.data(),
                                                         fragment.spirv.size(),
                                                         NS::UTF8StringEncoding,
@@ -702,11 +702,17 @@ Handle<Pipeline> create_graphics_pipeline(Device            d,
     MTL4::LibraryDescriptor* vert_lib_desc = MTL4::LibraryDescriptor::alloc()->init();
     vert_lib_desc->setSource(vert_source);
     MTL::Library* vert_lib = d->m_compiler->newLibrary(vert_lib_desc, &error);
+    if (error != nullptr) {
+        printf("%s\n", error->localizedDescription()->utf8String());
+    }
     vert_lib_desc->release();
 
     MTL4::LibraryDescriptor* frag_lib_desc = MTL4::LibraryDescriptor::alloc()->init();
     frag_lib_desc->setSource(frag_source);
     MTL::Library* frag_lib = d->m_compiler->newLibrary(frag_lib_desc, &error);
+    if (error) {
+        printf("%s\n", error->localizedDescription()->utf8String());
+    }
     frag_lib_desc->release();
 
     auto vert_func_desc = MTL4::LibraryFunctionDescriptor::alloc()->init();
@@ -934,6 +940,7 @@ CommandBuffer queue_start_command_recording(Queue q) {
         buffer->command_buffer->beginCommandBuffer(pool->allocator);
         buffer->compute_encoder = nullptr;
         buffer->render_encoder  = nullptr;
+        buffer->command_buffer->useResidencySet(d->m_residency_set);
     }
     return buffer;
 }

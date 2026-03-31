@@ -9,7 +9,7 @@ struct VertexStageOutput
 };
 
 [shader("vertex")]
-VertexStageOutput vertexMain(uint32_t vertexIdx : SV_VertexID)
+VertexStageOutput vertex_main(uint32_t vertexIdx : SV_VertexID)
 {
     const float2 verts[3] = {float2(0, 0.5), float2(0.5, -0.5), float2(-0.5,-0.5)};
     const float3 colors[3] = {float3(1,0,0), float3(0,1,0), float3(0,0,1)};
@@ -22,7 +22,7 @@ VertexStageOutput vertexMain(uint32_t vertexIdx : SV_VertexID)
 }
 
 [shader("fragment")]
-float4 fragmentMain(CoarseVertex coarse_vertex : VertexInterpolant) : SV_Target
+float4 fragment_main(CoarseVertex coarse_vertex : VertexInterpolant) : SV_Target
 {
     float4 out_color = float4(coarse_vertex.color, 1.0);
     return out_color;

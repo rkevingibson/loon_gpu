@@ -656,7 +656,7 @@ struct SamplerDesc {
     SamplerCoords     coord          = SamplerCoords::Normalized;
     SamplerFilter     filter         = SamplerFilter::Nearest;
     SamplerAddressing address        = SamplerAddressing::ClampToEdge;
-    float             max_anisotropy = 0.0f;
+    float             max_anisotropy = 1.0f;
 };
 
 /**
