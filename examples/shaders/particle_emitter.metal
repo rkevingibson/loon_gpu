@@ -1,5 +1,6 @@
 #include <metal_stdlib>
 #include <metal_texture>
+#include <metal_atomic>
 
 using namespace metal;
 
@@ -9,7 +10,7 @@ struct DeadList {
     // Since we're either only ever decrementing (in the emitter stage) or incrementing (in the sim stage when particles age out), we can simplify a bit.
     int pop() {
         
-        int index = atomic_fetch_sub_explicit(reinterpret_cast<device atomic_int*>(indices), 1);
+        int index = atomic_fetch_sub_explicit(reinterpret_cast<device atomic_int*>(indices), 1, memory_order_relaxed);
         if (index > 0) {
             return indices[index];
         } else {
@@ -20,7 +21,7 @@ struct DeadList {
     }
 
     void push(int i) {
-        int prev_size = atomic_fetch_add_explicit(reinterpret_cast<device atomic_int*>(indices), 1);
+        int prev_size = atomic_fetch_add_explicit(reinterpret_cast<device atomic_int*>(indices), 1, memory_order_relaxed);
         indices[prev_size + 1] = i;
     }
 };
@@ -68,9 +69,9 @@ struct ParticleSimOptions {
 };
 
 struct Particle {
-    float3 position;
+    float3_packed position;
     float  life;
-    float3 velocity;
+    float3_packed velocity;
     float  size;
     float4 color;    
 };

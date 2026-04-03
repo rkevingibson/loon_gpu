@@ -11,8 +11,8 @@ struct CameraData {
 
 struct Mesh
 {
-    constant float3* position;
-    constant float2* uvs;
+    constant packed_float3* position;
+    constant packed_float2* uvs;
     float4x4 worldFromMesh;
 };
 
