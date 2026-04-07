@@ -803,9 +803,17 @@ struct TextureTransition {
 };
 
 struct BufferToTextureCopyInfo {
-    Dimension2D buffer_image_size;
-    Dimension3D image_offset{0, 0, 0};
     Dimension3D image_extent;
+    uint32_t    source_row_pixels_stride
+        = 0;  ///< Number of pixels between subsequent rows of data in the source buffer. If 0,
+              ///< treated as equal to image_extent.x. Otherwise, should be >= image_extent.x
+    uint32_t source_plane_rows_stride
+        = 0;  ///< Number of rows in a plane of image in the source buffer. If 0, treated as equal
+              ///< to image_extent.y. Otherwise, should be >= image_extent.y.
+    Dimension3D destination_image_offset{0, 0, 0};
+
+    uint8_t base_mip   = 0;
+    uint8_t base_layer = 0;
 };
 
 struct DrawIndexedInstancedInfo {

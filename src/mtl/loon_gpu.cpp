@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstring>
 
+#include "format_info.h"
 #include "platform_utils.h"
 
 // NB: This include has to be before others, as it defines the implementation of the metal lib.
@@ -54,6 +55,7 @@ struct Buffer {
 
 struct Texture {
     MTL::Texture* texture;
+    Format        format;
 };
 
 struct SamplerMapping {
@@ -541,7 +543,10 @@ Handle<Texture> create_texture(Device d, const TextureDesc& desc, GpuPtr locatio
     }
 
     info->release();
-    auto handle = d->m_texture_pool.emplace({.texture = texture});
+    auto handle = d->m_texture_pool.emplace({
+        .texture = texture,
+        .format  = desc.format,
+    });
     return handle;
 }
 
@@ -702,17 +707,13 @@ Handle<Pipeline> create_graphics_pipeline(Device            d,
     MTL4::LibraryDescriptor* vert_lib_desc = MTL4::LibraryDescriptor::alloc()->init();
     vert_lib_desc->setSource(vert_source);
     MTL::Library* vert_lib = d->m_compiler->newLibrary(vert_lib_desc, &error);
-    if (error != nullptr) {
-        printf("%s\n", error->localizedDescription()->utf8String());
-    }
+    if (error != nullptr) { printf("%s\n", error->localizedDescription()->utf8String()); }
     vert_lib_desc->release();
 
     MTL4::LibraryDescriptor* frag_lib_desc = MTL4::LibraryDescriptor::alloc()->init();
     frag_lib_desc->setSource(frag_source);
     MTL::Library* frag_lib = d->m_compiler->newLibrary(frag_lib_desc, &error);
-    if (error) {
-        printf("%s\n", error->localizedDescription()->utf8String());
-    }
+    if (error) { printf("%s\n", error->localizedDescription()->utf8String()); }
     frag_lib_desc->release();
 
     auto vert_func_desc = MTL4::LibraryFunctionDescriptor::alloc()->init();
@@ -1034,11 +1035,26 @@ void cmd_copy_to_texture(CommandBuffer                  cmd,
                          const BufferToTextureCopyInfo& info) {
     auto d = cmd->device;
 
-    auto encoder = get_compute_encoder(cmd);
-    auto src     = buffer_and_offset_from_ptr(d, srcGpu);
-
-    // TODO: I need more info here than I'm currently getting, need an API change.
-    // encoder->copyFromBuffer(src.buffer, src.offset,,info.buffer_image_size,)
+    auto             encoder     = get_compute_encoder(cmd);
+    auto             src         = buffer_and_offset_from_ptr(d, srcGpu);
+    const auto&      t           = d->m_texture_pool[texture];
+    const FormatInfo format_info = get_format_info(t.format);
+    const uint64_t   pixels_per_row
+        = info.source_row_pixels_stride == 0 ? info.image_extent.x : info.source_row_pixels_stride;
+    const uint64_t rows_per_image
+        = info.source_plane_rows_stride == 0 ? info.image_extent.y : info.source_plane_rows_stride;
+    encoder->copyFromBuffer(
+        src.buffer->buffer,
+        src.offset,
+        pixels_per_row * format_info.block_size_bytes,
+        rows_per_image * format_info.block_size_bytes,
+        MTL::Size::Make(info.image_extent.x, info.image_extent.y, info.image_extent.z),
+        t.texture,
+        info.base_layer,
+        info.base_mip,
+        MTL::Origin::Make(info.destination_image_offset.x,
+                          info.destination_image_offset.y,
+                          info.destination_image_offset.z));
 }
 
 void cmd_copy_from_texture(CommandBuffer   cmd,

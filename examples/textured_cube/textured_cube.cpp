@@ -178,8 +178,7 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
                              m_constant_buffer + Cube::kSize,
                              m_color_texture,
                              BufferToTextureCopyInfo{
-                                 .buffer_image_size = {(uint32_t)x, (uint32_t)y},
-                                 .image_extent      = {(uint32_t)x, (uint32_t)y, 1},
+                                 .image_extent = {(uint32_t)x, (uint32_t)y, 1},
                              });
     //  A little excessive, but wait for the copy to be done before returning.
     gpu::cmd_barrier(cmd, StageFlags::Transfer, StageFlags::VertexShader);

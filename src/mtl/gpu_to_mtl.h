@@ -1,6 +1,5 @@
 #pragma once
 
-
 #include "Metal.hpp"
 #include "gpu/loon_gpu.h"
 

@@ -8,7 +8,7 @@ option(LOON_GPU_BUILD_TESTS "Build tests" OFF)
 option(LOON_GPU_BUILD_DOCS "Build documentation" OFF)
 option(LOON_GPU_WERROR "Treat warnings as errors" OFF)
 option(LOON_GPU_INSTALL "Install library" ON)
-option(LOON_GPU_USE_KOSMICKRISP "Use the kosmickrisp vulkan driver on MacOS" OFF)
+option(LOON_GPU_USE_KOSMICKRISP "Use the kosmickrisp vulkan driver on MacOS" ON)
 
 set(CLANG_TIDY_CONFIG clang-tidy --config-file=${CMAKE_SOURCE_DIR}/.clang-tidy)
 
@@ -30,6 +30,7 @@ add_library(
     loon_gpu STATIC
     src/containers.cpp
     src/platform_utils.cpp
+    src/format_info.cpp
 )
 set(PUBLIC_HEADERS
     include/gpu/loon_gpu.h
