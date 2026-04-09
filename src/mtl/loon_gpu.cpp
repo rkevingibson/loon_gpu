@@ -98,10 +98,10 @@ struct Semaphore {
 };
 
 struct Surface {
-    CA::MetalLayer*    metal_layer;
-    CA::MetalDrawable* current_drawable = nullptr;
-    Handle<Texture>    current_texture  = {};
-    uint64_t           frame_idx        = 0;
+    id<CA::MetalLayer>    metal_layer;
+    id<CA::MetalDrawable> current_drawable = nullptr;
+    Handle<Texture>       current_texture  = {};
+    uint64_t              frame_idx        = 0;
 
     // Formats from
     // https://developer.apple.com/documentation/quartzcore/cametallayer/pixelformat?language=objc
@@ -149,11 +149,11 @@ struct QueueImpl {
         Function<void> callback;
     };
 
-    MTL4::CommandQueue* command_queue = nullptr;
-    CommandSuperpool    command_superpool;
-    MTL::SharedEvent*   callback_event = nullptr;
-    Vector<Event>       pending_events;
-    uint64_t            timeline_value = 0;
+    id<MTL4::CommandQueue> command_queue = nullptr;
+    CommandSuperpool       command_superpool;
+    id<MTL::SharedEvent>   callback_event = nullptr;
+    Vector<Event>          pending_events;
+    uint64_t               timeline_value = 0;
 
     Device device = nullptr;
 };
@@ -246,8 +246,8 @@ Device create_device(const DeviceDesc& desc) {
     auto options       = make_id<MTL4::CompilerTaskOptions>();
 
     // It seems like this is a valid cast from testing.
-    auto surface_metal_layer = reinterpret_cast<CA::MetalLayer*>(desc.native_window_handle);
-    surface_metal_layer->retain();
+    auto surface_metal_layer
+        = NS::RetainPtr(reinterpret_cast<CA::MetalLayer*>(desc.native_window_handle));
 
     auto residency_set_descriptor = make_id<MTL::ResidencySetDescriptor>();
     // NOTE: Not sure how much this matters, should dig in more
@@ -315,26 +315,15 @@ void destroy_device(Device d) {
     device_wait_for_idle(d);
     unconfigure_surface(d);
 
-    auto& q = d->m_queue;
-    if (q.command_queue) {
-        for (auto& p : q.command_superpool.pools) {
-            if (p.allocator) { p.allocator->release(); }
-            for (uint32_t i = 0; i < p.command_buffers.size(); ++i) {
-                p.command_buffers[i].command_buffer->release();
-            }
-        }
-
-        q.callback_event->release();
-    }
-
     d->m_semaphore_pool.clear();
     d->m_depth_stencil_state_pool.clear();
     d->m_pipeline_pool.clear();
     d->m_texture_heap_pool.clear();
     d->m_texture_pool.clear();
     d->m_buffer_pool.clear();
-
     tls_free(d->m_tls_key);
+
+    d->~DeviceImpl();
 }
 
 Backend device_backend() {
@@ -346,7 +335,7 @@ void device_wait_for_idle(Device d) {
     // only waits until any currently submitted work is done.
     auto& q = d->m_queue;
     if (q.command_queue) {
-        q.command_queue->signalEvent(q.callback_event, q.timeline_value);
+        q.command_queue->signalEvent(q.callback_event.get(), q.timeline_value);
         q.callback_event->waitUntilSignaledValue(q.timeline_value++, UINT64_MAX);
     }
 }
@@ -371,15 +360,12 @@ bool configure_surface(Device d, const SurfaceConfiguration& config) {
 
 void unconfigure_surface(Device d) {
     // Not much to do here.
-    if (d->m_surface.current_drawable) {
-        d->m_surface.current_drawable->release();
-        d->m_surface.current_drawable = nullptr;
-    }
+    d->m_surface.current_drawable = nullptr;
 }
 
 SurfaceTextureInfo get_current_texture(Device d) {
-    CA::MetalDrawable* drawable = d->m_surface.metal_layer->nextDrawable();
-    drawable->retain();
+    id<CA::MetalDrawable> drawable = NS::RetainPtr(d->m_surface.metal_layer->nextDrawable());
+
 
     if (!drawable) {
         return SurfaceTextureInfo{
@@ -387,7 +373,7 @@ SurfaceTextureInfo get_current_texture(Device d) {
             .texture = {0},
         };
     }
-    d->m_queue.command_queue->wait(drawable);
+    d->m_queue.command_queue->wait(drawable.get());
 
     d->m_surface.current_drawable = drawable;
     d->m_surface.frame_idx++;
@@ -406,9 +392,8 @@ SurfaceTextureInfo get_current_texture(Device d) {
 }
 
 SurfaceStatus present(Device d, Queue queue) {
-    queue->command_queue->signalDrawable(d->m_surface.current_drawable);
+    queue->command_queue->signalDrawable(d->m_surface.current_drawable.get());
     d->m_surface.current_drawable->present();
-    d->m_surface.current_drawable->release();
     d->m_surface.current_drawable = nullptr;
     d->m_texture_pool.erase(d->m_surface.current_texture);
     return SurfaceStatus::Success;
@@ -563,16 +548,16 @@ void free(Device d, Handle<TextureHeap> h) {
 }
 
 TextureView add_texture_view_to_heap(Device d, Handle<TextureHeap> h, const TextureViewDesc& desc) {
-    auto&                       heap      = d->m_texture_heap_pool[h];
-    auto&                       tex       = d->m_texture_pool[desc.texture];
-    MTL::TextureViewDescriptor* view_info = MTL::TextureViewDescriptor::alloc()->init();
+    auto&                          heap      = d->m_texture_heap_pool[h];
+    auto&                          tex       = d->m_texture_pool[desc.texture];
+    id<MTL::TextureViewDescriptor> view_info = make_id<MTL::TextureViewDescriptor>();
     view_info->setLevelRange(NS::Range(desc.base_mip, desc.mip_count));
     view_info->setPixelFormat(bridge(desc.format));
     view_info->setSliceRange(NS::Range(desc.base_layer, desc.layer_count));
     view_info->setTextureType(tex.texture->textureType());
-    const auto      index        = heap.bitset.set_leading_zero();
-    MTL::ResourceID texture_view = heap.pool->setTextureView(tex.texture.get(), view_info, index);
-    view_info->release();
+    const auto      index = heap.bitset.set_leading_zero();
+    MTL::ResourceID texture_view
+        = heap.pool->setTextureView(tex.texture.get(), view_info.get(), index);
 
     return texture_view._impl;
 }
@@ -630,11 +615,10 @@ void remove_sampler_from_heap(Device d, Handle<TextureHeap> h, Sampler s) {
 }
 
 static id<NS::String> get_span_as_string(Span<const char> span) {
-    NS::String* source_view
-        = NS::String::alloc()->init((void*)span.data(), span.size(), NS::UTF8StringEncoding, false);
-    NS::String* copy = NS::String::alloc()->init(source_view);
-    source_view->release();
-    return NS::TransferPtr(copy);
+    id<NS::String> source_view
+        = make_id<NS::String>((void*)span.data(), span.size(), NS::UTF8StringEncoding, false);
+    id<NS::String> copy = make_id<NS::String>(source_view.get());
+    return copy;
 }
 
 // MARK: Pipelines
@@ -876,10 +860,10 @@ static CommandBufferImpl* get_command_buffer(Queue q, CommandPool* pool) {
 }
 
 Queue get_queue(Device d, QueueType type) {
-    if (d->m_queue.command_queue == nullptr) {
-        auto& q = d->m_queue = {
-            .command_queue  = d->m_device->newMTL4CommandQueue(),
-            .callback_event = d->m_device->newSharedEvent(),
+    if (!d->m_queue.command_queue) {
+        d->m_queue = {
+            .command_queue  = NS::TransferPtr(d->m_device->newMTL4CommandQueue()),
+            .callback_event = NS::TransferPtr(d->m_device->newSharedEvent()),
             .pending_events = Vector<QueueImpl::Event>(d->m_allocator),
             .timeline_value = 0,
             .device         = d,
@@ -939,7 +923,7 @@ void queue_cancel(Queue q, Span<const Handle<CommandBuffer>> command_buffers) {}
 void queue_on_submitted_work_completed(Queue q, Function<void>&& fn) {
     q->pending_events.emplace_back(
         QueueImpl::Event{.completed_time = q->timeline_value, .callback = std::move(fn)});
-    q->command_queue->signalEvent(q->callback_event, q->timeline_value++);
+    q->command_queue->signalEvent(q->callback_event.get(), q->timeline_value++);
 }
 
 void queue_process_events(Queue q) {
