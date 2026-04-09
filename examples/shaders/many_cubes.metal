@@ -1,5 +1,5 @@
-#include <metal_stdlib>
-#include <metal_texture>
+#import <metal_stdlib>
+#import <metal_texture>
 
 using namespace metal;
 
@@ -12,8 +12,8 @@ struct VertexInput
 {
     float4x4 worldFromMesh;
     constant CameraData* camera;
-    constant float3* position;
-    constant float2* uvs;
+    constant packed_float3* position;
+    constant packed_float2* uvs;
     constant float* padding;
 };
 
@@ -29,7 +29,7 @@ struct FragmentInput {
 };
 
 [[vertex]]
-VertexStageOutput vertexMain(
+VertexStageOutput vertex_main(
     constant VertexInput* vert [[buffer(0)]], 
     uint32_t vertexIdx [[vertex_id]],
     uint32_t instanceIdx [[instance_id]]
@@ -46,7 +46,7 @@ VertexStageOutput vertexMain(
 }
 
 [[fragment]]
-float4 fragmentMain(
+float4 fragment_main(
     constant FragmentInput* frag [[buffer(1)]],
     VertexStageOutput vert[[stage_in]]
 )

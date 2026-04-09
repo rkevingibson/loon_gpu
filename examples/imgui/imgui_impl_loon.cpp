@@ -197,7 +197,7 @@ static bool CreateDeviceObjects() {
 
     // Create pipelines
     using namespace gpu;
-    ShaderModule shader         = bd->shader_loader->load_module("imgui.slang");
+    ShaderModule shader         = bd->shader_loader->load_module("imgui");
     const auto   vertex_spirv   = get_spirv(shader.get(), "vertex_main");
     const auto   fragment_spirv = get_spirv(shader.get(), "fragment_main");
     bd->pipelineState = gpu::create_graphics_pipeline(bd->device,
@@ -330,7 +330,6 @@ void NewFrame() {
 struct alignas(64) VertexInput {
     ImVec2      scale;
     ImVec2      translate;
-    ImVec2      padding;
     gpu::GpuPtr vertex_buffer;
 };
 
@@ -469,7 +468,6 @@ void Render(gpu::CommandBuffer cmd) {
                 *draw_args = DrawArgs{.vert{
                                   .scale         = scale,
                                   .translate     = translate,
-                                  .padding       = {0, 0},
                                   .vertex_buffer = vertex_buf,
                               },
                               .frag = {

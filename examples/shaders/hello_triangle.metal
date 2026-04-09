@@ -1,4 +1,4 @@
-#include <metal_stdlib>
+#import <metal_stdlib>
 
 using namespace metal;
 

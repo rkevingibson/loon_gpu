@@ -7,7 +7,6 @@ struct Vertex {
 struct VertexInput {
     float2 scale;
     float2 translate;
-    float2 padding;
     Vertex* verts;
 };
 

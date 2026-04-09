@@ -19,7 +19,7 @@ using namespace loon;
 
 static Format select_surface_format(const loon::gpu::SurfaceCapabilities& surface_capabilities) {
     for (Format f : surface_capabilities.formats) {
-        if (f == loon::gpu::Format::RGBA8UnormSrgb) {
+        if (f == loon::gpu::Format::RGBA8UnormSrgb || f == loon::gpu::Format::BGRA8UnormSrgb) {
             // Choose 8 bit srgb if we have it
             return f;
         }

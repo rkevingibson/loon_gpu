@@ -6,25 +6,25 @@ using namespace metal;
 
 struct DeadList {
     device int* indices;
-
-    // Since we're either only ever decrementing (in the emitter stage) or incrementing (in the sim stage when particles age out), we can simplify a bit.
-    int pop() {
-        
-        int index = atomic_fetch_sub_explicit(reinterpret_cast<device atomic_int*>(indices), 1, memory_order_relaxed);
-        if (index > 0) {
-            return indices[index];
-        } else {
-            // Probably a better way to do this, going to be a bunch of memory traffic.
-            indices[0] = 0;
-            return -1;
-        }
-    }
-
-    void push(int i) {
-        int prev_size = atomic_fetch_add_explicit(reinterpret_cast<device atomic_int*>(indices), 1, memory_order_relaxed);
-        indices[prev_size + 1] = i;
-    }
 };
+
+// Since we're either only ever decrementing (in the emitter stage) or incrementing (in the sim stage when particles age out), we can simplify a bit.
+int pop(device DeadList* list) {
+    
+    int index = atomic_fetch_sub_explicit(reinterpret_cast<device atomic_int*>(list->indices), 1, memory_order_relaxed);
+    if (index > 0) {
+        return list->indices[index];
+    } else {
+        // Probably a better way to do this, going to be a bunch of memory traffic.
+        list->indices[0] = 0;
+        return -1;
+    }
+}
+
+void push(device DeadList* list, int i) {
+    int prev_size = atomic_fetch_add_explicit(reinterpret_cast<device atomic_int*>(list->indices), 1, memory_order_relaxed);
+    list->indices[prev_size + 1] = i;
+}
 
 // Adapted from https://www.reedbeta.com/blog/hash-functions-for-gpu-rendering/
 uint rand_pcg(thread uint& state)
@@ -41,7 +41,7 @@ float uniform_rand(thread uint& state)
     // This is imperfect but good enough - generate a float in [1, 2) using 23 bits from x, then subtract 1. 
     // This only covers 50% of the possible float values in [0,1), but that should be plenty. 
     // This feels like it should be fixable using some extra bits in x but eh.
-    return asfloat((x & 0x7FFFFF) | (0x3F800000)) - 1.0f;
+    return as_type<float>((x & 0x7FFFFF) | (0x3F800000)) - 1.0f;
 }
 
 // From PBRT 4E, Pharr, Jakob & Humphreys.
@@ -69,9 +69,9 @@ struct ParticleSimOptions {
 };
 
 struct Particle {
-    float3_packed position;
+    packed_float3 position;
     float  life;
-    float3_packed velocity;
+    packed_float3 velocity;
     float  size;
     float4 color;    
 };
@@ -87,7 +87,7 @@ struct DrawIndexedIndirectArgs {
 struct ParticleSim {
     ParticleSimOptions       options;
     DeadList                 dead_list;
-    Particle*                particles;
+    device Particle*                particles;
     device DrawIndexedIndirectArgs* draw_args;
     device uint*                    alive_particle_list;
 };
@@ -113,7 +113,7 @@ void reset_sim(
 
 [[kernel, required_threads_per_threadgroup(64, 1, 1)]]
 void emitter(
-    constant ParticleSim* sim [[buffer(0)]],
+    device ParticleSim* sim [[buffer(0)]],
     uint3 gid [[thread_position_in_grid]]
     )
 {
@@ -121,7 +121,7 @@ void emitter(
         return;
     }
 
-    let particle_index = sim->dead_list.pop();
+    int particle_index = pop(&sim->dead_list);
     if (particle_index == -1) {
         return;
     }
@@ -149,7 +149,7 @@ void emitter(
 
 [[kernel, required_threads_per_threadgroup(64, 1, 1)]]
 void update_particle_sim(
-    constant ParticleSim* sim [[buffer(0)]], 
+    device ParticleSim* sim [[buffer(0)]], 
     uint3 gid [[thread_position_in_grid]]
     )
 {
@@ -166,7 +166,7 @@ void update_particle_sim(
     float dt = sim->options.delta_t;
     p.life -= dt;
     if (p.life < 0) {
-        sim->dead_list.push(particle_id);
+        push(&sim->dead_list, particle_id);
     }
 
     p.position = p.position + dt * p.velocity;
@@ -175,7 +175,7 @@ void update_particle_sim(
 
     sim->particles[particle_id] = p;
     // Add this particle to the indirect args. Also need to append it to the list of alive particles, for a re-ordering in the vertex shader - need a map from instance_id to particle_id. 
-    uint instance_id = atomic_fetch_add_explicit(reinterpret_cast<device atomic_uint*>(&sim->draw_args->instance_count), 1);
+    uint instance_id = atomic_fetch_add_explicit(reinterpret_cast<device atomic_uint*>(&sim->draw_args->instance_count), 1, memory_order_relaxed);
     sim->alive_particle_list[instance_id] = particle_id;
 }
 
@@ -214,7 +214,7 @@ VertexStageOutput vertex_main(
     float2 quad_pos = 2.0f*quad_uv - 1.0f;
 
     uint particle_id = args->particle_ids[instance];
-    Particle p = args.particles[particle_id];
+    Particle p = args->particles[particle_id];
     VertexStageOutput out;
     
     if (p.life < 0) {

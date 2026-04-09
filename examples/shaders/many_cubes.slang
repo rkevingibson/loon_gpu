@@ -33,7 +33,7 @@ struct Args {
 [[vk::push_constant]] uniform Args args;
 
 [shader("vertex")]
-VertexStageOutput vertexMain(uint32_t vertexIdx : SV_VertexID, uint32_t instanceIdx : SV_InstanceID)
+VertexStageOutput vertex_main(uint32_t vertexIdx : SV_VertexID, uint32_t instanceIdx : SV_InstanceID)
 {
     VertexStageOutput output; 
     CameraData* cam = args.vert[instanceIdx].camera;
@@ -46,7 +46,7 @@ VertexStageOutput vertexMain(uint32_t vertexIdx : SV_VertexID, uint32_t instance
 }
 
 [shader("fragment")]
-float4 fragmentMain(VertexStageOutput vertex) : SV_Target
+float4 fragment_main(VertexStageOutput vertex) : SV_Target
 {
     float4 out_color = args.frag->texture.Sample(args.frag->sampler, vertex.uv);
     return out_color;

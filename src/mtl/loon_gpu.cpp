@@ -30,6 +30,14 @@ template class Span<const Handle<gpu::CommandBuffer>>;
 template class Span<const gpu::TextureTransition>;
 template class Function<void>;
 
+template <class T>
+using id = NS::SharedPtr<T>;
+
+template <class T, class... Args>
+id<T> make_id(Args&&... args) {
+    return NS::TransferPtr(T::alloc()->init(std::forward<Args>(args)...));
+}
+
 template <class T, class CompareFn>
 static constexpr auto lower_bound = [](T* first, T* last, const T& value) {
     CompareFn compare;
@@ -49,8 +57,8 @@ static constexpr auto lower_bound = [](T* first, T* last, const T& value) {
 };
 
 struct Buffer {
-    MTL::Buffer* buffer;
-    MTL::Heap*   heap;
+    id<MTL::Buffer> buffer;
+    id<MTL::Heap>   heap;
 };
 
 struct Texture {
@@ -183,13 +191,13 @@ struct DeviceImpl {
     LogLevel           m_log_level    = LogLevel::Off;
     loon::gpu::tls_key m_tls_key;
 
-    MTL::Device* m_device = nullptr;
+    id<MTL::Device> m_device = nullptr;
 
-    MTL4::Compiler*            m_compiler;
-    MTL4::CompilerTaskOptions* m_options;
+    id<MTL4::Compiler>            m_compiler;
+    id<MTL4::CompilerTaskOptions> m_options;
 
-    MTL::ResidencySet* m_residency_set = nullptr;
-    Surface            m_surface;
+    id<MTL::ResidencySet> m_residency_set = nullptr;
+    Surface               m_surface;
 
     QueueImpl m_queue;
 
@@ -228,25 +236,24 @@ Device create_device(const DeviceDesc& desc) {
     auto blk = alloc.alloc(sizeof(DeviceImpl));
     if (blk.ptr == 0) { return nullptr; }
 
-    auto device = MTL::CreateSystemDefaultDevice();
+    auto device = NS::TransferPtr(MTL::CreateSystemDefaultDevice());
     if (!device) { return nullptr; }
 
     NS::Error* error = nullptr;
 
-    auto compiler_desc = MTL4::CompilerDescriptor::alloc()->init();
-    auto compiler      = device->newCompiler(compiler_desc, &error);
-    compiler_desc->release();
-    auto options = MTL4::CompilerTaskOptions::alloc()->init();
+    auto compiler_desc = make_id<MTL4::CompilerDescriptor>();
+    auto compiler      = NS::TransferPtr(device->newCompiler(compiler_desc.get(), &error));
+    auto options       = make_id<MTL4::CompilerTaskOptions>();
 
     // It seems like this is a valid cast from testing.
     auto surface_metal_layer = reinterpret_cast<CA::MetalLayer*>(desc.native_window_handle);
     surface_metal_layer->retain();
 
-    auto residency_set_descriptor = MTL::ResidencySetDescriptor::alloc()->init();
+    auto residency_set_descriptor = make_id<MTL::ResidencySetDescriptor>();
     // NOTE: Not sure how much this matters, should dig in more
     residency_set_descriptor->setInitialCapacity(64);
-    auto residency_set = device->newResidencySet(residency_set_descriptor, nullptr);
-    residency_set_descriptor->release();
+    auto residency_set
+        = NS::TransferPtr(device->newResidencySet(residency_set_descriptor.get(), nullptr));
 
     // NOTE: Not 100% sure about if this is UB - I need a pointer to the device in order to capture
     // it in the lambdas, that are created during construction of the object. It probably is
@@ -272,9 +279,8 @@ Device create_device(const DeviceDesc& desc) {
         },
         .m_buffer_pool              = SlotMap<Buffer>(alloc,
                                          [d](Buffer* b) {
-                                             if (b->buffer) {
-                                                 d->m_residency_set->removeAllocation(b->buffer);
-                                                 b->buffer->release();
+                                             if (b->heap) {
+                                                 d->m_residency_set->removeAllocation(b->heap.get());
                                              }
                                              b->~Buffer();
                                          }),
@@ -337,11 +343,6 @@ void destroy_device(Device d) {
     d->m_texture_pool.clear();
     d->m_buffer_pool.clear();
 
-    d->m_residency_set->release();
-    d->m_options->release();
-    d->m_compiler->release();
-    d->m_device->release();
-
     tls_free(d->m_tls_key);
 }
 
@@ -362,9 +363,9 @@ void device_wait_for_idle(Device d) {
 // MARK: Surface functions
 SurfaceCapabilities get_surface_capabilities(Device d) {
     return SurfaceCapabilities{
-        .formats       = Surface::kSwapchainFormats,
+        .usages  = UsageFlags::ColorAttachment | UsageFlags::TransferDst | UsageFlags::Storage,
+        .formats = Surface::kSwapchainFormats,
         .present_modes = Surface::kPresentModes,
-        .usages = UsageFlags::ColorAttachment | UsageFlags::TransferDst | UsageFlags::Storage,
     };
 }
 
@@ -391,8 +392,8 @@ SurfaceTextureInfo get_current_texture(Device d) {
 
     if (!drawable) {
         return SurfaceTextureInfo{
-            .texture = 0,
             .status  = SurfaceStatus::Error,
+            .texture = {0},
         };
     }
     d->m_queue.command_queue->wait(drawable);
@@ -408,8 +409,8 @@ SurfaceTextureInfo get_current_texture(Device d) {
     d->m_surface.current_texture = handle;
 
     return SurfaceTextureInfo{
-        .texture = handle,
         .status  = SurfaceStatus::Success,
+        .texture = handle,
     };
 }
 
@@ -429,7 +430,7 @@ GpuPtr malloc(Device d, size_t bytes, Memory memory) {
 }
 
 GpuPtr malloc(Device d, size_t bytes, size_t align, Memory memory) {
-    MTL::HeapDescriptor* heap_info = MTL::HeapDescriptor::alloc()->init();
+    id<MTL::HeapDescriptor> heap_info = make_id<MTL::HeapDescriptor>();
     heap_info->setType(MTL::HeapTypePlacement);
     heap_info->setStorageMode(memory == Memory::Gpu ? MTL::StorageModePrivate
                                                     : MTL::StorageModeShared);
@@ -438,8 +439,7 @@ GpuPtr malloc(Device d, size_t bytes, size_t align, Memory memory) {
     heap_info->setHazardTrackingMode(MTL::HazardTrackingModeUntracked);
     heap_info->setSize(bytes);
 
-    MTL::Heap* heap = d->m_device->newHeap(heap_info);
-    heap_info->release();
+    id<MTL::Heap> heap = NS::TransferPtr(d->m_device->newHeap(heap_info.get()));
 
     const MTL::ResourceOptions resource_options
         = (memory == Memory::Gpu ? MTL::ResourceStorageModePrivate : MTL::ResourceStorageModeShared)
@@ -447,14 +447,14 @@ GpuPtr malloc(Device d, size_t bytes, size_t align, Memory memory) {
                                        : MTL::ResourceCPUCacheModeDefaultCache);
 
 
-    MTL::Buffer* buffer = heap->newBuffer(bytes, resource_options, 0);
+    id<MTL::Buffer> buffer = NS::TransferPtr(heap->newBuffer(bytes, resource_options, 0));
     if (!buffer) { return 0; }
 
     auto handle = d->m_buffer_pool.emplace({
         .buffer = buffer,
         .heap   = heap,
     });
-    d->m_residency_set->addAllocation(heap);
+    d->m_residency_set->addAllocation(heap.get());
     d->m_residency_set->commit();
     // TODO: Can i reduce the frenquency of commits at all?
 
@@ -551,7 +551,7 @@ Handle<Texture> create_texture(Device d, const TextureDesc& desc, GpuPtr locatio
 }
 
 Handle<TextureHeap> create_texture_heap(Device d, const TextureHeapDesc& desc) {
-    auto view_pool_descriptor = MTL::ResourceViewPoolDescriptor::alloc();
+    auto view_pool_descriptor = MTL::ResourceViewPoolDescriptor::alloc()->init();
     view_pool_descriptor->setResourceViewCount(desc.texture_count);
 
     auto texture_view_pool = d->m_device->newTextureViewPool(view_pool_descriptor, nullptr);
@@ -610,6 +610,7 @@ Sampler add_sampler_to_heap(Device d, Handle<TextureHeap> h, const SamplerDesc& 
     desc->setSAddressMode(addressing);
     desc->setTAddressMode(addressing);
     desc->setMaxAnisotropy((uint32_t)sampler.max_anisotropy);
+    desc->setSupportArgumentBuffers(true);
     auto sampler_state = d->m_device->newSamplerState(desc);
     desc->release();
 
@@ -640,18 +641,20 @@ void remove_sampler_from_heap(Device d, Handle<TextureHeap> h, Sampler s) {
     heap.sampler_lookup.erase(it, it + 1);
 }
 
+static NS::String* get_span_as_string(Span<const char> span) {
+    NS::String* source_view
+        = NS::String::alloc()->init((void*)span.data(), span.size(), NS::UTF8StringEncoding, false);
+    NS::String* copy = NS::String::alloc()->init(source_view);
+    source_view->release();
+    return copy;
+}
+
 // MARK: Pipelines
 Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource compute) {
-    NS::String* shader_source = NS::String::alloc()->init((void*)compute.spirv.data(),
-                                                          compute.spirv.size(),
-                                                          NS::UTF8StringEncoding,
-                                                          false);
+    NS::String* shader_source = get_span_as_string(compute.spirv.cast<const char>());
+    NS::String* entry_point   = get_span_as_string(compute.entry_point);
 
-    NS::String* entry_point = NS::String::alloc()->init((void*)compute.entry_point.data(),
-                                                        compute.entry_point.size(),
-                                                        NS::UTF8StringEncoding,
-                                                        false);
-    NS::Error*  error       = nullptr;
+    NS::Error* error = nullptr;
 
     MTL4::LibraryDescriptor* lib_desc = MTL4::LibraryDescriptor::alloc()->init();
     lib_desc->setSource(shader_source);
@@ -664,9 +667,8 @@ Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource compute) {
     func_desc->setName(entry_point);
     desc->setComputeFunctionDescriptor(func_desc);
 
-
     MTL::ComputePipelineState* compute_pipeline
-        = d->m_compiler->newComputePipelineState(desc, d->m_options, &error);
+        = d->m_compiler->newComputePipelineState(desc, d->m_options.get(), &error);
 
     func_desc->release();
     desc->release();
@@ -676,8 +678,8 @@ Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource compute) {
     shader_source->release();
 
     return d->m_pipeline_pool.emplace({
-        .compute_pipeline = compute_pipeline,
         .render_pipeline  = nullptr,
+        .compute_pipeline = compute_pipeline,
     });
 }
 
@@ -686,22 +688,10 @@ Handle<Pipeline> create_graphics_pipeline(Device            d,
                                           ShaderSource      fragment,
                                           const RasterDesc& desc) {
     // TODO: Error handling/propagation
-    NS::String* vert_source      = NS::String::alloc()->init((void*)vertex.spirv.data(),
-                                                        vertex.spirv.size(),
-                                                        NS::UTF8StringEncoding,
-                                                        false);
-    NS::String* vert_entry_point = NS::String::alloc()->init((void*)vertex.entry_point.data(),
-                                                             vertex.entry_point.size(),
-                                                             NS::UTF8StringEncoding,
-                                                             false);
-    NS::String* frag_source      = NS::String::alloc()->init((void*)fragment.spirv.data(),
-                                                        fragment.spirv.size(),
-                                                        NS::UTF8StringEncoding,
-                                                        false);
-    NS::String* frag_entry_point = NS::String::alloc()->init((void*)fragment.entry_point.data(),
-                                                             fragment.entry_point.size(),
-                                                             NS::UTF8StringEncoding,
-                                                             false);
+    NS::String* vert_source      = get_span_as_string(vertex.spirv.cast<const char>());
+    NS::String* vert_entry_point = get_span_as_string(vertex.entry_point);
+    NS::String* frag_source      = get_span_as_string(fragment.spirv.cast<const char>());
+    NS::String* frag_entry_point = get_span_as_string(fragment.entry_point);
     NS::Error*  error            = nullptr;
 
     MTL4::LibraryDescriptor* vert_lib_desc = MTL4::LibraryDescriptor::alloc()->init();
@@ -756,7 +746,7 @@ Handle<Pipeline> create_graphics_pipeline(Device            d,
     }
 
     MTL::RenderPipelineState* render_pipeline
-        = d->m_compiler->newRenderPipelineState(pipeline_desc, d->m_options, &error);
+        = d->m_compiler->newRenderPipelineState(pipeline_desc, d->m_options.get(), &error);
 
     pipeline_desc->release();
     frag_func_desc->release();
@@ -770,8 +760,8 @@ Handle<Pipeline> create_graphics_pipeline(Device            d,
 
 
     return d->m_pipeline_pool.emplace({
-        .compute_pipeline = nullptr,
         .render_pipeline  = render_pipeline,
+        .compute_pipeline = nullptr,
         .cull_mode        = desc.cull,
     });
 }
@@ -941,7 +931,7 @@ CommandBuffer queue_start_command_recording(Queue q) {
         buffer->command_buffer->beginCommandBuffer(pool->allocator);
         buffer->compute_encoder = nullptr;
         buffer->render_encoder  = nullptr;
-        buffer->command_buffer->useResidencySet(d->m_residency_set);
+        buffer->command_buffer->useResidencySet(d->m_residency_set.get());
     }
     return buffer;
 }
@@ -1026,7 +1016,11 @@ void cmd_memcpy(CommandBuffer cmd, GpuPtr destGpu, GpuPtr srcGpu, size_t size) {
     auto encoder = get_compute_encoder(cmd);
     auto src     = buffer_and_offset_from_ptr(d, srcGpu);
     auto dst     = buffer_and_offset_from_ptr(d, destGpu);
-    encoder->copyFromBuffer(src.buffer->buffer, src.offset, dst.buffer->buffer, dst.offset, size);
+    encoder->copyFromBuffer(src.buffer->buffer.get(),
+                            src.offset,
+                            dst.buffer->buffer.get(),
+                            dst.offset,
+                            size);
 }
 
 void cmd_copy_to_texture(CommandBuffer                  cmd,
@@ -1044,10 +1038,10 @@ void cmd_copy_to_texture(CommandBuffer                  cmd,
     const uint64_t rows_per_image
         = info.source_plane_rows_stride == 0 ? info.image_extent.y : info.source_plane_rows_stride;
     encoder->copyFromBuffer(
-        src.buffer->buffer,
+        src.buffer->buffer.get(),
         src.offset,
         pixels_per_row * format_info.block_size_bytes,
-        rows_per_image * format_info.block_size_bytes,
+        rows_per_image * format_info.block_size_bytes * pixels_per_row,
         MTL::Size::Make(info.image_extent.x, info.image_extent.y, info.image_extent.z),
         t.texture,
         info.base_layer,
@@ -1204,8 +1198,8 @@ void cmd_draw_indexed_instanced_indirect(CommandBuffer cmd, const DrawIndexedInd
         MTL::PrimitiveTypeTriangle,
         args.type == IndexType::UInt16 ? MTL::IndexTypeUInt16 : MTL::IndexTypeUInt32,
         args.indicesGpu,
-        UINT32_MAX,  // TODO: Is this fine? Don't have access to the size otherwise without looking
-                     // up the allocation for this.
+        1 << 30,  // TODO: Is this fine? Don't have access to the size otherwise without looking
+                  // up the allocation for this.
         args.argsGpu);
 }
 

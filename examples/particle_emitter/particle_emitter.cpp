@@ -46,7 +46,7 @@ static constexpr uint32_t kMaxNumParticles = 512;
 
 static Format select_surface_format(const loon::gpu::SurfaceCapabilities& surface_capabilities) {
     for (Format f : surface_capabilities.formats) {
-        if (f == loon::gpu::Format::RGBA8UnormSrgb) {
+        if (f == loon::gpu::Format::RGBA8UnormSrgb || f == loon::gpu::Format::BGRA8UnormSrgb) {
             // Choose 8 bit srgb if we have it
             return f;
         }
@@ -91,11 +91,11 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
     auto fragment_spirv = get_spirv(shader.get(), "fragment_main");
     m_render_particle_pipeline = gpu::create_graphics_pipeline(m_device,
         {
-            .spirv       = Span(vertex_spirv.data(), vertex_spirv.size()).as_bytes(),
+            .spirv       = Span(vertex_spirv.data(), vertex_spirv.size()),
             .entry_point = "vertex_main"_sv,
         },
         {
-            .spirv       = Span(fragment_spirv.data(), fragment_spirv.size()).as_bytes(),
+            .spirv       = Span(fragment_spirv.data(), fragment_spirv.size()),
             .entry_point = "fragment_main"_sv,
         },
         RasterDesc{
