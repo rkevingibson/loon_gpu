@@ -62,13 +62,13 @@ struct Buffer {
 };
 
 struct Texture {
-    MTL::Texture* texture;
-    Format        format;
+    id<MTL::Texture> texture;
+    Format           format;
 };
 
 struct SamplerMapping {
-    Sampler            sampler;
-    MTL::SamplerState* state;
+    Sampler               sampler;
+    id<MTL::SamplerState> state;
 };
 
 struct SamplerMappingCompare {
@@ -78,23 +78,23 @@ struct SamplerMappingCompare {
 };
 
 struct TextureHeap {
-    MTL::TextureViewPool*  pool = nullptr;
-    TwoLevelBitset         bitset;
-    Vector<SamplerMapping> sampler_lookup;
+    id<MTL::TextureViewPool> pool = nullptr;
+    TwoLevelBitset           bitset;
+    Vector<SamplerMapping>   sampler_lookup;
 };
 
 struct Pipeline {
-    MTL::RenderPipelineState*  render_pipeline  = nullptr;
-    MTL::ComputePipelineState* compute_pipeline = nullptr;
-    Cull                       cull_mode;
+    id<MTL::RenderPipelineState>  render_pipeline  = nullptr;
+    id<MTL::ComputePipelineState> compute_pipeline = nullptr;
+    Cull                          cull_mode;
 };
 
 struct DepthStencilState {
-    MTL::DepthStencilState* state = nullptr;
+    id<MTL::DepthStencilState> state = nullptr;
 };
 
 struct Semaphore {
-    MTL::SharedEvent* event = nullptr;
+    id<MTL::SharedEvent> event = nullptr;
 };
 
 struct Surface {
@@ -119,18 +119,18 @@ struct Surface {
 
 struct CommandPool;
 struct CommandBufferImpl {
-    MTL4::CommandBuffer*         command_buffer = nullptr;
-    MTL4::ArgumentTable*         argument_table = nullptr;
-    Queue                        queue;
-    CommandPool*                 pool;
-    Device                       device;
-    MTL4::ComputeCommandEncoder* compute_encoder = nullptr;
-    MTL4::RenderCommandEncoder*  render_encoder  = nullptr;
+    id<MTL4::CommandBuffer>         command_buffer = nullptr;
+    id<MTL4::ArgumentTable>         argument_table = nullptr;
+    Queue                           queue;
+    CommandPool*                    pool;
+    Device                          device;
+    id<MTL4::ComputeCommandEncoder> compute_encoder = nullptr;
+    id<MTL4::RenderCommandEncoder>  render_encoder  = nullptr;
 };
 
 struct CommandPool {
-    MTL4::CommandAllocator*         allocator      = nullptr;
-    MTL4::ArgumentTable*            argument_table = nullptr;
+    id<MTL4::CommandAllocator>      allocator      = nullptr;
+    id<MTL4::ArgumentTable>         argument_table = nullptr;
     SegmentArray<CommandBufferImpl> command_buffers;  // In theory
     uint64_t                        buffer_free_idx = 0;
     uint64_t                        frame_idx       = 0;
@@ -287,34 +287,25 @@ Device create_device(const DeviceDesc& desc) {
         .m_texture_pool             = SlotMap<Texture>(alloc,
                                            [d](Texture* t) {
                                                if (t->texture) {
-                                                   d->m_residency_set->removeAllocation(t->texture);
-                                                   t->texture->release();
+                                                   d->m_residency_set->removeAllocation(t->texture.get());
                                                }
                                                t->~Texture();
                                            }),
         .m_texture_heap_pool        = SlotMap<TextureHeap>(alloc,
                                                     [](TextureHeap* t) {
-                                                        if (t->pool) { t->pool->release(); }
                                                         t->~TextureHeap();
                                                     }),
         .m_pipeline_pool            = SlotMap<Pipeline>(alloc,
                                              [](Pipeline* p) {
-                                                 if (p->compute_pipeline) {
-                                                     p->compute_pipeline->release();
-                                                 }
-                                                 if (p->render_pipeline) {
-                                                     p->render_pipeline->release();
-                                                 }
+                                                p->~Pipeline();
                                              }),
         .m_depth_stencil_state_pool = SlotMap<DepthStencilState>(alloc,
                                                                  [](DepthStencilState* s) {
-                                                                     if (s->state) {
-                                                                         s->state->release();
-                                                                     }
+                                                                     s->~DepthStencilState();
                                                                  }),
         .m_semaphore_pool           = SlotMap<Semaphore>(alloc,
                                                [](Semaphore* s) {
-                                                   if (s->event) { s->event->release(); }
+                                                s->~Semaphore();
                                                }),
         .m_ptr_map                  = Vector<GpuPtrMap>(alloc),
     };
@@ -400,7 +391,7 @@ SurfaceTextureInfo get_current_texture(Device d) {
 
     d->m_surface.current_drawable = drawable;
     d->m_surface.frame_idx++;
-    MTL::Texture* tex = drawable->texture();
+    id<MTL::Texture> tex = NS::RetainPtr(drawable->texture());
 
     // TODO: Need to remove this when I present.
     Handle<Texture> handle       = d->m_texture_pool.emplace({
@@ -500,7 +491,7 @@ void free(Device d, GpuPtr ptr) {
 
 // MARK: Textures
 TextureSizeAlign get_texture_size_align(Device d, const TextureDesc& desc) {
-    MTL::TextureDescriptor* info = MTL::TextureDescriptor::alloc()->init();
+    id<MTL::TextureDescriptor> info = make_id<MTL::TextureDescriptor>();
     info->setTextureType(bridge(desc.type));
     info->setPixelFormat(bridge(desc.format));
     info->setWidth(desc.dimensions.x);
@@ -512,14 +503,13 @@ TextureSizeAlign get_texture_size_align(Device d, const TextureDesc& desc) {
     info->setHazardTrackingMode(MTL::HazardTrackingModeUntracked);
     info->setUsage(bridge_texture_usage(desc.usage));
 
-    const auto size_align = d->m_device->heapTextureSizeAndAlign(info);
-    info->release();
+    const auto size_align = d->m_device->heapTextureSizeAndAlign(info.get());
 
     return {.size = size_align.size, .align = size_align.align};
 }
 
 Handle<Texture> create_texture(Device d, const TextureDesc& desc, GpuPtr location) {
-    MTL::TextureDescriptor* info = MTL::TextureDescriptor::alloc()->init();
+    id<MTL::TextureDescriptor> info = make_id<MTL::TextureDescriptor>();
     info->setTextureType(bridge(desc.type));
     info->setPixelFormat(bridge(desc.format));
     info->setWidth(desc.dimensions.x);
@@ -531,18 +521,17 @@ Handle<Texture> create_texture(Device d, const TextureDesc& desc, GpuPtr locatio
     info->setHazardTrackingMode(MTL::HazardTrackingModeUntracked);
     info->setUsage(bridge_texture_usage(desc.usage));
 
-    MTL::Texture* texture = nullptr;
+    id<MTL::Texture> texture = nullptr;
     if (location != 0) {
         // Specify location, use the mtlheap from the buffer
         auto memory = buffer_and_offset_from_ptr(d, location);
-        texture     = memory.buffer->heap->newTexture(info, memory.offset);
+        texture     = NS::TransferPtr(memory.buffer->heap->newTexture(info.get(), memory.offset));
     } else {
-        texture = d->m_device->newTexture(info);
-        d->m_residency_set->addAllocation(texture);
+        texture = NS::TransferPtr(d->m_device->newTexture(info.get()));
+        d->m_residency_set->addAllocation(texture.get());
         d->m_residency_set->commit();
     }
 
-    info->release();
     auto handle = d->m_texture_pool.emplace({
         .texture = texture,
         .format  = desc.format,
@@ -551,11 +540,11 @@ Handle<Texture> create_texture(Device d, const TextureDesc& desc, GpuPtr locatio
 }
 
 Handle<TextureHeap> create_texture_heap(Device d, const TextureHeapDesc& desc) {
-    auto view_pool_descriptor = MTL::ResourceViewPoolDescriptor::alloc()->init();
+    auto view_pool_descriptor = make_id<MTL::ResourceViewPoolDescriptor>();
     view_pool_descriptor->setResourceViewCount(desc.texture_count);
 
-    auto texture_view_pool = d->m_device->newTextureViewPool(view_pool_descriptor, nullptr);
-    view_pool_descriptor->release();
+    auto texture_view_pool
+        = NS::TransferPtr(d->m_device->newTextureViewPool(view_pool_descriptor.get(), nullptr));
 
     const auto handle = d->m_texture_heap_pool.emplace(TextureHeap{
         .pool           = texture_view_pool,
@@ -582,7 +571,7 @@ TextureView add_texture_view_to_heap(Device d, Handle<TextureHeap> h, const Text
     view_info->setSliceRange(NS::Range(desc.base_layer, desc.layer_count));
     view_info->setTextureType(tex.texture->textureType());
     const auto      index        = heap.bitset.set_leading_zero();
-    MTL::ResourceID texture_view = heap.pool->setTextureView(tex.texture, view_info, index);
+    MTL::ResourceID texture_view = heap.pool->setTextureView(tex.texture.get(), view_info, index);
     view_info->release();
 
     return texture_view._impl;
@@ -599,7 +588,7 @@ void remove_texture_view_from_heap(Device d, Handle<TextureHeap> h, TextureView 
 Sampler add_sampler_to_heap(Device d, Handle<TextureHeap> h, const SamplerDesc& sampler) {
     auto& heap = d->m_texture_heap_pool[h];
 
-    MTL::SamplerDescriptor* desc = MTL::SamplerDescriptor::alloc()->init();
+    id<MTL::SamplerDescriptor> desc = make_id<MTL::SamplerDescriptor>();
     desc->setNormalizedCoordinates(sampler.coord == SamplerCoords::Normalized);
     auto filter = bridge_minmag(sampler.filter);
     desc->setMagFilter(filter);
@@ -611,8 +600,8 @@ Sampler add_sampler_to_heap(Device d, Handle<TextureHeap> h, const SamplerDesc& 
     desc->setTAddressMode(addressing);
     desc->setMaxAnisotropy((uint32_t)sampler.max_anisotropy);
     desc->setSupportArgumentBuffers(true);
-    auto sampler_state = d->m_device->newSamplerState(desc);
-    desc->release();
+    auto sampler_state = NS::TransferPtr(d->m_device->newSamplerState(desc.get()));
+
 
     Sampler result = sampler_state->gpuResourceID()._impl;
     // Need to add to some list so we can free it easily. For now using a sorted list, could be a
@@ -637,45 +626,37 @@ void remove_sampler_from_heap(Device d, Handle<TextureHeap> h, Sampler s) {
                                                                        heap.sampler_lookup.end(),
                                                                        {.sampler = s});
     assert(it->sampler == s);
-    it->state->release();
     heap.sampler_lookup.erase(it, it + 1);
 }
 
-static NS::String* get_span_as_string(Span<const char> span) {
+static id<NS::String> get_span_as_string(Span<const char> span) {
     NS::String* source_view
         = NS::String::alloc()->init((void*)span.data(), span.size(), NS::UTF8StringEncoding, false);
     NS::String* copy = NS::String::alloc()->init(source_view);
     source_view->release();
-    return copy;
+    return NS::TransferPtr(copy);
 }
 
 // MARK: Pipelines
 Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource compute) {
-    NS::String* shader_source = get_span_as_string(compute.spirv.cast<const char>());
-    NS::String* entry_point   = get_span_as_string(compute.entry_point);
+    id<NS::String> shader_source = get_span_as_string(compute.spirv.cast<const char>());
+    id<NS::String> entry_point   = get_span_as_string(compute.entry_point);
 
     NS::Error* error = nullptr;
 
-    MTL4::LibraryDescriptor* lib_desc = MTL4::LibraryDescriptor::alloc()->init();
-    lib_desc->setSource(shader_source);
-    MTL::Library* lib = d->m_compiler->newLibrary(lib_desc, &error);
+    id<MTL4::LibraryDescriptor> lib_desc = make_id<MTL4::LibraryDescriptor>();
+    lib_desc->setSource(shader_source.get());
+    id<MTL::Library> lib = NS::TransferPtr(d->m_compiler->newLibrary(lib_desc.get(), &error));
 
-    auto desc = MTL4::ComputePipelineDescriptor::alloc()->init();
+    auto desc = make_id<MTL4::ComputePipelineDescriptor>();
 
-    auto func_desc = MTL4::LibraryFunctionDescriptor::alloc()->init();
-    func_desc->setLibrary(lib);
-    func_desc->setName(entry_point);
-    desc->setComputeFunctionDescriptor(func_desc);
+    auto func_desc = make_id<MTL4::LibraryFunctionDescriptor>();
+    func_desc->setLibrary(lib.get());
+    func_desc->setName(entry_point.get());
+    desc->setComputeFunctionDescriptor(func_desc.get());
 
-    MTL::ComputePipelineState* compute_pipeline
-        = d->m_compiler->newComputePipelineState(desc, d->m_options.get(), &error);
-
-    func_desc->release();
-    desc->release();
-    lib_desc->release();
-    lib->release();
-    entry_point->release();
-    shader_source->release();
+    id<MTL::ComputePipelineState> compute_pipeline = NS::TransferPtr(
+        d->m_compiler->newComputePipelineState(desc.get(), d->m_options.get(), &error));
 
     return d->m_pipeline_pool.emplace({
         .render_pipeline  = nullptr,
@@ -688,35 +669,35 @@ Handle<Pipeline> create_graphics_pipeline(Device            d,
                                           ShaderSource      fragment,
                                           const RasterDesc& desc) {
     // TODO: Error handling/propagation
-    NS::String* vert_source      = get_span_as_string(vertex.spirv.cast<const char>());
-    NS::String* vert_entry_point = get_span_as_string(vertex.entry_point);
-    NS::String* frag_source      = get_span_as_string(fragment.spirv.cast<const char>());
-    NS::String* frag_entry_point = get_span_as_string(fragment.entry_point);
-    NS::Error*  error            = nullptr;
+    id<NS::String> vert_source      = get_span_as_string(vertex.spirv.cast<const char>());
+    id<NS::String> vert_entry_point = get_span_as_string(vertex.entry_point);
+    id<NS::String> frag_source      = get_span_as_string(fragment.spirv.cast<const char>());
+    id<NS::String> frag_entry_point = get_span_as_string(fragment.entry_point);
+    NS::Error*     error            = nullptr;
 
-    MTL4::LibraryDescriptor* vert_lib_desc = MTL4::LibraryDescriptor::alloc()->init();
-    vert_lib_desc->setSource(vert_source);
-    MTL::Library* vert_lib = d->m_compiler->newLibrary(vert_lib_desc, &error);
+    id<MTL4::LibraryDescriptor> vert_lib_desc = make_id<MTL4::LibraryDescriptor>();
+    vert_lib_desc->setSource(vert_source.get());
+    id<MTL::Library> vert_lib
+        = NS::TransferPtr(d->m_compiler->newLibrary(vert_lib_desc.get(), &error));
     if (error != nullptr) { printf("%s\n", error->localizedDescription()->utf8String()); }
-    vert_lib_desc->release();
 
-    MTL4::LibraryDescriptor* frag_lib_desc = MTL4::LibraryDescriptor::alloc()->init();
-    frag_lib_desc->setSource(frag_source);
-    MTL::Library* frag_lib = d->m_compiler->newLibrary(frag_lib_desc, &error);
+    id<MTL4::LibraryDescriptor> frag_lib_desc = make_id<MTL4::LibraryDescriptor>();
+    frag_lib_desc->setSource(frag_source.get());
+    id<MTL::Library> frag_lib
+        = NS::TransferPtr(d->m_compiler->newLibrary(frag_lib_desc.get(), &error));
     if (error) { printf("%s\n", error->localizedDescription()->utf8String()); }
-    frag_lib_desc->release();
 
-    auto vert_func_desc = MTL4::LibraryFunctionDescriptor::alloc()->init();
-    vert_func_desc->setLibrary(vert_lib);
-    vert_func_desc->setName(vert_entry_point);
+    auto vert_func_desc = make_id<MTL4::LibraryFunctionDescriptor>();
+    vert_func_desc->setLibrary(vert_lib.get());
+    vert_func_desc->setName(vert_entry_point.get());
 
-    auto frag_func_desc = MTL4::LibraryFunctionDescriptor::alloc()->init();
-    frag_func_desc->setLibrary(frag_lib);
-    frag_func_desc->setName(frag_entry_point);
+    auto frag_func_desc = make_id<MTL4::LibraryFunctionDescriptor>();
+    frag_func_desc->setLibrary(frag_lib.get());
+    frag_func_desc->setName(frag_entry_point.get());
 
-    auto pipeline_desc = MTL4::RenderPipelineDescriptor::alloc()->init();
-    pipeline_desc->setVertexFunctionDescriptor(vert_func_desc);
-    pipeline_desc->setFragmentFunctionDescriptor(frag_func_desc);
+    auto pipeline_desc = make_id<MTL4::RenderPipelineDescriptor>();
+    pipeline_desc->setVertexFunctionDescriptor(vert_func_desc.get());
+    pipeline_desc->setFragmentFunctionDescriptor(frag_func_desc.get());
     pipeline_desc->setInputPrimitiveTopology(bridge(desc.topology));
     pipeline_desc->setAlphaToCoverageState(desc.alpha_to_coverage
                                                ? MTL4::AlphaToCoverageStateEnabled
@@ -745,19 +726,8 @@ Handle<Pipeline> create_graphics_pipeline(Device            d,
         attachment->setDestinationAlphaBlendFactor(bridge(state.dst_alpha_factor));
     }
 
-    MTL::RenderPipelineState* render_pipeline
-        = d->m_compiler->newRenderPipelineState(pipeline_desc, d->m_options.get(), &error);
-
-    pipeline_desc->release();
-    frag_func_desc->release();
-    vert_func_desc->release();
-    frag_lib->release();
-    vert_lib->release();
-    frag_entry_point->release();
-    frag_source->release();
-    vert_entry_point->release();
-    vert_source->release();
-
+    id<MTL::RenderPipelineState> render_pipeline = NS::TransferPtr(
+        d->m_compiler->newRenderPipelineState(pipeline_desc.get(), d->m_options.get(), &error));
 
     return d->m_pipeline_pool.emplace({
         .render_pipeline  = render_pipeline,
@@ -773,28 +743,28 @@ void free(Device d, Handle<Pipeline> pipeline) {
 // MARK: State Objects
 
 Handle<DepthStencilState> create_depth_stencil_state(Device d, const DepthStencilDesc& desc) {
-    auto info = MTL::DepthStencilDescriptor::alloc()->init();
+    auto info = make_id<MTL::DepthStencilDescriptor>();
     info->setDepthCompareFunction(bridge(desc.depth_test));
     info->setDepthWriteEnabled((desc.depth_mode & DepthFlags::Write) == DepthFlags::Write);
 
-    auto backface_stencil = MTL::StencilDescriptor::alloc()->init();
+    auto backface_stencil = make_id<MTL::StencilDescriptor>();
     backface_stencil->setStencilFailureOperation(bridge(desc.stencil_back.fail_op));
     backface_stencil->setDepthFailureOperation(bridge(desc.stencil_back.depth_fail_op));
     backface_stencil->setDepthStencilPassOperation(bridge(desc.stencil_back.pass_op));
     backface_stencil->setStencilCompareFunction(bridge(desc.stencil_back.test));
     backface_stencil->setReadMask(desc.stencil_read_mask);
     backface_stencil->setWriteMask(desc.stencil_write_mask);
-    info->setBackFaceStencil(backface_stencil);
+    info->setBackFaceStencil(backface_stencil.get());
 
-    auto frontface_stencil = MTL::StencilDescriptor::alloc()->init();
+    auto frontface_stencil = make_id<MTL::StencilDescriptor>();
     frontface_stencil->setStencilFailureOperation(bridge(desc.stencil_front.fail_op));
     frontface_stencil->setDepthFailureOperation(bridge(desc.stencil_front.depth_fail_op));
     frontface_stencil->setDepthStencilPassOperation(bridge(desc.stencil_front.pass_op));
     frontface_stencil->setStencilCompareFunction(bridge(desc.stencil_front.test));
     frontface_stencil->setReadMask(desc.stencil_read_mask);
     frontface_stencil->setWriteMask(desc.stencil_write_mask);
-    info->setFrontFaceStencil(frontface_stencil);
-    auto state = d->m_device->newDepthStencilState(info);
+    info->setFrontFaceStencil(frontface_stencil.get());
+    auto state = NS::TransferPtr(d->m_device->newDepthStencilState(info.get()));
     return d->m_depth_stencil_state_pool.emplace({
         .state = state,
     });
@@ -807,7 +777,7 @@ void free_depth_stencil_state(Device d, Handle<DepthStencilState> state) {
 // MARK: Semaphores
 
 Handle<Semaphore> create_semaphore(Device d, uint64_t initValue) {
-    auto event = d->m_device->newSharedEvent();
+    auto event = NS::TransferPtr(d->m_device->newSharedEvent());
     event->setSignaledValue(initValue);
     return d->m_semaphore_pool.emplace({
         .event = event,
@@ -846,22 +816,21 @@ static CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
         pool = &superpool.pools[CommandSuperpool::kPoolsPerGroup * idx
                                 + (frame_idx % CommandSuperpool::kPoolsPerGroup)];
 
-        if (pool->allocator == nullptr) {
-            auto argument_table_desc = MTL4::ArgumentTableDescriptor::alloc()->init();
+        if (!pool->allocator) {
+            auto argument_table_desc = make_id<MTL4::ArgumentTableDescriptor>();
             argument_table_desc->setMaxBufferBindCount(2);
             argument_table_desc->setInitializeBindings(false);
             argument_table_desc->setMaxSamplerStateBindCount(0);
             argument_table_desc->setMaxTextureBindCount(0);
             // Initialize the command pool here.
             *pool = CommandPool{
-                .allocator = queue->device->m_device->newCommandAllocator(),
-                .argument_table
-                = queue->device->m_device->newArgumentTable(argument_table_desc, nullptr),
+                .allocator      = NS::TransferPtr(queue->device->m_device->newCommandAllocator()),
+                .argument_table = NS::TransferPtr(
+                    queue->device->m_device->newArgumentTable(argument_table_desc.get(), nullptr)),
                 .command_buffers = SegmentArray<CommandBufferImpl>(queue->device->m_allocator),
                 .buffer_free_idx = 0,
                 .frame_idx       = 0,
             };
-            argument_table_desc->release();
         } else if (pool->frame_idx != frame_idx) {
             // Last time this was used was on a different frame, so reset the pool.
             reset_command_pool(pool);
@@ -893,7 +862,7 @@ static CommandBufferImpl* get_command_buffer(Queue q, CommandPool* pool) {
 
     if (pool->command_buffers.size() <= pool->buffer_free_idx) {
         pool->command_buffers.emplace_back(CommandBufferImpl{
-            .command_buffer = device->m_device->newCommandBuffer(),
+            .command_buffer = NS::TransferPtr(device->m_device->newCommandBuffer()),
             .argument_table = pool->argument_table,
             .queue          = q,
             .pool           = pool,
@@ -928,7 +897,7 @@ CommandBuffer queue_start_command_recording(Queue q) {
 
     CommandBuffer buffer = get_command_buffer(q, pool);
     if (buffer) {
-        buffer->command_buffer->beginCommandBuffer(pool->allocator);
+        buffer->command_buffer->beginCommandBuffer(pool->allocator.get());
         buffer->compute_encoder = nullptr;
         buffer->render_encoder  = nullptr;
         buffer->command_buffer->useResidencySet(d->m_residency_set.get());
@@ -946,22 +915,22 @@ void queue_submit(Queue                     q,
     for (auto s : wait_semaphores) {
         // NOTE: Metal doesn't support waiting for a specific stage, so this is a full pipeline
         // flush?
-        MTL::SharedEvent* event = d->m_semaphore_pool[s.semaphore].event;
-        q->command_queue->wait(event, s.value);
+        id<MTL::SharedEvent> event = d->m_semaphore_pool[s.semaphore].event;
+        q->command_queue->wait(event.get(), s.value);
     }
 
 
     Span<MTL4::CommandBuffer*> commands;
     for (auto cmd : command_buffers) {
-        MTL4::CommandBuffer* buf = cmd->command_buffer;
+        MTL4::CommandBuffer* buf = cmd->command_buffer.get();
         commands                 = concat(&arena, commands, buf);
     }
     q->command_queue->commit(commands.data(), commands.size());
 
     for (auto s : signal_semaphores) {
         // NOTE: Metal doesn't support signaling after a specific stage.
-        MTL::SharedEvent* event = d->m_semaphore_pool[s.semaphore].event;
-        q->command_queue->signalEvent(event, s.value);
+        id<MTL::SharedEvent> event = d->m_semaphore_pool[s.semaphore].event;
+        q->command_queue->signalEvent(event.get(), s.value);
     }
 }
 
@@ -988,17 +957,17 @@ void queue_process_events(Queue q) {
 // MARK: CommandBuffer
 
 static bool is_in_compute_pass(CommandBuffer cmd) {
-    return (cmd->compute_encoder != nullptr);
+    return (bool)cmd->compute_encoder;
 }
 
 static bool is_in_render_pass(CommandBuffer cmd) {
-    return (cmd->render_encoder != nullptr);
+    return (bool)cmd->render_encoder;
 }
 
-static MTL4::ComputeCommandEncoder* get_compute_encoder(CommandBuffer cmd) {
+static id<MTL4::ComputeCommandEncoder> get_compute_encoder(CommandBuffer cmd) {
     assert(!is_in_render_pass(cmd));
     if (!cmd->compute_encoder) {
-        cmd->compute_encoder = cmd->command_buffer->computeCommandEncoder();
+        cmd->compute_encoder = NS::RetainPtr(cmd->command_buffer->computeCommandEncoder());
     }
 
     return cmd->compute_encoder;
@@ -1043,7 +1012,7 @@ void cmd_copy_to_texture(CommandBuffer                  cmd,
         pixels_per_row * format_info.block_size_bytes,
         rows_per_image * format_info.block_size_bytes * pixels_per_row,
         MTL::Size::Make(info.image_extent.x, info.image_extent.y, info.image_extent.z),
-        t.texture,
+        t.texture.get(),
         info.base_layer,
         info.base_mip,
         MTL::Origin::Make(info.destination_image_offset.x,
@@ -1072,18 +1041,18 @@ void cmd_set_pipeline(CommandBuffer cmd, Handle<Pipeline> pipeline) {
     auto& p = cmd->device->m_pipeline_pool[pipeline];
     assert((is_in_render_pass(cmd) && p.render_pipeline) || p.compute_pipeline);
     if (is_in_render_pass(cmd)) {
-        cmd->render_encoder->setRenderPipelineState(p.render_pipeline);
+        cmd->render_encoder->setRenderPipelineState(p.render_pipeline.get());
         // TODO: Cull mode
     } else {
         auto compute_encoder = get_compute_encoder(cmd);
-        compute_encoder->setComputePipelineState(p.compute_pipeline);
+        compute_encoder->setComputePipelineState(p.compute_pipeline.get());
     }
 }
 
 void cmd_set_depth_stencil_state(CommandBuffer cmd, Handle<DepthStencilState> state) {
     assert(is_in_render_pass(cmd));
     auto& d = cmd->device->m_depth_stencil_state_pool[state];
-    cmd->render_encoder->setDepthStencilState(d.state);
+    cmd->render_encoder->setDepthStencilState(d.state.get());
 }
 
 void cmd_set_scissor_rect(CommandBuffer cmd, const Rect2D& rect) {
@@ -1105,8 +1074,8 @@ void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
     assert(!is_in_render_pass(cmd));
     if (is_in_compute_pass(cmd)) { end_compute_pass(cmd); }
 
-    auto                        d    = cmd->device;
-    MTL4::RenderPassDescriptor* pass = MTL4::RenderPassDescriptor::alloc()->init();
+    auto                           d    = cmd->device;
+    id<MTL4::RenderPassDescriptor> pass = make_id<MTL4::RenderPassDescriptor>();
 
     uint32_t attachment_idx   = 0;
     auto     pass_attachments = pass->colorAttachments();
@@ -1114,7 +1083,7 @@ void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
         MTL::RenderPassColorAttachmentDescriptor* attachment
             = MTL::RenderPassColorAttachmentDescriptor::alloc()->init();
         auto& tex = d->m_texture_pool[c.texture];
-        attachment->setTexture(tex.texture);
+        attachment->setTexture(tex.texture.get());
         attachment->setLoadAction(bridge(c.load_op));
         attachment->setStoreAction(bridge(c.store_op));
         attachment->setClearColor(
@@ -1127,14 +1096,14 @@ void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
         MTL::RenderPassDepthAttachmentDescriptor* depth_desc
             = MTL::RenderPassDepthAttachmentDescriptor::alloc()->init();
         auto& depth_tex = d->m_texture_pool[desc.depth_attachment.texture];
-        depth_desc->setTexture(depth_tex.texture);
+        depth_desc->setTexture(depth_tex.texture.get());
         depth_desc->setLoadAction(bridge(desc.depth_attachment.load_op));
         depth_desc->setStoreAction(bridge(desc.depth_attachment.store_op));
         depth_desc->setClearDepth(desc.depth_attachment.clear_color.r);
         pass->setDepthAttachment(depth_desc);
     }
 
-    cmd->render_encoder = cmd->command_buffer->renderCommandEncoder(pass);
+    cmd->render_encoder = NS::RetainPtr(cmd->command_buffer->renderCommandEncoder(pass.get()));
 
     cmd->render_encoder->setViewport(MTL::Viewport{
         .originX = 0,
@@ -1144,7 +1113,6 @@ void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
         .znear   = 0,
         .zfar    = 1,
     });
-    pass->release();
 }
 
 void cmd_end_render_pass(CommandBuffer cmd) {
@@ -1156,7 +1124,7 @@ void cmd_end_render_pass(CommandBuffer cmd) {
 static void set_graphics_ptrs(CommandBuffer cmd, GpuPtr vertexDataGpu, GpuPtr fragmentDataGpu) {
     cmd->argument_table->setAddress(vertexDataGpu, 0);
     cmd->argument_table->setAddress(fragmentDataGpu, 1);
-    cmd->render_encoder->setArgumentTable(cmd->argument_table,
+    cmd->render_encoder->setArgumentTable(cmd->argument_table.get(),
                                           MTL::RenderStageVertex | MTL::RenderStageFragment);
 }
 
