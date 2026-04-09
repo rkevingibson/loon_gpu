@@ -632,7 +632,11 @@ Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource compute) {
 
     id<MTL4::LibraryDescriptor> lib_desc = make_id<MTL4::LibraryDescriptor>();
     lib_desc->setSource(shader_source.get());
-    id<MTL::Library> lib = NS::TransferPtr(d->m_compiler->newLibrary(lib_desc.get(), &error));
+
+    auto options = make_id<MTL::CompileOptions>();
+
+    id<MTL::Library> lib
+        = NS::TransferPtr(d->m_device->newLibrary(shader_source.get(), options.get(), &error));
 
     auto desc = make_id<MTL4::ComputePipelineDescriptor>();
 
@@ -661,16 +665,16 @@ Handle<Pipeline> create_graphics_pipeline(Device            d,
     id<NS::String> frag_entry_point = get_span_as_string(fragment.entry_point);
     NS::Error*     error            = nullptr;
 
-    id<MTL4::LibraryDescriptor> vert_lib_desc = make_id<MTL4::LibraryDescriptor>();
-    vert_lib_desc->setSource(vert_source.get());
+    auto options = make_id<MTL::CompileOptions>();
+
     id<MTL::Library> vert_lib
-        = NS::TransferPtr(d->m_compiler->newLibrary(vert_lib_desc.get(), &error));
+        = NS::TransferPtr(d->m_device->newLibrary(vert_source.get(), options.get(), &error));
+
     if (error != nullptr) { printf("%s\n", error->localizedDescription()->utf8String()); }
 
-    id<MTL4::LibraryDescriptor> frag_lib_desc = make_id<MTL4::LibraryDescriptor>();
-    frag_lib_desc->setSource(frag_source.get());
     id<MTL::Library> frag_lib
-        = NS::TransferPtr(d->m_compiler->newLibrary(frag_lib_desc.get(), &error));
+        = NS::TransferPtr(d->m_device->newLibrary(frag_source.get(), options.get(), &error));
+
     if (error) { printf("%s\n", error->localizedDescription()->utf8String()); }
 
     auto vert_func_desc = make_id<MTL4::LibraryFunctionDescriptor>();
@@ -708,6 +712,8 @@ Handle<Pipeline> create_graphics_pipeline(Device            d,
 
         attachment->setAlphaBlendOperation(bridge(state.alpha_op));
         attachment->setRgbBlendOperation(bridge(state.color_op));
+        attachment->setSourceRGBBlendFactor(bridge(state.src_color_factor));
+        attachment->setDestinationRGBBlendFactor(bridge(state.dst_color_factor));
         attachment->setSourceAlphaBlendFactor(bridge(state.src_alpha_factor));
         attachment->setDestinationAlphaBlendFactor(bridge(state.dst_alpha_factor));
     }
