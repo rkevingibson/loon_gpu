@@ -337,8 +337,8 @@ void device_wait_for_idle(Device d) {
     // only waits until any currently submitted work is done.
     auto& q = d->m_queue;
     if (q.command_queue) {
-        q.command_queue->signalEvent(q.callback_event.get(), q.timeline_value);
-        q.callback_event->waitUntilSignaledValue(q.timeline_value++, UINT64_MAX);
+        q.command_queue->signalEvent(q.callback_event.get(), ++q.timeline_value);
+        q.callback_event->waitUntilSignaledValue(q.timeline_value, UINT64_MAX);
     }
 }
 
