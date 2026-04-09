@@ -323,7 +323,9 @@ void destroy_device(Device d) {
     d->m_buffer_pool.clear();
     tls_free(d->m_tls_key);
 
+    auto allocator = d->m_allocator;
     d->~DeviceImpl();
+    allocator.free({.ptr = d, .len = sizeof(DeviceImpl)});
 }
 
 Backend device_backend() {
@@ -1064,27 +1066,27 @@ void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
     uint32_t attachment_idx   = 0;
     auto     pass_attachments = pass->colorAttachments();
     for (const auto& c : desc.color_attachments) {
-        MTL::RenderPassColorAttachmentDescriptor* attachment
-            = MTL::RenderPassColorAttachmentDescriptor::alloc()->init();
+        id<MTL::RenderPassColorAttachmentDescriptor> attachment
+            = make_id<MTL::RenderPassColorAttachmentDescriptor>();
         auto& tex = d->m_texture_pool[c.texture];
         attachment->setTexture(tex.texture.get());
         attachment->setLoadAction(bridge(c.load_op));
         attachment->setStoreAction(bridge(c.store_op));
         attachment->setClearColor(
             MTL::ClearColor(c.clear_color.r, c.clear_color.g, c.clear_color.b, c.clear_color.a));
-        pass_attachments->setObject(attachment, attachment_idx);
+        pass_attachments->setObject(attachment.get(), attachment_idx);
         attachment_idx++;
     }
 
     if (desc.depth_attachment.texture) {
-        MTL::RenderPassDepthAttachmentDescriptor* depth_desc
-            = MTL::RenderPassDepthAttachmentDescriptor::alloc()->init();
+        id<MTL::RenderPassDepthAttachmentDescriptor> depth_desc
+            = make_id<MTL::RenderPassDepthAttachmentDescriptor>();
         auto& depth_tex = d->m_texture_pool[desc.depth_attachment.texture];
         depth_desc->setTexture(depth_tex.texture.get());
         depth_desc->setLoadAction(bridge(desc.depth_attachment.load_op));
         depth_desc->setStoreAction(bridge(desc.depth_attachment.store_op));
         depth_desc->setClearDepth(desc.depth_attachment.clear_color.r);
-        pass->setDepthAttachment(depth_desc);
+        pass->setDepthAttachment(depth_desc.get());
     }
 
     cmd->render_encoder = NS::RetainPtr(cmd->command_buffer->renderCommandEncoder(pass.get()));
