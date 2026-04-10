@@ -18,5 +18,6 @@ MTL::StoreAction            bridge(StoreOp op);
 MTL::SamplerMinMagFilter    bridge_minmag(SamplerFilter f);
 MTL::SamplerMipFilter       bridge_mip(SamplerFilter f);
 MTL::SamplerAddressMode     bridge(SamplerAddressing a);
+MTL::Stages                 bridge(StageFlags s);
 
 }  // namespace loon::gpu

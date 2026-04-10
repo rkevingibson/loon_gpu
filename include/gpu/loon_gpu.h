@@ -20,9 +20,14 @@
     }
 
 #define LOON_BITWISE_ASSIGNMENT_OP(name, op)                                                       \
-    inline constexpr name operator op##=(name lhs, name rhs) {                                     \
+    inline constexpr name operator op## = (name lhs, name rhs) {                                   \
         lhs = lhs op rhs;                                                                          \
         return lhs;                                                                                \
+    }
+
+#define LOON_BITWISE_BOOL_OP(name)                                                                 \
+    inline constexpr bool any(name x) {                                                            \
+        return static_cast<std::underlying_type_t<name>>(x) != 0;                                  \
     }
 
 #define LOON_DEFINE_BITWISE_OPS(name)                                                              \
@@ -31,8 +36,8 @@
     LOON_BITWISE_BINARY_OP(name, ^);                                                               \
     LOON_BITWISE_ASSIGNMENT_OP(name, |);                                                           \
     LOON_BITWISE_ASSIGNMENT_OP(name, &);                                                           \
-    LOON_BITWISE_ASSIGNMENT_OP(name, ^);
-
+    LOON_BITWISE_ASSIGNMENT_OP(name, ^);                                                           \
+    LOON_BITWISE_BOOL_OP(name);
 
 namespace loon::gpu {
 

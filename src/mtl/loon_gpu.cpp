@@ -1031,6 +1031,33 @@ void cmd_barrier(CommandBuffer                 cmd,
                  Span<const TextureTransition> image_transitions,
                  HazardFlags                   hazards) {
     auto d = cmd->device;
+    (void)image_transitions;  // Only thing we could maybe use image transitions for is waiting
+                              // for/signalling the drawable, but we're currently doing that when
+                              // getting the drawable and presenting.
+
+    assert(!is_in_render_pass(
+        cmd));  // To match vulkan behaviour, don't allow barriers in a render pass.
+    // If we're in a compute pass, can encode this
+
+    // TODO: Avoid creating a compute encoder if we're not in one, for more efficient barriers.
+    // TODO: Ensure visibility options are correct here.
+
+    if (before == StageFlags::None || after == StageFlags::None) {
+        // In vulkan this is a valid image transition, but it's meaningless here. Skip it.
+        return;
+    } else if (before == StageFlags::RasterColorOut || after == StageFlags::RasterColorOut) {
+        // TODO: Check correctness of this in render-to-texture cases.
+        // These barriers should be covered by waiting for drawables? uncertain here, maybe needed
+        // for deferred rendering but I think there's implicit render pass synchronization.
+        return;
+    }
+
+    // This isn't the optimal option, but for now this should work:
+    auto encoder = get_compute_encoder(cmd);
+
+    encoder->barrierAfterStages(bridge(before), bridge(after), MTL4::VisibilityOptionDevice);
+
+    end_compute_pass(cmd);
 }
 
 void cmd_set_pipeline(CommandBuffer cmd, Handle<Pipeline> pipeline) {
@@ -1179,14 +1206,14 @@ void cmd_draw_indexed_instanced_indirect(CommandBuffer cmd, const DrawIndexedInd
     assert(is_in_render_pass(cmd));
 
     set_graphics_ptrs(cmd, args.vertexDataGpu, args.fragmentDataGpu);
+    auto index_info = buffer_and_offset_from_ptr(cmd->device, args.indicesGpu);
 
     cmd->render_encoder->drawIndexedPrimitives(
         MTL::PrimitiveTypeTriangle,
         args.type == IndexType::UInt16 ? MTL::IndexTypeUInt16 : MTL::IndexTypeUInt32,
         args.indicesGpu,
-        1 << 30,  // TODO: Is this fine? Don't have access to the size otherwise without looking
-                  // up the allocation for this.
-        args.argsGpu);
+        index_info.buffer->buffer->length() - index_info.offset,
+                                               args.argsGpu);
 }
 
 void cmd_draw_indexed_instanced_indirect_multi(CommandBuffer                cmd,

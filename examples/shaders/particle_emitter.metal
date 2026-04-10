@@ -58,7 +58,7 @@ float3 sample_uniform_sphere(thread uint& rng_state)
 }
 
 struct ParticleSimOptions {
-    float3 spawn_pos;
+    packed_float3 spawn_pos;
     float  spawn_radius;
     float  lifetime;
     float  particle_size;
@@ -186,10 +186,10 @@ struct CameraData {
 
 struct DrawSimArgs {
     CameraData camera;
-    float3 camera_right_worldspace;
-    float3 camera_up_worldspace;
+    packed_float3 camera_right_worldspace;
+    packed_float3 camera_up_worldspace;
     constant Particle* particles;
-    constant uint* particle_ids;
+    device uint* particle_ids;
 };
 
 struct VertexStageOutput {

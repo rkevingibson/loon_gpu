@@ -3,7 +3,6 @@
 
 using namespace metal;
 
-#pragma 
 struct Vertex {
     packed_float2 pos;
     packed_float2 uv;

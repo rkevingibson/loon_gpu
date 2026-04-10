@@ -121,19 +121,23 @@ MTL::TextureType bridge(TextureType t) {
 }
 
 MTL::TextureUsage bridge_texture_usage(UsageFlags u) {
-    MTL::TextureUsage usages = 0;
-    if ((u & UsageFlags::Sampled) != UsageFlags::None) { usages |= MTL::TextureUsageShaderRead; }
-    if ((u & UsageFlags::Storage) != UsageFlags::None) {
-        usages |= MTL::TextureUsageShaderWrite | MTL::TextureUsageShaderRead
-                  | MTL::TextureUsageShaderAtomic;
-    }
-    if ((u & UsageFlags::ColorAttachment) != UsageFlags::None
-        || (u & UsageFlags::DepthStencilAttachment) != UsageFlags::None) {
-        usages |= MTL::TextureUsageRenderTarget;
-    }
+    static constexpr struct {
+        UsageFlags        in;
+        MTL::TextureUsage out;
+    } kMapping[] = {
+        {UsageFlags::Sampled, MTL::TextureUsageShaderRead},
+        {UsageFlags::Storage,
+         MTL::TextureUsageShaderWrite | MTL::TextureUsageShaderRead
+             | MTL::TextureUsageShaderAtomic},
+        {UsageFlags::ColorAttachment, MTL::TextureUsageRenderTarget},
+        {UsageFlags::DepthStencilAttachment, MTL::TextureUsageRenderTarget},
+    };
     // TODO: TransferSrc/Dst, do they need shader write/read?
     // TODO: PixelFormatView might be needed as a default?
-    return usages;
+
+    MTL::TextureUsage out = 0;
+    for (const auto& entry : kMapping) { out |= any(u & entry.in) ? entry.out : 0; }
+    return out;
 }
 
 MTL::PrimitiveTopologyClass bridge(Topology t) {
@@ -227,6 +231,22 @@ MTL::SamplerAddressMode bridge(SamplerAddressing a) {
         case SamplerAddressing::Repeat: return MTL::SamplerAddressModeRepeat;
         case SamplerAddressing::Mirrored: return MTL::SamplerAddressModeMirrorRepeat;
     }
+}
+
+MTL::Stages bridge(StageFlags s) {
+    static constexpr struct {
+        StageFlags  in;
+        MTL::Stages out;
+    } kStageMap[] = {
+        {StageFlags::Transfer, MTL::StageBlit},
+        {StageFlags::Compute, MTL::StageDispatch},
+        {StageFlags::RasterColorOut, MTL::StageFragment},
+        {StageFlags::PixelShader, MTL::StageFragment},
+        {StageFlags::VertexShader, MTL::StageVertex},
+    };
+    MTL::Stages out = 0;
+    for (const auto entry : kStageMap) { out |= any(s & entry.in) ? entry.out : 0; }
+    return out;
 }
 
 }  // namespace loon::gpu
