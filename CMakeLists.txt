@@ -54,6 +54,7 @@ target_sources(
     PRIVATE 
     src/mtl/loon_gpu.cpp
     src/mtl/gpu_to_mtl.cpp
+    src/mtl/metal_compute_metadata.cpp
 )
 target_link_libraries(loon_gpu PRIVATE metal-cpp)
 

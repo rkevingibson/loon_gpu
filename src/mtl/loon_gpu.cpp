@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "format_info.h"
+#include "metal_compute_metadata.h"
 #include "platform_utils.h"
 
 // NB: This include has to be before others, as it defines the implementation of the metal lib.
@@ -87,6 +88,7 @@ struct Pipeline {
     id<MTL::RenderPipelineState>  render_pipeline  = nullptr;
     id<MTL::ComputePipelineState> compute_pipeline = nullptr;
     Cull                          cull_mode;
+    ShaderMetadata                metadata;
 };
 
 struct DepthStencilState {
@@ -126,14 +128,17 @@ struct CommandBufferImpl {
     Device                          device;
     id<MTL4::ComputeCommandEncoder> compute_encoder = nullptr;
     id<MTL4::RenderCommandEncoder>  render_encoder  = nullptr;
+
+    MTL::Size required_threadgroup_size;  // Required threadgroup size of the currently bound
+                                          // compute pipeline.
 };
 
 struct CommandPool {
     id<MTL4::CommandAllocator>      allocator      = nullptr;
     id<MTL4::ArgumentTable>         argument_table = nullptr;
     SegmentArray<CommandBufferImpl> command_buffers;  // In theory
-    uint64_t                        buffer_free_idx = 0;
     uint64_t                        frame_idx       = 0;
+    uint32_t                        buffer_free_idx = 0;
 };
 
 struct CommandSuperpool {
@@ -628,18 +633,12 @@ Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource compute) {
     id<NS::String> shader_source = get_span_as_string(compute.spirv.cast<const char>());
     id<NS::String> entry_point   = get_span_as_string(compute.entry_point);
 
-    NS::Error* error = nullptr;
-
-    id<MTL4::LibraryDescriptor> lib_desc = make_id<MTL4::LibraryDescriptor>();
-    lib_desc->setSource(shader_source.get());
-
-    auto options = make_id<MTL::CompileOptions>();
-
+    NS::Error*       error   = nullptr;
+    auto             options = make_id<MTL::CompileOptions>();
     id<MTL::Library> lib
         = NS::TransferPtr(d->m_device->newLibrary(shader_source.get(), options.get(), &error));
 
-    auto desc = make_id<MTL4::ComputePipelineDescriptor>();
-
+    auto desc      = make_id<MTL4::ComputePipelineDescriptor>();
     auto func_desc = make_id<MTL4::LibraryFunctionDescriptor>();
     func_desc->setLibrary(lib.get());
     func_desc->setName(entry_point.get());
@@ -648,9 +647,14 @@ Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource compute) {
     id<MTL::ComputePipelineState> compute_pipeline = NS::TransferPtr(
         d->m_compiler->newComputePipelineState(desc.get(), d->m_options.get(), &error));
 
+    const auto metadata = parse_metadata(*get_thread_local_arena(d),
+                                         compute.spirv.cast<const char>(),
+                                         compute.entry_point);
+
     return d->m_pipeline_pool.emplace({
         .render_pipeline  = nullptr,
         .compute_pipeline = compute_pipeline,
+        .metadata         = metadata,
     });
 }
 
@@ -820,8 +824,8 @@ static CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
                 .argument_table = NS::TransferPtr(
                     queue->device->m_device->newArgumentTable(argument_table_desc.get(), nullptr)),
                 .command_buffers = SegmentArray<CommandBufferImpl>(queue->device->m_allocator),
-                .buffer_free_idx = 0,
                 .frame_idx       = 0,
+                .buffer_free_idx = 0,
             };
         } else if (pool->frame_idx != frame_idx) {
             // Last time this was used was on a different frame, so reset the pool.
@@ -1038,6 +1042,9 @@ void cmd_set_pipeline(CommandBuffer cmd, Handle<Pipeline> pipeline) {
     } else {
         auto compute_encoder = get_compute_encoder(cmd);
         compute_encoder->setComputePipelineState(p.compute_pipeline.get());
+        cmd->required_threadgroup_size = MTL::Size::Make(p.metadata.required_threadgroup_size.x,
+                                                         p.metadata.required_threadgroup_size.y,
+                                                         p.metadata.required_threadgroup_size.z);
     }
 }
 
@@ -1058,9 +1065,28 @@ void cmd_set_scissor_rect(CommandBuffer cmd, const Rect2D& rect) {
     });
 }
 
-void cmd_dispatch(CommandBuffer cmd, GpuPtr dataGpu, const Dimension3D& gridDimensions) {}
+static void set_compute_ptrs(CommandBuffer cmd, GpuPtr computeDataGpu) {
+    cmd->argument_table->setAddress(computeDataGpu, 0);
+    cmd->compute_encoder->setArgumentTable(cmd->argument_table.get());
+}
 
-void cmd_dispatch_indirect(CommandBuffer cmd, GpuPtr dataGpu, GpuPtr gridDimensionsGpu) {}
+void cmd_dispatch(CommandBuffer cmd, GpuPtr dataGpu, const Dimension3D& gridDimensions) {
+    assert(!is_in_render_pass(cmd));
+
+    auto encoder = get_compute_encoder(cmd);
+    set_compute_ptrs(cmd, dataGpu);
+    encoder->dispatchThreadgroups(
+        MTL::Size::Make(gridDimensions.x, gridDimensions.y, gridDimensions.z),
+        cmd->required_threadgroup_size);
+}
+
+void cmd_dispatch_indirect(CommandBuffer cmd, GpuPtr dataGpu, GpuPtr gridDimensionsGpu) {
+    assert(!is_in_render_pass(cmd));
+
+    auto encoder = get_compute_encoder(cmd);
+    set_compute_ptrs(cmd, dataGpu);
+    encoder->dispatchThreadgroups(gridDimensionsGpu, cmd->required_threadgroup_size);
+}
 
 void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
     assert(!is_in_render_pass(cmd));
