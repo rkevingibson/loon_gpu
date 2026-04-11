@@ -386,7 +386,6 @@ enum class Factor : uint8_t {
 enum class Topology : uint8_t {
     TriangleList,
     TriangleStrip,
-    TriangleFan,
 };
 
 enum class TextureType : uint8_t {

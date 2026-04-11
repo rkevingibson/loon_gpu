@@ -140,11 +140,10 @@ MTL::TextureUsage bridge_texture_usage(UsageFlags u) {
     return out;
 }
 
-MTL::PrimitiveTopologyClass bridge(Topology t) {
+MTL::PrimitiveTopologyClass bridge_topology_class(Topology t) {
     switch (t) {
         case Topology::TriangleList:
-        case Topology::TriangleStrip:
-        case Topology::TriangleFan: return MTL::PrimitiveTopologyClassTriangle;
+        case Topology::TriangleStrip: return MTL::PrimitiveTopologyClassTriangle;
     }
 }
 
@@ -247,6 +246,13 @@ MTL::Stages bridge(StageFlags s) {
     MTL::Stages out = 0;
     for (const auto entry : kStageMap) { out |= any(s & entry.in) ? entry.out : 0; }
     return out;
+}
+
+MTL::PrimitiveType bridge(Topology t) {
+    switch (t) {
+        case Topology::TriangleList: return MTL::PrimitiveTypeTriangle;
+        case Topology::TriangleStrip: return MTL::PrimitiveTypeTriangleStrip;
+    }
 }
 
 }  // namespace loon::gpu

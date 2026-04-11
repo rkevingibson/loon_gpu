@@ -88,6 +88,7 @@ struct Pipeline {
     id<MTL::RenderPipelineState>  render_pipeline  = nullptr;
     id<MTL::ComputePipelineState> compute_pipeline = nullptr;
     Cull                          cull_mode;
+    Topology                      topology;
     ShaderMetadata                metadata;
 };
 
@@ -129,6 +130,7 @@ struct CommandBufferImpl {
     id<MTL4::ComputeCommandEncoder> compute_encoder = nullptr;
     id<MTL4::RenderCommandEncoder>  render_encoder  = nullptr;
 
+    MTL::PrimitiveType current_topology;
     MTL::Size required_threadgroup_size;  // Required threadgroup size of the currently bound
                                           // compute pipeline.
 };
@@ -386,7 +388,6 @@ SurfaceTextureInfo get_current_texture(Device d) {
     d->m_surface.frame_idx++;
     id<MTL::Texture> tex = NS::RetainPtr(drawable->texture());
 
-    // TODO: Need to remove this when I present.
     Handle<Texture> handle       = d->m_texture_pool.emplace({
               .texture = tex,
     });
@@ -692,7 +693,7 @@ Handle<Pipeline> create_graphics_pipeline(Device            d,
     auto pipeline_desc = make_id<MTL4::RenderPipelineDescriptor>();
     pipeline_desc->setVertexFunctionDescriptor(vert_func_desc.get());
     pipeline_desc->setFragmentFunctionDescriptor(frag_func_desc.get());
-    pipeline_desc->setInputPrimitiveTopology(bridge(desc.topology));
+    pipeline_desc->setInputPrimitiveTopology(bridge_topology_class(desc.topology));
     pipeline_desc->setAlphaToCoverageState(desc.alpha_to_coverage
                                                ? MTL4::AlphaToCoverageStateEnabled
                                                : MTL4::AlphaToCoverageStateDisabled);
@@ -729,6 +730,7 @@ Handle<Pipeline> create_graphics_pipeline(Device            d,
         .render_pipeline  = render_pipeline,
         .compute_pipeline = nullptr,
         .cull_mode        = desc.cull,
+        .topology         = desc.topology,
     });
 }
 
@@ -1066,6 +1068,7 @@ void cmd_set_pipeline(CommandBuffer cmd, Handle<Pipeline> pipeline) {
     if (is_in_render_pass(cmd)) {
         cmd->render_encoder->setRenderPipelineState(p.render_pipeline.get());
         // TODO: Cull mode
+        cmd->current_topology = bridge(p.topology);
     } else {
         auto compute_encoder = get_compute_encoder(cmd);
         compute_encoder->setComputePipelineState(p.compute_pipeline.get());
@@ -1181,7 +1184,7 @@ void cmd_draw(CommandBuffer cmd,
     assert(is_in_render_pass(cmd));
 
     set_graphics_ptrs(cmd, vertexDataGpu, fragmentDataGpu);
-    cmd->render_encoder->drawPrimitives(MTL::PrimitiveTypeTriangle, 0, vertexCount, instanceCount);
+    cmd->render_encoder->drawPrimitives(cmd->current_topology, 0, vertexCount, instanceCount);
 }
 
 void cmd_draw_indexed_instanced(CommandBuffer cmd, const DrawIndexedInstancedInfo& args) {
@@ -1189,12 +1192,10 @@ void cmd_draw_indexed_instanced(CommandBuffer cmd, const DrawIndexedInstancedInf
 
     set_graphics_ptrs(cmd, args.vertexDataGpu, args.fragmentDataGpu);
 
-    // TODO: Topology comes from RasterDesc in the current bound pipeline.
-
     const uint32_t index_buffer_size
         = args.indexCount * (args.type == IndexType::UInt16 ? sizeof(uint16_t) : sizeof(uint32_t));
     cmd->render_encoder->drawIndexedPrimitives(
-        MTL::PrimitiveTypeTriangle,
+        cmd->current_topology,
         args.indexCount,
         args.type == IndexType::UInt16 ? MTL::IndexTypeUInt16 : MTL::IndexTypeUInt32,
         args.indicesGpu,
@@ -1209,11 +1210,11 @@ void cmd_draw_indexed_instanced_indirect(CommandBuffer cmd, const DrawIndexedInd
     auto index_info = buffer_and_offset_from_ptr(cmd->device, args.indicesGpu);
 
     cmd->render_encoder->drawIndexedPrimitives(
-        MTL::PrimitiveTypeTriangle,
+        cmd->current_topology,
         args.type == IndexType::UInt16 ? MTL::IndexTypeUInt16 : MTL::IndexTypeUInt32,
         args.indicesGpu,
         index_info.buffer->buffer->length() - index_info.offset,
-                                               args.argsGpu);
+        args.argsGpu);
 }
 
 void cmd_draw_indexed_instanced_indirect_multi(CommandBuffer                cmd,

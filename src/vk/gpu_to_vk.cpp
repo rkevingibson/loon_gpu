@@ -230,7 +230,6 @@ VkPrimitiveTopology bridge(Topology topo) {
     switch (topo) {
         case Topology::TriangleList: return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
         case Topology::TriangleStrip: return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
-        case Topology::TriangleFan: return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN;
         default: return VK_PRIMITIVE_TOPOLOGY_MAX_ENUM;
     }
 }
