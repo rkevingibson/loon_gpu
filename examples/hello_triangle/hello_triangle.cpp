@@ -19,7 +19,7 @@ using namespace loon;
 
 static Format select_surface_format(const loon::gpu::SurfaceCapabilities& surface_capabilities) {
     for (Format f : surface_capabilities.formats) {
-        if (f == loon::gpu::Format::RGBA8UnormSrgb) {
+        if (f == loon::gpu::Format::RGBA8UnormSrgb || f == loon::gpu::Format::BGRA8UnormSrgb) {
             // Choose 8 bit srgb if we have it
             return f;
         }
@@ -54,19 +54,19 @@ HelloTriangle::HelloTriangle(const WindowState& window_state) {
     m_swapchain_height = window_state.height;
 
     // Load shaders and create render pipeline
-    ShaderModule shader         = window_state.shader_loader->load_module("hello_triangle.slang");
-    const auto   vertex_spirv   = get_spirv(shader.get(), "vertexMain");
-    const auto   fragment_spirv = get_spirv(shader.get(), "fragmentMain");
+    ShaderModule shader         = window_state.shader_loader->load_module("hello_triangle");
+    const auto   vertex_spirv   = get_spirv(shader.get(), "vertex_main");
+    const auto   fragment_spirv = get_spirv(shader.get(), "fragment_main");
 
     m_render_pipeline = gpu::create_graphics_pipeline(
         m_device,
         {
             .spirv       = Span(vertex_spirv.data(), vertex_spirv.size()).as_bytes(),
-            .entry_point = "vertexMain"_sv,
+            .entry_point = "vertex_main"_sv,
         },
         {
             .spirv       = Span(fragment_spirv.data(), fragment_spirv.size()).as_bytes(),
-            .entry_point = "fragmentMain"_sv,
+            .entry_point = "fragment_main"_sv,
         },
         RasterDesc{.color_targets = {{.format = m_swapchain_format}}});
 
@@ -119,7 +119,8 @@ void HelloTriangle::Update(const WindowState& window) {
                                        .load_op      = loon::gpu::LoadOp::Clear,
                                        .store_op     = loon::gpu::StoreOp::Store,
                                        .clear_color  = Color(0, 0, 0, 0),
-                                   }, .render_area = {.width = m_swapchain_width, .height = m_swapchain_height},});
+                                   }, .render_area = {.width = m_swapchain_width, .height =
+                                   m_swapchain_height},});
 
     gpu::cmd_set_pipeline(cmd, m_render_pipeline);
     gpu::cmd_draw(cmd, 0, 0, 3, 1);
@@ -142,6 +143,4 @@ void HelloTriangle::Update(const WindowState& window) {
     if (status == SurfaceStatus::OutOfDate || status == SurfaceStatus::Suboptimal) {
         recreate_swapchain(window.width, window.height);
     }
-
-    gpu::queue_process_events(m_queue);
 }

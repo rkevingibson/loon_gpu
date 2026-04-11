@@ -29,3 +29,10 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(vma)
 
+### Metal-cpp
+
+if(APPLE)
+    add_library(metal-cpp INTERFACE)
+    target_include_directories(metal-cpp INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
+
+endif()

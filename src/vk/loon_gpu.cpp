@@ -1154,6 +1154,10 @@ void destroy_device(Device d) {
     allocator.free({.ptr = d, .len = sizeof(DeviceImpl)});
 }
 
+Backend device_backend() {
+    return Backend::Vulkan;
+}
+
 void device_wait_for_idle(Device d) {
     chk(d, d->m_api.vkDeviceWaitIdle(d->m_device));
 }
@@ -2696,8 +2700,8 @@ void cmd_copy_to_texture(CommandBuffer                  cmd,
     const auto& tex = impl->m_texture_pool[texture];
     const VkBufferImageCopy region{
         .bufferOffset      = src.offset,
-        .bufferRowLength   = info.buffer_image_size.x,
-        .bufferImageHeight = info.buffer_image_size.y,
+        .bufferRowLength   = info.source_row_pixels_stride,
+        .bufferImageHeight = info.source_plane_rows_stride,
         .imageSubresource = {
             .aspectMask = aspects_for_format(tex.format),
             .mipLevel = 0,
@@ -2705,7 +2709,7 @@ void cmd_copy_to_texture(CommandBuffer                  cmd,
             .layerCount = 1,
         },
         .imageOffset
-        = {.x = static_cast<int32_t>(info.image_offset.x), .y = static_cast<int32_t>(info.image_offset.y), .z = static_cast<int32_t>(info.image_offset.z),},
+        = {.x = static_cast<int32_t>(info.destination_image_offset.x), .y = static_cast<int32_t>(info.destination_image_offset.y), .z = static_cast<int32_t>(info.destination_image_offset.z),},
         .imageExtent = {.width = info.image_extent.x, .height = info.image_extent.y, .depth = info.image_extent.z,},
     };
 
@@ -2964,9 +2968,9 @@ void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
 
     VkViewport viewport{
         .x        = 0,
-        .y        = 0,
+        .y        = (float)desc.render_area.height,
         .width    = (float)desc.render_area.width,
-        .height   = (float)desc.render_area.height,
+        .height   = -(float)desc.render_area.height,
         .minDepth = 0,
         .maxDepth = 1.0,
     };

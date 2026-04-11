@@ -187,7 +187,7 @@ class Vector {
         // Move from pos, end to pos + 1, end+1
         ::new (end()) T(std::move(*(end() - 1)));
         for (auto it = end() - 1; it > pos; --it) { *it = std::move(*(it - 1)); }
-        *pos = value;
+        ::new (pos) T(value);
         m_count++;
         return pos;
     }

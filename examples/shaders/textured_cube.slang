@@ -36,7 +36,7 @@ struct Args {
 [[vk::push_constant]] uniform Args args;
 
 [shader("vertex")]
-VertexStageOutput vertexMain(uint32_t vertexIdx : SV_VertexID)
+VertexStageOutput vertex_main(uint32_t vertexIdx : SV_VertexID)
 {
     VertexStageOutput output; 
     const Mesh mesh = args.vert->mesh;
@@ -49,7 +49,7 @@ VertexStageOutput vertexMain(uint32_t vertexIdx : SV_VertexID)
 }
 
 [shader("fragment")]
-float4 fragmentMain(VertexStageOutput vertex) : SV_Target
+float4 fragment_main(VertexStageOutput vertex) : SV_Target
 {
     float4 out_color = args.frag->texture.Sample(args.frag->sampler, vertex.uv);
     return out_color;

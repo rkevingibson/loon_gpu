@@ -23,7 +23,7 @@ struct VertexStageOutput
 };
 
 [shader("vertex")]
-VertexStageOutput vertexMain(uniform InputData* args, uint32_t vertexIdx : SV_VertexID)
+VertexStageOutput vertex_main(uniform InputData* args, uint32_t vertexIdx : SV_VertexID)
 {
     VertexStageOutput output; 
     const Mesh mesh = args->mesh;
@@ -36,7 +36,7 @@ VertexStageOutput vertexMain(uniform InputData* args, uint32_t vertexIdx : SV_Ve
 }
 
 [shader("fragment")]
-float4 fragmentMain(VertexStageOutput coarse_vertex ) : SV_Target
+float4 fragment_main(VertexStageOutput coarse_vertex) : SV_Target
 {
     float4 out_color = float4(coarse_vertex.color, 1.0);
     return out_color;

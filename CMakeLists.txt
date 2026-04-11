@@ -8,6 +8,7 @@ option(LOON_GPU_BUILD_TESTS "Build tests" OFF)
 option(LOON_GPU_BUILD_DOCS "Build documentation" OFF)
 option(LOON_GPU_WERROR "Treat warnings as errors" OFF)
 option(LOON_GPU_INSTALL "Install library" ON)
+option(LOON_GPU_USE_KOSMICKRISP "Use the kosmickrisp vulkan driver on MacOS" OFF)
 
 set(CLANG_TIDY_CONFIG clang-tidy --config-file=${CMAKE_SOURCE_DIR}/.clang-tidy)
 
@@ -29,6 +30,7 @@ add_library(
     loon_gpu STATIC
     src/containers.cpp
     src/platform_utils.cpp
+    src/format_info.cpp
 )
 set(PUBLIC_HEADERS
     include/gpu/loon_gpu.h
@@ -45,6 +47,27 @@ target_include_directories(
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
 
+if (APPLE AND NOT LOON_GPU_USE_KOSMICKRISP)
+
+target_sources(
+    loon_gpu 
+    PRIVATE 
+    src/mtl/loon_gpu.cpp
+    src/mtl/gpu_to_mtl.cpp
+    src/mtl/metal_compute_metadata.cpp
+)
+target_link_libraries(loon_gpu PRIVATE metal-cpp)
+
+target_link_libraries(loon_gpu
+    PRIVATE
+    "-framework Foundation"
+    "-framework Metal"
+    "-framework QuartzCore"
+    "-framework CoreGraphics"
+    )
+
+set (TARGETS loon_gpu metal-cpp)
+else()
 set(SOURCES
     src/vk/loon_gpu.cpp
     src/vk/vma_usage.cpp
@@ -66,6 +89,7 @@ target_compile_definitions(
 )
 
 set (TARGETS loon_gpu volk VulkanMemoryAllocator)
+endif()
 
 if (LOON_GPU_WERROR)
     if (MSVC)

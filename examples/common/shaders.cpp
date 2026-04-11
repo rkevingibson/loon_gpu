@@ -1,5 +1,7 @@
 #include "shaders.h"
 
+#include <fstream>
+#include <iterator>
 #include <string>
 
 #include "slang-com-ptr.h"
@@ -10,97 +12,122 @@ using namespace slang;
 
 struct ShaderModuleImpl {
     Slang::ComPtr<IModule> module;
+    std::vector<uint8_t>   metal_source;
 };
 void ShaderModuleDeleter::operator()(ShaderModuleImpl* p) {
     delete p;
 };
 
-std::vector<uint32_t> get_spirv(ShaderModuleImpl* module, const char* entry_point_name) {
-    auto                       m = module->module;
-    Slang::ComPtr<IEntryPoint> entry_point{};
-    auto result = m->findEntryPointByName(entry_point_name, entry_point.writeRef());
+std::vector<uint8_t> get_spirv(ShaderModuleImpl* module, const char* entry_point_name) {
+    if (module->module) {
+        auto                       m = module->module;
+        Slang::ComPtr<IEntryPoint> entry_point{};
+        auto result = m->findEntryPointByName(entry_point_name, entry_point.writeRef());
 
-    if (SLANG_FAILED(result)) {
-        fprintf(stderr,
-                "Failed to get entry point %s in shader module: 0x%x 0x%x",
-                entry_point_name,
-                SLANG_GET_RESULT_FACILITY(result),
-                SLANG_GET_RESULT_CODE(result));
-        return {};
-    }
+        if (SLANG_FAILED(result)) {
+            fprintf(stderr,
+                    "Failed to get entry point %s in shader module: 0x%x 0x%x",
+                    entry_point_name,
+                    SLANG_GET_RESULT_FACILITY(result),
+                    SLANG_GET_RESULT_CODE(result));
+            return {};
+        }
 
-    Slang::ComPtr<ISlangBlob>     diagnostics{};
-    slang::IComponentType*        components[] = {m, entry_point};
-    Slang::ComPtr<IComponentType> program;
+        Slang::ComPtr<ISlangBlob>     diagnostics{};
+        slang::IComponentType*        components[] = {m, entry_point};
+        Slang::ComPtr<IComponentType> program;
 
-    result = m->getSession()->createCompositeComponentType(components,
-                                                           2,
-                                                           program.writeRef(),
-                                                           diagnostics.writeRef());
-    if (SLANG_FAILED(result)) {
-        fprintf(stderr,
-                "Failed to create composite component: 0x%x 0x%x\n",
-                SLANG_GET_RESULT_FACILITY(result),
-                SLANG_GET_RESULT_CODE(result));
-        fprintf(stderr, "Shader diagnostic: %s\n", (char*)diagnostics->getBufferPointer());
-        return {};
-    }
-    Slang::ComPtr<slang::IComponentType> component{};
-    result = program->link(component.writeRef(), diagnostics.writeRef());
-    if (SLANG_FAILED(result)) {
-        fprintf(stderr,
-                "Failed to link program: 0x%x 0x%x\n",
-                SLANG_GET_RESULT_FACILITY(result),
-                SLANG_GET_RESULT_CODE(result));
-        fprintf(stderr, "Shader diagnostic: %s\n", (char*)diagnostics->getBufferPointer());
-        return {};
-    }
-    Slang::ComPtr<ISlangBlob> code{};
-    result = component->getEntryPointCode(0, 0, code.writeRef(), diagnostics.writeRef());
-    if (SLANG_FAILED(result)) {
-        fprintf(stderr,
-                "Failed to retrieve entry point code: 0x%x 0x%x\n",
-                SLANG_GET_RESULT_FACILITY(result),
-                SLANG_GET_RESULT_CODE(result));
-        fprintf(stderr, "Shader diagnostic: %s\n", (char*)diagnostics->getBufferPointer());
-        return {};
-    }
+        result = m->getSession()->createCompositeComponentType(components,
+                                                               2,
+                                                               program.writeRef(),
+                                                               diagnostics.writeRef());
+        if (SLANG_FAILED(result)) {
+            fprintf(stderr,
+                    "Failed to create composite component: 0x%x 0x%x\n",
+                    SLANG_GET_RESULT_FACILITY(result),
+                    SLANG_GET_RESULT_CODE(result));
+            fprintf(stderr, "Shader diagnostic: %s\n", (char*)diagnostics->getBufferPointer());
+            return {};
+        }
+        Slang::ComPtr<slang::IComponentType> component{};
+        result = program->link(component.writeRef(), diagnostics.writeRef());
+        if (SLANG_FAILED(result)) {
+            fprintf(stderr,
+                    "Failed to link program: 0x%x 0x%x\n",
+                    SLANG_GET_RESULT_FACILITY(result),
+                    SLANG_GET_RESULT_CODE(result));
+            fprintf(stderr, "Shader diagnostic: %s\n", (char*)diagnostics->getBufferPointer());
+            return {};
+        }
+        Slang::ComPtr<ISlangBlob> code{};
+        result = component->getEntryPointCode(0, 0, code.writeRef(), diagnostics.writeRef());
+        if (SLANG_FAILED(result)) {
+            fprintf(stderr,
+                    "Failed to retrieve entry point code: 0x%x 0x%x\n",
+                    SLANG_GET_RESULT_FACILITY(result),
+                    SLANG_GET_RESULT_CODE(result));
+            fprintf(stderr, "Shader diagnostic: %s\n", (char*)diagnostics->getBufferPointer());
+            return {};
+        }
 
-    const uint32_t* begin = reinterpret_cast<const uint32_t*>(code->getBufferPointer());
-    const size_t    size  = code->getBufferSize() / sizeof(uint32_t);
-    return std::vector<uint32_t>(begin, begin + size);
+        const uint8_t* begin = reinterpret_cast<const uint8_t*>(code->getBufferPointer());
+        const size_t   size  = code->getBufferSize();
+        return std::vector<uint8_t>(begin, begin + size);
+    } else {
+        return module->metal_source;
+    }
+}
+
+std::vector<uint8_t> read_file_into_vec(const std::string& filepath) {
+    std::ifstream                  fs(filepath);
+    std::istreambuf_iterator<char> it(fs);
+    std::vector<uint8_t>           result(it, std::istreambuf_iterator<char>());
+    return result;
 }
 
 class ShaderLoader::Impl {
    public:
-    Impl(std::string_view search_path) : m_search_path(search_path) {
-        SlangGlobalSessionDesc desc = {};
-        createGlobalSession(&desc, m_global_session.writeRef());
-
-        reset_cache();
+    Impl(std::string_view search_path, bool use_metal) :
+        m_search_path(search_path), m_use_metal(use_metal) {
+        if (!use_metal) {
+            SlangGlobalSessionDesc desc = {};
+            createGlobalSession(&desc, m_global_session.writeRef());
+            reset_cache();
+        }
     }
 
     ShaderModule load_module(std::string_view module_name) {
-        std::string          name = std::string(module_name);
-        Slang::ComPtr<IBlob> diagnostics;
-        auto                 module
-            = Slang::ComPtr<IModule>(m_session->loadModule(name.c_str(), diagnostics.writeRef()));
-        if (diagnostics) {
-            fprintf(stderr, "Shader diagnostic: %s", (char*)diagnostics->getBufferPointer());
-        }
-        return ShaderModule(new ShaderModuleImpl{.module = module});
+        if (m_use_metal) {
+            std::string name = m_search_path + "/" + std::string(module_name) + ".metal";
 
-        return nullptr;
+            return ShaderModule(new ShaderModuleImpl{
+                .module       = nullptr,
+                .metal_source = read_file_into_vec(name),
+            });
+        } else {
+            std::string          name = std::string(module_name);
+            Slang::ComPtr<IBlob> diagnostics;
+            auto                 module = Slang::ComPtr<IModule>(
+                m_session->loadModule(name.c_str(), diagnostics.writeRef()));
+            if (diagnostics) {
+                fprintf(stderr, "Shader diagnostic: %s", (char*)diagnostics->getBufferPointer());
+            }
+            return ShaderModule(new ShaderModuleImpl{.module = module});
+        }
     }
 
     void reset_cache() {
+        if (m_use_metal) return;
         SessionDesc session_desc{};
         TargetDesc  target_description{};
         target_description.structureSize = sizeof(TargetDesc);
-        // target_description.format        = SLANG_METAL;
-        target_description.format  = SLANG_SPIRV;
-        target_description.profile = m_global_session->findProfile("spirv_1_6");
-        target_description.flags   = 0;
+        if (m_use_metal) {
+            target_description.format = SLANG_METAL;
+        } else {
+            target_description.format  = SLANG_SPIRV;
+            target_description.profile = m_global_session->findProfile("spirv_1_6");
+        }
+        target_description.flags = 0;
 
         CompilerOptionEntry options[]
             = {{
@@ -150,10 +177,11 @@ class ShaderLoader::Impl {
     Slang::ComPtr<IGlobalSession> m_global_session;
     Slang::ComPtr<ISession>       m_session;
     std::string                   m_search_path;
+    bool                          m_use_metal;
 };
 
-ShaderLoader::ShaderLoader(std::string_view search_path) {
-    m_impl = std::make_unique<Impl>(search_path);
+ShaderLoader::ShaderLoader(std::string_view search_path, bool use_metal) {
+    m_impl = std::make_unique<Impl>(search_path, use_metal);
 }
 
 ShaderLoader::~ShaderLoader() = default;

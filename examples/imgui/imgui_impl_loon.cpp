@@ -163,8 +163,6 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
             fb->buffer,
             backend_tex->texture,
             gpu::BufferToTextureCopyInfo{
-                .buffer_image_size
-                = {static_cast<uint32_t>(tex->Width), static_cast<uint32_t>(tex->Height)},
                 .image_extent
                 = {static_cast<uint32_t>(tex->Width), static_cast<uint32_t>(tex->Height), 1},
             });
@@ -199,7 +197,7 @@ static bool CreateDeviceObjects() {
 
     // Create pipelines
     using namespace gpu;
-    ShaderModule shader         = bd->shader_loader->load_module("imgui.slang");
+    ShaderModule shader         = bd->shader_loader->load_module("imgui");
     const auto   vertex_spirv   = get_spirv(shader.get(), "vertex_main");
     const auto   fragment_spirv = get_spirv(shader.get(), "fragment_main");
     bd->pipelineState = gpu::create_graphics_pipeline(bd->device,
@@ -332,7 +330,6 @@ void NewFrame() {
 struct alignas(64) VertexInput {
     ImVec2      scale;
     ImVec2      translate;
-    ImVec2      padding;
     gpu::GpuPtr vertex_buffer;
 };
 
@@ -427,10 +424,10 @@ void Render(gpu::CommandBuffer cmd) {
 
     ImVec2 scale;
     scale[0] = 2.0f / draw_data->DisplaySize.x;
-    scale[1] = 2.0f / draw_data->DisplaySize.y;
+    scale[1] = -2.0f / draw_data->DisplaySize.y;
     ImVec2 translate;
     translate[0] = -1.0f - draw_data->DisplayPos.x * scale[0];
-    translate[1] = -1.0f - draw_data->DisplayPos.y * scale[1];
+    translate[1] = 1.0f - draw_data->DisplayPos.y * scale[1];
 
     ImVec2 clip_off   = draw_data->DisplayPos;
     ImVec2 clip_scale = draw_data->FramebufferScale;
@@ -471,7 +468,6 @@ void Render(gpu::CommandBuffer cmd) {
                 *draw_args = DrawArgs{.vert{
                                   .scale         = scale,
                                   .translate     = translate,
-                                  .padding       = {0, 0},
                                   .vertex_buffer = vertex_buf,
                               },
                               .frag = {

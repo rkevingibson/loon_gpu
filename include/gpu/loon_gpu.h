@@ -25,14 +25,19 @@
         return lhs;                                                                                \
     }
 
+#define LOON_BITWISE_BOOL_OP(name)                                                                 \
+    inline constexpr bool any(name x) {                                                            \
+        return static_cast<std::underlying_type_t<name>>(x) != 0;                                  \
+    }
+
 #define LOON_DEFINE_BITWISE_OPS(name)                                                              \
     LOON_BITWISE_BINARY_OP(name, |);                                                               \
     LOON_BITWISE_BINARY_OP(name, &);                                                               \
     LOON_BITWISE_BINARY_OP(name, ^);                                                               \
     LOON_BITWISE_ASSIGNMENT_OP(name, |);                                                           \
     LOON_BITWISE_ASSIGNMENT_OP(name, &);                                                           \
-    LOON_BITWISE_ASSIGNMENT_OP(name, ^);
-
+    LOON_BITWISE_ASSIGNMENT_OP(name, ^);                                                           \
+    LOON_BITWISE_BOOL_OP(name);
 
 namespace loon::gpu {
 
@@ -287,6 +292,15 @@ enum class GpuPreference : uint8_t {
 };
 
 /**
+ * @brief
+ *
+ */
+enum class Backend {
+    Vulkan,
+    Metal,
+};
+
+/**
  * @brief Type of memory to allocate.
  *
  */
@@ -372,7 +386,6 @@ enum class Factor : uint8_t {
 enum class Topology : uint8_t {
     TriangleList,
     TriangleStrip,
-    TriangleFan,
 };
 
 enum class TextureType : uint8_t {
@@ -647,7 +660,7 @@ struct SamplerDesc {
     SamplerCoords     coord          = SamplerCoords::Normalized;
     SamplerFilter     filter         = SamplerFilter::Nearest;
     SamplerAddressing address        = SamplerAddressing::ClampToEdge;
-    float             max_anisotropy = 0.0f;
+    float             max_anisotropy = 1.0f;
 };
 
 /**
@@ -794,9 +807,17 @@ struct TextureTransition {
 };
 
 struct BufferToTextureCopyInfo {
-    Dimension2D buffer_image_size;
-    Dimension3D image_offset{0, 0, 0};
     Dimension3D image_extent;
+    uint32_t    source_row_pixels_stride
+        = 0;  ///< Number of pixels between subsequent rows of data in the source buffer. If 0,
+              ///< treated as equal to image_extent.x. Otherwise, should be >= image_extent.x
+    uint32_t source_plane_rows_stride
+        = 0;  ///< Number of rows in a plane of image in the source buffer. If 0, treated as equal
+              ///< to image_extent.y. Otherwise, should be >= image_extent.y.
+    Dimension3D destination_image_offset{0, 0, 0};
+
+    uint8_t base_mip   = 0;
+    uint8_t base_layer = 0;
 };
 
 struct DrawIndexedInstancedInfo {
@@ -850,6 +871,13 @@ Device create_device(const DeviceDesc&);
  * Note: this will flush the gpu, and destroy any created resources.
  */
 void destroy_device(Device d);
+
+/**
+ * @brief Get the current backend for the device.
+ * Currently this is statically determined, but in the future we may support selection at device
+ * creation.
+ */
+Backend device_backend();
 
 /**
  * @brief Block until any pending work on the GPU is completed.
