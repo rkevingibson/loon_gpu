@@ -82,6 +82,11 @@ target_sources(
 
 target_link_libraries(loon_gpu PRIVATE volk VulkanMemoryAllocator)
 
+if(LINUX)
+    find_package(X11 REQUIRED)
+    target_link_libraries(loon_gpu PRIVATE ${X11_LIBRARIES})
+endif()
+
 # We use device-specific loader, can define this to avoid accidentally accessing an unloaded function
 target_compile_definitions(
     loon_gpu

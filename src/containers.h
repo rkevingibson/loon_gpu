@@ -121,7 +121,6 @@ class Vector {
    public:
     Vector() = default;
     Vector(Allocator allocator, uint32_t initial_capacity = 0);
-    Vector(Allocator allocator, const T* buff, uint32_t count);
     Vector(Allocator allocator, const T& value, uint32_t count);
     Vector(Vector&& rhs) :
         m_allocator(rhs.m_allocator),
@@ -390,14 +389,6 @@ template <class T>
 Vector<T>::Vector(Allocator allocator, uint32_t initial_capacity) : m_allocator(allocator) {
     reserve(initial_capacity);
 };
-
-template <class T>
-Vector<T>::Vector(Allocator allocator, const T* buff, uint32_t count) : Vector(allocator, count) {
-    m_count = count;
-    for (auto first = buff, output = m_data, end = buff + count; first != end; ++first, ++output) {
-        ::new (output) T(*first);
-    }
-}
 
 template <class T>
 Vector<T>::Vector(Allocator allocator, const T& value, uint32_t count) : Vector(allocator, count) {

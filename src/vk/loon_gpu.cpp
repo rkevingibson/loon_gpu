@@ -12,6 +12,15 @@
 #include "volk.h"
 #include "vulkan/vulkan_core.h"
 
+// Workaround - on linux, Xlib declares these as global #defines, which breaks things because we use
+// them in scoped enums.
+#ifdef None
+#    undef None
+#endif
+#ifdef Success
+#    undef Success
+#endif
+
 namespace loon::gpu {
 template class Span<const char>;
 template class Span<uint8_t>;
@@ -498,7 +507,7 @@ static SurfaceCreationResult create_surface(VkInstance instance, const DeviceDes
             .dpy    = reinterpret_cast<Display*>(desc.native_instance_handle),
             .window = desc.native_window_handle,
         };
-        result = vkCreateXlibSurfaceKHR(m_instance, &surface_info, nullptr, &surface);
+        result = vkCreateXlibSurfaceKHR(instance, &surface_info, nullptr, &surface);
 #elif defined(VK_USE_PLATFORM_METAL_EXT)
         const VkMetalSurfaceCreateInfoEXT surface_info{
             .sType  = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT,
@@ -1317,8 +1326,8 @@ bool configure_surface(Device d, const SurfaceConfiguration& config) {
     // create the present semaphores.
     for (int i = 0; i < image_count; ++i) {
         VkImageView default_image_view = VK_NULL_HANDLE;
-        if ((config.usages & UsageFlags::ColorAttachment) != UsageFlags::None
-            || (config.usages & UsageFlags::DepthStencilAttachment) != UsageFlags::None) {
+        if (any(config.usages & UsageFlags::ColorAttachment)
+            || any(config.usages & UsageFlags::DepthStencilAttachment)) {
             const VkImageViewCreateInfo view_info {
                 .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
                 .pNext = nullptr,
@@ -1649,8 +1658,8 @@ Handle<Texture> create_texture(Device d, const TextureDesc& desc, GpuPtr locatio
     }
     // Create a default image view for use as a render target attachment.
     VkImageView default_image_view = VK_NULL_HANDLE;
-    if ((desc.usage & UsageFlags::ColorAttachment) != UsageFlags::None
-        || (desc.usage & UsageFlags::DepthStencilAttachment) != UsageFlags::None) {
+    if (any(desc.usage & UsageFlags::ColorAttachment)
+        || any(desc.usage & UsageFlags::DepthStencilAttachment)) {
         const VkImageViewCreateInfo view_info {
                 .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
                 .pNext = nullptr,
@@ -2366,7 +2375,7 @@ bool chk(Device d, VkResult result) {
         case VK_ERROR_COMPRESSION_EXHAUSTED_EXT:
             log(d, LogLevel::Error, "VK_ERROR_COMPRESSION_EXHAUSTED_EXT");
             break;
-        case VK_INCOMPATIBLE_SHADER_BINARY_EXT:
+        case VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT:
             log(d, LogLevel::Error, "VK_INCOMPATIBLE_SHADER_BINARY_EXT");
             break;
         default: log(d, LogLevel::Error, "Unknown error"_sv); break;
@@ -2759,7 +2768,7 @@ void cmd_barrier(CommandBuffer                 cmd,
     // TODO: Use HazardFlags to reduce the stage/access_masks unless necessary.
     const auto src_stage = bridge_pipeline_stage(before);
     auto       dst_stage = bridge_pipeline_stage(after);
-    if ((hazards & HazardFlags::DrawArguments) != HazardFlags::None) {
+    if (any(hazards & HazardFlags::DrawArguments)) {
         dst_stage |= VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
     }
 
