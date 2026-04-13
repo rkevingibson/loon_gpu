@@ -1,17 +1,36 @@
 # Loon GPU
 
-A bindless wrapper for Vulkan, targetting modern GPUs.
+![Loon GPU Logo](./docs/loon_gpu.svg)
 
-The API design is inspired by Sebastian Aaltonen's blog post [No Graphics API](https://www.sebastianaaltonen.com/blog/no-graphics-api), adapted to the realities of what is possible in Vulkan today. Currently it targets a roughly Vulkan 1.3 feature set, with a couple of required features:
+A bindless wrapper for Vulkan and Metal, targetting modern GPUs.
+
+The API design is inspired by Sebastian Aaltonen's blog post [No Graphics API](https://www.sebastianaaltonen.com/blog/no-graphics-api), adapted to the realities of what is possible in Vulkan today. 
+
+
+Currently it targets a roughly Vulkan 1.3 feature set, with a couple of required features:
 - Dynamic Rendering
 - Buffer Device Addresses
 - Timeline Semaphores
 - Descriptor Indexing
 
-This should support most modern desktop GPUs, and I've also been able to run it on my M5 Macbook Pro via [KosmicKrisp](https://www.lunarg.com/a-vulkan-on-metal-mesa-3d-graphics-driver/) with no issues.
+The project is designed to be built with cmake, and should be self-contained (all dependencies are either vendored or downloaded by cmake via FetchContent). We also aim to use minimal STL headers to minimize compile times when possible.
 
+## Quick start
 
-The project is designed to be built with cmake, and should be self-contained (all dependencies are either vendored or downloaded by cmake via FetchContent). 
-Fast compile times are a goal, and so minimal use of C++ STL headers are used whenever possible - internally we use custom containers and the API uses a custom Span replacement.
-Note that this doesn't apply to the examples, which use things like std::vector for simplicity.
+If you're a Visual Studio user, you should be able to clone the repo and open the directory, and build/run from Visual Studio directly.
 
+On Windows, run from a 64-bit Visual Studio Command Prompt, and use MSVC, or have Clang available on the PATH.
+
+`git clone https://github.com/rkevingibson/loon_gpu.git`
+`cd loon_gpu`
+`mkdir build && cd build`
+`cmake .. --preset "Development Windows MSVC"`
+`cmake --build .`
+
+On Mac OS, the same instructions should work but with the "Development MacOS" preset.
+
+While the library should build for linux, it is not tested and currently there is no example framework for linux. I hope to add this in the future.
+
+## Running examples
+
+The build should produce a `loon_gpu_examples(.exe)` executable, which can be run from the command line. Use the `M/N` keys to cycle between different examples.
