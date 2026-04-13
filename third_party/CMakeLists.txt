@@ -1,5 +1,14 @@
 include(FetchContent)
 
+### Vulkan Headers
+
+FetchContent_Declare(
+    vulkan
+    GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers
+    GIT_TAG vulkan-sdk-1.4.341.0
+)
+FetchContent_MakeAvailable(vulkan)
+
 ### Volk
 
 FetchContent_Declare(

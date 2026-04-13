@@ -6,7 +6,6 @@ A bindless wrapper for Vulkan and Metal, targetting modern GPUs.
 
 The API design is inspired by Sebastian Aaltonen's blog post [No Graphics API](https://www.sebastianaaltonen.com/blog/no-graphics-api), adapted to the realities of what is possible in Vulkan today. 
 
-
 Currently it targets a roughly Vulkan 1.3 feature set, with a couple of required features:
 - Dynamic Rendering
 - Buffer Device Addresses
@@ -14,6 +13,14 @@ Currently it targets a roughly Vulkan 1.3 feature set, with a couple of required
 - Descriptor Indexing
 
 The project is designed to be built with cmake, and should be self-contained (all dependencies are either vendored or downloaded by cmake via FetchContent). We also aim to use minimal STL headers to minimize compile times when possible.
+
+## Prequisites
+
+The library should be entirely self-contained. The Vulkan SDK is recommended for development but not required - we pull down the necessary headers via cmake.
+
+Building with `LOON_GPU_BUILD_DOCS=YES` requires Doxygen installed on your system. On windows, `winget install doxygen` is enough to get it working. On MacOS, `brew install doxygen` should work.
+
+If you have the VulkanSDK installed on MacOS, you can use `LOON_GPU_USE_KOSMICKRISP=YES` to enable the Vulkan backend. 
 
 ## Quick start
 
@@ -34,3 +41,7 @@ While the library should build for linux, it is not tested and currently there i
 ## Running examples
 
 The build should produce a `loon_gpu_examples(.exe)` executable, which can be run from the command line. Use the `M/N` keys to cycle between different examples.
+
+## Documentation
+
+There is Doxygen-generated documentation built by default. I currently am not hosting the documentation anywhere, but it should appear in `<build dir>/docs/html/index.html`.
