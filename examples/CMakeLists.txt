@@ -99,6 +99,10 @@ elseif(APPLE)
         common/example_macos.mm 
         imgui/imgui_impl_osx.mm
         )
+elseif(LINUX)
+    list(APPEND EXAMPLE_SOURCES
+        common/example_linux.cpp
+    )
 endif()
 
 add_executable(
