@@ -70,6 +70,7 @@ jobs:
         -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
         -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
         -DLOON_GPU_BUILD_TESTS=YES
+        -DLOON_GPU_BUILD_EXAMPLES=YES
         -S ${{ github.workspace }}
 
     - name: Build
