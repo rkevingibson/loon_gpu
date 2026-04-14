@@ -57,7 +57,7 @@ void rwlock_unlock_write(rwlock* l);
 
 inline constexpr uint64_t count_leading_zeros(uint64_t x) {
     if (x == 0) { return 64; }
-#if __clang__
+#if __clang__ || __GNUC__
     return __builtin_clzll(x);
 #elif _MSC_VER
     unsigned long index;
@@ -70,7 +70,7 @@ inline constexpr uint64_t count_leading_zeros(uint64_t x) {
 
 inline constexpr uint64_t count_trailing_zeros(uint64_t x) {
     if (x == 0) { return 64; }
-#if __clang__
+#if __clang__ || __GNUC__
     return __builtin_ctzll(x);
 #elif _MSC_VER
     unsigned long index;

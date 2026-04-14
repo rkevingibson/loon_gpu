@@ -10,6 +10,8 @@
 extern "C" __declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void*,
                                                                             char*,
                                                                             unsigned long);
+#else
+#    include <unistd.h>
 #endif
 
 #include <memory>
@@ -33,6 +35,20 @@ static std::string get_executable_directory() {
 #elif _WIN32
     std::vector<char> path(256);
     uint32_t          bufsize = GetModuleFileNameA(nullptr, path.data(), (uint32_t)path.size()) + 1;
+#else
+    uint32_t          bufsize = 256;
+    std::vector<char> path(bufsize, '\0');
+    do {
+        const ssize_t result = readlink("/proc/self/exe", path.data(), bufsize);
+        if (result > 0 && static_cast<uint32_t>(result) == bufsize) {
+            // Truncation possible
+            bufsize *= 2;
+            path.resize(bufsize, '\0');
+        } else if (result > 0) {
+            bufsize = static_cast<uint32_t>(result) + 1;
+        }
+    } while (result == bufsize || result == -1);
+
 #endif
     auto parent = loon::filesystem::parent_path(loon::StringView(path.data(), bufsize - 1));
     return std::string(parent.begin(), parent.end());
