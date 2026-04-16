@@ -12,6 +12,7 @@
 #include <gpu/loon_gpu.h>
 
 #include <cassert>
+#include <cstring>
 
 #include "common/geometry.h"
 #include "common/shaders.h"
