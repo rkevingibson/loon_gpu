@@ -4,6 +4,7 @@
 
 #include <cassert>
 #include <chrono>
+#include <cstring>
 
 #include "common/geometry.h"
 #include "common/shaders.h"

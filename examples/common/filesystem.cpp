@@ -1,5 +1,7 @@
 #include "filesystem.h"
 
+#include <cstring>
+
 namespace loon::filesystem {
 
 [[nodiscard]] static bool is_alpha(char c) {
