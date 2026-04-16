@@ -255,4 +255,12 @@ MTL::PrimitiveType bridge(Topology t) {
     }
 }
 
+MTL::CullMode bridge(Cull c) {
+    switch (c) {
+        case Cull::Front: return MTL::CullModeFront;
+        case Cull::Back: return MTL::CullModeBack;
+        case Cull::None: return MTL::CullModeNone;
+    }
+}
+
 }  // namespace loon::gpu

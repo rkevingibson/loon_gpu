@@ -99,7 +99,6 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
             .entry_point = "fragment_main"_sv,
         },
         RasterDesc{
-            .cull          = Cull::None,
             .depth_format  = loon::gpu::Format::Depth32Float,
             .color_targets = ColorTarget{
                 .format = m_swapchain_format,

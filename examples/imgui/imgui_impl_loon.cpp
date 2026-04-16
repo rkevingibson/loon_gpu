@@ -61,6 +61,7 @@ static void SetupRenderState(ImDrawData*                   draw_data,
     // Bind shader
     gpu::cmd_set_depth_stencil_state(command_list, bd->depth_stencil_state);
     gpu::cmd_set_pipeline(command_list, bd->pipelineState);
+    gpu::cmd_set_cull_mode(command_list, gpu::Cull::None);
 }
 
 template <typename T>
@@ -211,7 +212,6 @@ static bool CreateDeviceObjects() {
           .entry_point = "fragment_main"_sv,
       },
       RasterDesc{
-          .cull = Cull::None,
           .depth_format = bd->depth_format,
           .color_targets = ColorTarget{
             .format = bd->color_format,

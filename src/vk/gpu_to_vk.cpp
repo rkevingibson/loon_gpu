@@ -419,4 +419,12 @@ VkIndexType bridge(IndexType t) {
     return VK_INDEX_TYPE_MAX_ENUM;
 }
 
+VkCullModeFlags bridge(Cull c) {
+    switch (c) {
+        case Cull::Front: return VK_CULL_MODE_FRONT_BIT;
+        case Cull::Back: return VK_CULL_MODE_BACK_BIT;
+        case Cull::None: return VK_CULL_MODE_NONE;
+    }
+}
+
 }  // namespace loon::gpu

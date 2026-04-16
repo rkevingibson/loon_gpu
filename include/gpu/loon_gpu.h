@@ -310,10 +310,14 @@ enum class Memory : uint8_t {
     Readback,  ///< CPU visible memory, optimized for reading from the CPU.
 };
 
+enum class FrontFace : uint8_t {
+    CCW = 0,  ///< Counter-clockwise
+    CW,       ///< Clockwise
+};
+
 enum class Cull : uint8_t {
-    CCW,  ///< Counter-clockwise
-    CW,   ///< Clockwise
-    All,
+    Front,
+    Back,
     None,
 };
 
@@ -718,7 +722,6 @@ struct ColorTarget {
 
 struct RasterDesc {
     Topology                topology          = Topology::TriangleList;
-    Cull                    cull              = Cull::None;
     bool                    alpha_to_coverage = false;
     uint8_t                 sample_count      = 1;
     Format                  depth_format      = Format::None;
@@ -1307,6 +1310,18 @@ void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc);
  * @param cmd
  */
 void cmd_end_render_pass(CommandBuffer cmd);
+
+/**
+ * @brief Set front face winding direction.
+ *
+ */
+void cmd_set_front_face(CommandBuffer cmd, FrontFace front);
+
+/**
+ * @brief Set backface culling mode
+ *
+ */
+void cmd_set_cull_mode(CommandBuffer cmd, Cull cull);
 
 /**
  * @brief

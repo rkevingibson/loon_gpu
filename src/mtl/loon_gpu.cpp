@@ -87,7 +87,6 @@ struct TextureHeap {
 struct Pipeline {
     id<MTL::RenderPipelineState>  render_pipeline  = nullptr;
     id<MTL::ComputePipelineState> compute_pipeline = nullptr;
-    Cull                          cull_mode;
     Topology                      topology;
     ShaderMetadata                metadata;
 };
@@ -729,7 +728,6 @@ Handle<Pipeline> create_graphics_pipeline(Device            d,
     return d->m_pipeline_pool.emplace({
         .render_pipeline  = render_pipeline,
         .compute_pipeline = nullptr,
-        .cull_mode        = desc.cull,
         .topology         = desc.topology,
     });
 }
@@ -1067,7 +1065,6 @@ void cmd_set_pipeline(CommandBuffer cmd, Handle<Pipeline> pipeline) {
     assert((is_in_render_pass(cmd) && p.render_pipeline) || p.compute_pipeline);
     if (is_in_render_pass(cmd)) {
         cmd->render_encoder->setRenderPipelineState(p.render_pipeline.get());
-        // TODO: Cull mode
         cmd->current_topology = bridge(p.topology);
     } else {
         auto compute_encoder = get_compute_encoder(cmd);
@@ -1167,6 +1164,17 @@ void cmd_end_render_pass(CommandBuffer cmd) {
     assert(is_in_render_pass(cmd));
     cmd->render_encoder->endEncoding();
     cmd->render_encoder = nullptr;
+}
+
+void cmd_set_front_face(CommandBuffer cmd, FrontFace front) {
+    assert(is_in_render_pass(cmd));
+    cmd->render_encoder->setFrontFacingWinding(
+        front == FrontFace::CCW ? MTL::WindingCounterClockwise : MTL::WindingClockwise);
+}
+
+void cmd_set_cull_mode(CommandBuffer cmd, Cull cull) {
+    assert(is_in_render_pass(cmd));
+    cmd->render_encoder->setCullMode(bridge(cull));
 }
 
 static void set_graphics_ptrs(CommandBuffer cmd, GpuPtr vertexDataGpu, GpuPtr fragmentDataGpu) {
