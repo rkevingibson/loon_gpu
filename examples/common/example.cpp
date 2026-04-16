@@ -38,8 +38,9 @@ static std::string get_executable_directory() {
 #else
     uint32_t          bufsize = 256;
     std::vector<char> path(bufsize, '\0');
+    ssize_t           result = 0;
     do {
-        const ssize_t result = readlink("/proc/self/exe", path.data(), bufsize);
+        result = readlink("/proc/self/exe", path.data(), bufsize);
         if (result > 0 && static_cast<uint32_t>(result) == bufsize) {
             // Truncation possible
             bufsize *= 2;
