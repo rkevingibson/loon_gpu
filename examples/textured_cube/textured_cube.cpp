@@ -113,7 +113,6 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
             .entry_point = "fragment_main"_sv,
         },
         RasterDesc{
-            .cull          = Cull::CW,
             .depth_format  = loon::gpu::Format::Depth32Float,
             .color_targets = {{.format = m_swapchain_format}},
         });
@@ -295,6 +294,9 @@ void TexturedCube::Update(const WindowState& window) {
                                    }, 
                                    .render_area = {.width = m_swapchain_width, .height = m_swapchain_height},
                                 });
+
+    gpu::cmd_set_front_face(cmd, FrontFace::CW);
+    gpu::cmd_set_cull_mode(cmd, Cull::Back);
     gpu::cmd_set_depth_stencil_state(cmd, m_depth_stencil_state);
     gpu::cmd_set_pipeline(cmd, m_render_pipeline);
     uint32_t args_offset = sizeof(ShaderArgs) * (m_frame_idx % 3);

@@ -2067,15 +2067,6 @@ Handle<Pipeline> create_graphics_pipeline(Device            d,
     };
 
     // Rasterization state:
-    VkCullModeFlags cull_mode  = VK_CULL_MODE_BACK_BIT;
-    VkFrontFace     front_face = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    switch (desc.cull) {
-        case Cull::CCW: front_face = VK_FRONT_FACE_COUNTER_CLOCKWISE; break;
-        case Cull::CW: front_face = VK_FRONT_FACE_CLOCKWISE; break;
-        case Cull::All: cull_mode = VK_CULL_MODE_FRONT_AND_BACK; break;
-        case Cull::None: cull_mode = VK_CULL_MODE_NONE; break;
-    }
-
     VkPipelineRasterizationStateCreateInfo rasterization_state{
         .sType                   = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
         .pNext                   = nullptr,
@@ -2083,8 +2074,8 @@ Handle<Pipeline> create_graphics_pipeline(Device            d,
         .depthClampEnable        = false,
         .rasterizerDiscardEnable = false,
         .polygonMode             = VK_POLYGON_MODE_FILL,
-        .cullMode                = cull_mode,
-        .frontFace               = front_face,
+        .cullMode                = VK_CULL_MODE_BACK_BIT,
+        .frontFace               = VK_FRONT_FACE_COUNTER_CLOCKWISE,
         .depthBiasEnable         = false,
         .depthBiasConstantFactor = 0,
         .depthBiasClamp          = 0,
@@ -2118,6 +2109,8 @@ Handle<Pipeline> create_graphics_pipeline(Device            d,
         VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT,
         VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT,
         VK_DYNAMIC_STATE_STENCIL_REFERENCE,
+        VK_DYNAMIC_STATE_CULL_MODE,
+        VK_DYNAMIC_STATE_FRONT_FACE,
     };
 
     VkPipelineViewportStateCreateInfo viewport_state{
@@ -2985,11 +2978,25 @@ void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
     };
     impl->m_api.vkCmdSetViewportWithCount(buf, 1, &viewport);
     impl->m_api.vkCmdSetScissorWithCount(buf, 1, &render_rect);
+    cmd_set_front_face(cmd, FrontFace::CCW);
+    cmd_set_cull_mode(cmd, Cull::None);
 }
 
 void cmd_end_render_pass(CommandBuffer cmd) {
     auto impl = cmd->device;
     impl->m_api.vkCmdEndRendering(cmd->buffer);
+}
+
+void cmd_set_front_face(CommandBuffer cmd, FrontFace front) {
+    auto impl = cmd->device;
+    impl->m_api.vkCmdSetFrontFace(
+        cmd->buffer,
+        front == FrontFace::CCW ? VK_FRONT_FACE_COUNTER_CLOCKWISE : VK_FRONT_FACE_CLOCKWISE);
+}
+
+void cmd_set_cull_mode(CommandBuffer cmd, Cull cull) {
+    auto impl = cmd->device;
+    impl->m_api.vkCmdSetCullMode(cmd->buffer, bridge(cull));
 }
 
 static void cmd_set_graphics_ptrs(CommandBuffer cmd, GpuPtr vertexDataGpu, GpuPtr fragmentDataGpu) {

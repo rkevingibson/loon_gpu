@@ -20,5 +20,6 @@ MTL::SamplerMipFilter       bridge_mip(SamplerFilter f);
 MTL::SamplerAddressMode     bridge(SamplerAddressing a);
 MTL::Stages                 bridge(StageFlags s);
 MTL::PrimitiveType          bridge(Topology t);
+MTL::CullMode               bridge(Cull c);
 
 }  // namespace loon::gpu

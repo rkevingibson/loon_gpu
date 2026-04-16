@@ -2,7 +2,7 @@
   "version": 3,
   "configurePresets": [
     {
-      "name": "Development-Base",
+      "name": "ninja-multiconfig-base",
       "hidden": true,
       "generator": "Ninja Multi-Config",
       "binaryDir": "${sourceDir}/build/",
@@ -10,22 +10,34 @@
         "FETCHCONTENT_BASE_DIR": "${sourceDir}/build/external",
         "CMAKE_OPTIMIZE_DEPENDENCIES": "YES",
         "CMAKE_CONFIGURATION_TYPES": "Debug;RelWithDebInfo",
-        "LOON_GPU_BUILD_EXAMPLES": "YES",
-        "LOON_GPU_BUILD_TESTS": "YES",
-        "LOON_GPU_BUILD_DOCS": "YES",
-        "LOON_GPU_WERROR": "YES",
-        "LOON_GPU_INSTALL": "YES",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/install"
       }
     },
     {
-      "name": "Development Windows Clang",
-      "displayName": "Development",
-      "inherits": [
-        "Development-Base"
-      ],
-      "hidden": false,
-      "description": "Sets Ninja generator, Clang compilers, x64 architecture, Multiple Configurations",
+      "name": "minimal-base",
+      "hidden": true,
+      "cacheVariables": {
+        "LOON_GPU_BUILD_EXAMPLES": "NO",
+        "LOON_GPU_BUILD_TESTS": "NO",
+        "LOON_GPU_BUILD_DOCS": "NO",
+        "LOON_GPU_WERROR": "YES",
+        "LOON_GPU_INSTALL": "YES"
+      }
+    },
+    {
+      "name": "development-base",
+      "hidden": true,
+      "cacheVariables": {
+        "LOON_GPU_BUILD_EXAMPLES": "YES",
+        "LOON_GPU_BUILD_TESTS": "YES",
+        "LOON_GPU_BUILD_DOCS": "YES",
+        "LOON_GPU_WERROR": "YES",
+        "LOON_GPU_INSTALL": "YES"
+      }
+    },
+    {
+      "name": "windows-clang-base",
+      "hidden": true,
       "condition": {
         "type": "inList",
         "string": "${hostSystemName}",
@@ -43,13 +55,8 @@
       }
     },
     {
-      "name": "Development Windows MSVC",
-      "displayName": "Development MSVC",
-      "inherits": [
-        "Development-Base"
-      ],
-      "hidden": false,
-      "description": "Sets Ninja generator, MSVC compilers, x64 architecture, Multiple Configurations",
+      "name": "windows-msvc-base",
+      "hidden": true,
       "condition": {
         "type": "inList",
         "string": "${hostSystemName}",
@@ -67,13 +74,8 @@
       }
     },
     {
-      "name": "Development MacOS",
-      "displayName": "Development",
-      "inherits": [
-        "Development-Base"
-      ],
-      "hidden": false,
-      "description": "Sets Ninja generator, Clang compilers, arm64 architecture, Multiple Configurations",
+      "name": "macos-clang-base",
+      "hidden": true,
       "condition": {
         "type": "inList",
         "string": "${hostSystemName}",
@@ -88,6 +90,89 @@
       "cacheVariables": {
         "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++"
+      }
+    },
+    {
+      "name": "Minimal Windows Clang",
+      "displayName": "Minimal",
+      "inherits": [
+        "ninja-multiconfig-base",
+        "minimal-base",
+        "windows-clang-base"
+      ],
+      "hidden": false,
+      "description": "Sets Ninja generator, Clang compilers, x64 architecture, Multiple Configurations"
+    },
+    {
+      "name": "Development Windows Clang",
+      "displayName": "Development",
+      "inherits": [
+        "ninja-multiconfig-base",
+        "development-base",
+        "windows-clang-base"
+      ],
+      "hidden": false,
+      "description": "Sets Ninja generator, Clang compilers, x64 architecture, Multiple Configurations"
+    },
+    {
+      "name": "Development Windows MSVC",
+      "displayName": "Development MSVC",
+      "inherits": [
+        "ninja-multiconfig-base",
+        "development-base",
+        "windows-msvc-base"
+      ],
+      "hidden": false,
+      "description": "Sets Ninja generator, MSVC compilers, x64 architecture, Multiple Configurations"
+    },
+    {
+      "name": "Minimal MacOS",
+      "displayName": "Minimal",
+      "inherits": [
+        "ninja-multiconfig-base",
+        "minimal-base",
+        "macos-clang-base"
+      ],
+      "hidden": false,
+      "description": "Sets Ninja generator, Clang compilers, arm64 architecture, Multiple Configurations"
+    },
+    {
+      "name": "Minimal MacOS (Vulkan)",
+      "displayName": "Minimal Vulkan",
+      "inherits": [
+        "ninja-multiconfig-base",
+        "minimal-base",
+        "macos-clang-base"
+      ],
+      "hidden": false,
+      "description": "Sets Ninja generator, Clang compilers, arm64 architecture, Multiple Configurations",
+      "cacheVariables": {
+        "LOON_GPU_USE_KOSMICKRISP": "YES"
+      }
+    },
+    {
+      "name": "Development MacOS",
+      "displayName": "Development",
+      "inherits": [
+        "ninja-multiconfig-base",
+        "development-base",
+        "macos-clang-base"
+      ],
+      "hidden": false,
+      "description": "Sets Ninja generator, Clang compilers, arm64 architecture, Multiple Configurations"
+    },
+    {
+      "name": "Development MacOS (Vulkan)",
+      "displayName": "Development Vulkan",
+      "inherits": [
+        "ninja-multiconfig-base",
+        "development-base",
+        "macos-clang-base"
+      ],
+      "hidden": false,
+      "description": "Sets Ninja generator, Clang compilers, arm64 architecture, Multiple Configurations",
+      "cacheVariables": {
+        "LOON_GPU_USE_KOSMICKRISP": "YES"
       }
     }
   ],
