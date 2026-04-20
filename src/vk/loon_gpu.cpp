@@ -31,6 +31,7 @@ template class Span<const PresentMode>;
 template class Span<const CommandBuffer>;
 template class Span<const SemaphoreInfo>;
 template class Span<const TextureTransition>;
+template class Span<const SpecializationConstant>;
 template class Function<void>;
 
 static constexpr uint32_t kBindingSlotSamplers      = 0;
@@ -1921,7 +1922,71 @@ void free(Device d, Handle<TextureHeap> heap) {
 
 // MARK: Pipelines
 
-Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource source) {
+static VkSpecializationInfo construct_specialization_info(
+    Span<const SpecializationConstant> constants,
+    Arena*                             arena) {
+    Span<uint8_t> data{};
+    const auto    as_byte_span
+        = []<class T>(const T& x) -> Span<const uint8_t> { return Span<const T>(x).as_bytes(); };
+
+    for (const auto& c : constants) {
+        switch (c.type) {
+            case SpecializationConstantType::UInt8:
+            case SpecializationConstantType::Int8:
+                data = concat(arena, data, as_byte_span(static_cast<uint8_t>(c.int_val)));
+                break;
+            case SpecializationConstantType::UInt16:
+            case SpecializationConstantType::Int16:
+                data = concat(arena, data, as_byte_span(static_cast<uint16_t>(c.int_val)));
+                break;
+            case SpecializationConstantType::UInt32:
+            case SpecializationConstantType::Int32:
+                data = concat(arena, data, as_byte_span(static_cast<uint32_t>(c.int_val)));
+                break;
+            case SpecializationConstantType::Boolean:
+                data = concat(arena, data, as_byte_span(c.bool_val ? VK_TRUE : VK_FALSE));
+                break;
+            case SpecializationConstantType::Float32:
+                data = concat(arena, data, as_byte_span(c.float_val));
+                break;
+        }
+    }
+
+    Span<VkSpecializationMapEntry> map_entries{};
+    uint32_t                       offset = 0;
+    for (const auto& c : constants) {
+        size_t size = 0;
+        switch (c.type) {
+            case SpecializationConstantType::UInt8:
+            case SpecializationConstantType::Int8: size = sizeof(uint8_t); break;
+            case SpecializationConstantType::UInt16:
+            case SpecializationConstantType::Int16: size = sizeof(uint16_t); break;
+            case SpecializationConstantType::UInt32:
+            case SpecializationConstantType::Int32:
+            case SpecializationConstantType::Boolean:
+            case SpecializationConstantType::Float32: size = sizeof(uint32_t); break;
+            case SpecializationConstantType::Float64: size = sizeof(uint64_t); break;
+        }
+        map_entries = concat(arena,
+                             map_entries,
+                             VkSpecializationMapEntry{
+                                 .constantID = c.constant_id,
+                                 .offset     = offset,
+                                 .size       = size,
+                             });
+    }
+
+    return VkSpecializationInfo{
+        .mapEntryCount = static_cast<uint32_t>(constants.size()),
+        .pMapEntries   = map_entries.data(),
+        .dataSize      = data.size(),
+        .pData         = data.data(),
+    };
+}
+
+Handle<Pipeline> create_compute_pipeline(Device                             d,
+                                         ShaderSource                       source,
+                                         Span<const SpecializationConstant> constants) {
     VkShaderModuleCreateInfo module_info{
         .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .pNext    = nullptr,
@@ -1932,6 +1997,10 @@ Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource source) {
 
     VkShaderModule module;
     chk(d, d->m_api.vkCreateShaderModule(d->m_device, &module_info, nullptr, &module));
+
+    Arena                      arena = *get_thread_local_arena(d);
+    const VkSpecializationInfo specialization_info
+        = construct_specialization_info(constants, &arena);
 
     VkComputePipelineCreateInfo info{
         .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
@@ -1944,7 +2013,7 @@ Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource source) {
             .stage = VK_SHADER_STAGE_COMPUTE_BIT,
             .module = module,
             .pName = source.entry_point.data(), // TODO: Need to ensure null-terminated, copy to local arena.
-            .pSpecializationInfo = nullptr,
+            .pSpecializationInfo = &specialization_info,
         }, 
         .layout = d->m_default_compute_layout, 
         .basePipelineHandle = VK_NULL_HANDLE,
@@ -1971,10 +2040,11 @@ Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource source) {
     return h;
 }
 
-Handle<Pipeline> create_graphics_pipeline(Device            d,
-                                          ShaderSource      vertex,
-                                          ShaderSource      fragment,
-                                          const RasterDesc& desc) {
+Handle<Pipeline> create_graphics_pipeline(Device                             d,
+                                          ShaderSource                       vertex,
+                                          ShaderSource                       fragment,
+                                          const RasterDesc&                  desc,
+                                          Span<const SpecializationConstant> constants) {
     VkShaderModuleCreateInfo vert_info{
         .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .pNext    = nullptr,
@@ -1995,6 +2065,10 @@ Handle<Pipeline> create_graphics_pipeline(Device            d,
     VkShaderModule frag_module;
     chk(d, d->m_api.vkCreateShaderModule(d->m_device, &frag_info, nullptr, &frag_module));
 
+    Arena                      arena = *get_thread_local_arena(d);
+    const VkSpecializationInfo specialization_info
+        = construct_specialization_info(constants, &arena);
+
     VkPipelineShaderStageCreateInfo stages[] = {
         // Vertex stage info
         VkPipelineShaderStageCreateInfo{
@@ -2004,7 +2078,7 @@ Handle<Pipeline> create_graphics_pipeline(Device            d,
             .stage               = VK_SHADER_STAGE_VERTEX_BIT,
             .module              = vert_module,
             .pName               = vertex.entry_point.data(),
-            .pSpecializationInfo = nullptr,  // TODO: Support specialization constants.
+            .pSpecializationInfo = &specialization_info,
         },
         // Fragment stage info
         VkPipelineShaderStageCreateInfo{
@@ -2014,7 +2088,7 @@ Handle<Pipeline> create_graphics_pipeline(Device            d,
             .stage               = VK_SHADER_STAGE_FRAGMENT_BIT,
             .module              = frag_module,
             .pName               = fragment.entry_point.data(),
-            .pSpecializationInfo = nullptr,  // TODO: Support specialization constants.
+            .pSpecializationInfo = &specialization_info,
         },
     };
 
@@ -2043,7 +2117,6 @@ Handle<Pipeline> create_graphics_pipeline(Device            d,
     VkFormat stencil_attachment_format = bridge(desc.stencil_format);
 
     // Color blend state
-    Arena                                     arena = *get_thread_local_arena(d);
     Span<VkPipelineColorBlendAttachmentState> color_blend_attachment_states{};
     Span<VkFormat>                            color_attachment_formats{};
 
