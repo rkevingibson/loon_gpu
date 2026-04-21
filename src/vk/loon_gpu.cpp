@@ -1965,7 +1965,6 @@ static VkSpecializationInfo construct_specialization_info(
             case SpecializationConstantType::Int32:
             case SpecializationConstantType::Boolean:
             case SpecializationConstantType::Float32: size = sizeof(uint32_t); break;
-            case SpecializationConstantType::Float64: size = sizeof(uint64_t); break;
         }
         map_entries = concat(arena,
                              map_entries,

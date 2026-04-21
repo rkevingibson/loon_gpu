@@ -42,6 +42,6 @@ set(DOXYGEN_STRIP_CODE_COMMENTS NO)
 set(DOXYGEN_HIDE_SCOPE_NAMES YES)
 set(DOXYGEN_SHOW_NAMESPACES NO)
 
-doxygen_add_docs(doc "docs/" "include/" ALL 
+doxygen_add_docs(doc "docs/" "include/" 
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} 
     COMMENT "Generate HTML documentation")
