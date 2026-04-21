@@ -48,20 +48,20 @@ list(TRANSFORM COMPILED_SHADERS PREPEND "${CMAKE_CURRENT_BINARY_DIR}/"
                                         OUTPUT_VARIABLE SHADER_DEPENDENCIES)
 add_custom_target(shaders DEPENDS ${SHADER_DEPENDENCIES})
 
+# We have 3 lists that we substitute into the test_shaders cpp/header files.
+# First, we generate a set of #include statements, then we define and
+# extern-declare Span's that cover the shader data
 list(TRANSFORM COMPILED_SHADERS REPLACE "(.+)" "#include \"\\1\""
                                         OUTPUT_VARIABLE SHADER_INCLUDES)
-string(JOIN "\n" SHADER_INCLUDES ${SHADER_INCLUDES})
-
 list(TRANSFORM COMPILED_SHADERS
      REPLACE "(.+).inc.h" "loon::gpu::Span<const unsigned char> \\1(\\1_bytes)"
              OUTPUT_VARIABLE SHADER_SPAN_DEFINES)
-string(JOIN ";\n" SHADER_SPAN_DEFINES ${SHADER_SPAN_DEFINES})
-
 list(TRANSFORM COMPILED_SHADERS
      REPLACE "(.+).inc.h" "extern loon::gpu::Span<const unsigned char> \\1"
              OUTPUT_VARIABLE SHADER_EXTERN_DECLARATIONS)
+string(JOIN "\n" SHADER_INCLUDES ${SHADER_INCLUDES})
 string(JOIN ";\n" SHADER_EXTERN_DECLARATIONS ${SHADER_EXTERN_DECLARATIONS})
-
+string(JOIN ";\n" SHADER_SPAN_DEFINES ${SHADER_SPAN_DEFINES})
 configure_file("shaders/test_shaders.in.cpp"
                ${CMAKE_CURRENT_BINARY_DIR}/test_shaders.cpp @ONLY)
 configure_file("shaders/test_shaders.in.h"
