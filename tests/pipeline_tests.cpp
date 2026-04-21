@@ -7,13 +7,11 @@ using loon::gpu::operator""_sv;
 UTEST(pipeline_tests, basic_compute_compilation) {
     auto device = gpu::create_device({});
 
-    auto pipeline = gpu::create_compute_pipeline(
-        device,
-        {
-            .spirv
-            = gpu::Span(test::shaders::specialization, test::shaders::specialization_sizeInBytes),
-            .entry_point = "basic_compute"_sv,
-        });
+    auto pipeline = gpu::create_compute_pipeline(device,
+                                                 {
+                                                     .spirv       = test::shaders::specialization,
+                                                     .entry_point = "basic_compute"_sv,
+                                                 });
 
     ASSERT_TRUE(pipeline);
 
