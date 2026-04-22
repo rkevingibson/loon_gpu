@@ -2273,8 +2273,9 @@ Queue get_queue(Device d, QueueType type) {
         uint32_t queue_family = 0;
         switch (type) {
             case QueueType::Default: queue_family = d->m_graphics_queue_family; break;
-            case QueueType::Compute: queue_family = d->m_async_compute_queue_family; break;
-            case QueueType::Transfer: queue_family = d->m_transfer_queue_family; break;
+            // TODO: Properly support multiple queues.
+            // case QueueType::Compute: queue_family = d->m_async_compute_queue_family; break;
+            // case QueueType::Transfer: queue_family = d->m_transfer_queue_family; break;
             case QueueType::ValidCount: break;
         }
 

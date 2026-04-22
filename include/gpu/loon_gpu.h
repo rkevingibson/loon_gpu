@@ -562,9 +562,10 @@ enum class StoreOp : uint8_t {
 };
 
 enum class QueueType : uint8_t {
-    Default,   ///< Queue capable of doing graphics, compute and transfer work
-    Compute,   ///< Dedicated compute-only queue
-    Transfer,  ///< Dedicated transfer-only queue
+    Default,  ///< Queue capable of doing graphics, compute and transfer work
+    // TODO: Enable multiple queue types. Right now, we only support a single global queue.
+    // Compute,   ///< Dedicated compute-only queue
+    // Transfer,  ///< Dedicated transfer-only queue
 
     ValidCount,
 };
@@ -1151,12 +1152,14 @@ void free(Device d, Handle<Semaphore> sema);
  * @defgroup queue Queue
  * @brief A command queue for submitting work to the GPU.
  * Queues are used to record and submit commands to the GPU.
- * Commands submitted on different queues are not ordered with respect to each other, but commands
- * submitted to a specific queue will start in submission order (though may complete or execute out
- * of order). To synchronize between queues, use `Semaphores`.
- * Note that generally queues are not thread safe - functions on queues should only be called on one
- * thread at a time. The exception to this is `queue_start_command_recording()`, which can be safely
- * called concurrently by multiple threads.
+ * NOTE: Currently we only support a single queue per device. Support for multiple queues is
+ * planned.
+ * Commands submitted on different queues are not ordered with respect to each other, but
+ * commands submitted to a specific queue will start in submission order (though may complete or
+ * execute out of order). To synchronize between queues, use `Semaphores`. Note that generally
+ * queues are not thread safe - functions on queues should only be called on one thread at a time.
+ * The exception to this is `queue_start_command_recording()`, which can be safely called
+ * concurrently by multiple threads.
  */
 /// @{
 
