@@ -9,7 +9,7 @@
       "cacheVariables": {
         "FETCHCONTENT_BASE_DIR": "${sourceDir}/build/external",
         "CMAKE_OPTIMIZE_DEPENDENCIES": "YES",
-        "CMAKE_CONFIGURATION_TYPES": "Debug;RelWithDebInfo",
+        "CMAKE_CONFIGURATION_TYPES": "Debug;RelWithDebInfo;Release",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/install"
       }
     },
@@ -189,6 +189,13 @@
       "displayName": "RelWithDebInfo",
       "hidden": false,
       "configuration": "RelWithDebInfo",
+      "configurePreset": "Development Windows Clang"
+    },
+    {
+      "name": "Release Windows Clang",
+      "displayName": "Release",
+      "hidden": false,
+      "configuration": "Release",
       "configurePreset": "Development Windows Clang"
     },
     {

@@ -2,11 +2,13 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 
 #include "format_info.h"
 #include "metal_compute_metadata.h"
 #include "platform_utils.h"
+
 
 // NB: This include has to be before others, as it defines the implementation of the metal lib.
 #define NS_PRIVATE_IMPLEMENTATION
@@ -20,15 +22,14 @@
 namespace loon::gpu {
 template class Span<const char>;
 template class Span<uint8_t>;
-template class Span<const gpu::SamplerDesc>;
-template class Span<const gpu::ColorTarget>;
-template class Span<const gpu::RenderAttachment>;
-template class Span<const gpu::Format>;
-template class Span<const gpu::PresentMode>;
-template class Span<const gpu::CommandBuffer>;
-template class Span<const gpu::SemaphoreInfo>;
-template class Span<const Handle<gpu::CommandBuffer>>;
-template class Span<const gpu::TextureTransition>;
+template class Span<const ColorTarget>;
+template class Span<const RenderAttachment>;
+template class Span<const Format>;
+template class Span<const PresentMode>;
+template class Span<const CommandBuffer>;
+template class Span<const SemaphoreInfo>;
+template class Span<const TextureTransition>;
+template class Span<const SpecializationConstant>;
 template class Function<void>;
 
 template <class T>
@@ -245,6 +246,8 @@ Device create_device(const DeviceDesc& desc) {
     auto device = NS::TransferPtr(MTL::CreateSystemDefaultDevice());
     if (!device) { return nullptr; }
 
+    if (!device->supportsFamily(MTL::GPUFamilyMetal4)) { return nullptr; }
+
     NS::Error* error = nullptr;
 
     auto compiler_desc = make_id<MTL4::CompilerDescriptor>();
@@ -260,7 +263,6 @@ Device create_device(const DeviceDesc& desc) {
     residency_set_descriptor->setInitialCapacity(64);
     auto residency_set
         = NS::TransferPtr(device->newResidencySet(residency_set_descriptor.get(), nullptr));
-
     // NOTE: Not 100% sure about if this is UB - I need a pointer to the device in order to capture
     // it in the lambdas, that are created during construction of the object. It probably is
     // technically undefined behviour. I'm also pretty certain it's totally fine in practice, if a
@@ -629,7 +631,61 @@ static id<NS::String> get_span_as_string(Span<const char> span) {
 }
 
 // MARK: Pipelines
-Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource compute) {
+static id<MTL::FunctionConstantValues> construct_constant_values(
+    Span<const SpecializationConstant> constants) {
+    auto result = make_id<MTL::FunctionConstantValues>();
+
+    constexpr auto copy_bytes = []<class T>(char* dst, const T& x) {
+        T val = x;
+        memcpy(dst, &val, sizeof(T));
+    };
+
+    for (const auto& c : constants) {
+        char          data[8] = {};
+        MTL::DataType type    = MTL::DataTypeUChar;
+        switch (c.type) {
+            case SpecializationConstantType::UInt8:
+                copy_bytes(data, static_cast<uint8_t>(c.int_val));
+                type = MTL::DataTypeUChar;
+                break;
+            case SpecializationConstantType::UInt16:
+                copy_bytes(data, static_cast<uint16_t>(c.int_val));
+                type = MTL::DataTypeUShort;
+                break;
+            case SpecializationConstantType::UInt32:
+                copy_bytes(data, static_cast<uint16_t>(c.int_val));
+                type = MTL::DataTypeUInt;
+                break;
+            case SpecializationConstantType::Int8:
+                copy_bytes(data, static_cast<uint16_t>(c.int_val));
+                type = MTL::DataTypeChar;
+                break;
+            case SpecializationConstantType::Int16:
+                copy_bytes(data, static_cast<uint16_t>(c.int_val));
+                type = MTL::DataTypeShort;
+                break;
+            case SpecializationConstantType::Int32:
+                copy_bytes(data, static_cast<uint16_t>(c.int_val));
+                type = MTL::DataTypeInt;
+                break;
+            case SpecializationConstantType::Boolean:
+                copy_bytes(data, c.bool_val);
+                type = MTL::DataTypeBool;
+                break;
+            case SpecializationConstantType::Float32:
+                copy_bytes(data, static_cast<float>(c.float_val));
+                type = MTL::DataTypeFloat;
+                break;
+        }
+        result->setConstantValue(data, type, c.constant_id);
+    }
+
+    return result;
+}
+
+Handle<Pipeline> create_compute_pipeline(Device                             d,
+                                         ShaderSource                       compute,
+                                         Span<const SpecializationConstant> constants) {
     id<NS::String> shader_source = get_span_as_string(compute.spirv.cast<const char>());
     id<NS::String> entry_point   = get_span_as_string(compute.entry_point);
 
@@ -642,7 +698,16 @@ Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource compute) {
     auto func_desc = make_id<MTL4::LibraryFunctionDescriptor>();
     func_desc->setLibrary(lib.get());
     func_desc->setName(entry_point.get());
-    desc->setComputeFunctionDescriptor(func_desc.get());
+
+    if (constants.is_empty()) {
+        desc->setComputeFunctionDescriptor(func_desc.get());
+    } else {
+        auto specialized_func_desc = make_id<MTL4::SpecializedFunctionDescriptor>();
+        specialized_func_desc->setFunctionDescriptor(func_desc.get());
+        auto function_constants = construct_constant_values(constants);
+        specialized_func_desc->setConstantValues(function_constants.get());
+        desc->setComputeFunctionDescriptor(specialized_func_desc.get());
+    }
 
     id<MTL::ComputePipelineState> compute_pipeline = NS::TransferPtr(
         d->m_compiler->newComputePipelineState(desc.get(), d->m_options.get(), &error));
@@ -658,10 +723,11 @@ Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource compute) {
     });
 }
 
-Handle<Pipeline> create_graphics_pipeline(Device            d,
-                                          ShaderSource      vertex,
-                                          ShaderSource      fragment,
-                                          const RasterDesc& desc) {
+Handle<Pipeline> create_graphics_pipeline(Device                             d,
+                                          ShaderSource                       vertex,
+                                          ShaderSource                       fragment,
+                                          const RasterDesc&                  desc,
+                                          Span<const SpecializationConstant> constants) {
     // TODO: Error handling/propagation
     id<NS::String> vert_source      = get_span_as_string(vertex.spirv.cast<const char>());
     id<NS::String> vert_entry_point = get_span_as_string(vertex.entry_point);
@@ -690,7 +756,22 @@ Handle<Pipeline> create_graphics_pipeline(Device            d,
     frag_func_desc->setName(frag_entry_point.get());
 
     auto pipeline_desc = make_id<MTL4::RenderPipelineDescriptor>();
-    pipeline_desc->setVertexFunctionDescriptor(vert_func_desc.get());
+
+    if (constants.is_empty()) {
+        pipeline_desc->setVertexFunctionDescriptor(vert_func_desc.get());
+        pipeline_desc->setFragmentFunctionDescriptor(frag_func_desc.get());
+    } else {
+        auto function_constants         = construct_constant_values(constants);
+        auto specialized_vert_func_desc = make_id<MTL4::SpecializedFunctionDescriptor>();
+        specialized_vert_func_desc->setFunctionDescriptor(vert_func_desc.get());
+        specialized_vert_func_desc->setConstantValues(function_constants.get());
+        pipeline_desc->setVertexFunctionDescriptor(specialized_vert_func_desc.get());
+
+        auto specialized_frag_func_desc = make_id<MTL4::SpecializedFunctionDescriptor>();
+        specialized_frag_func_desc->setFunctionDescriptor(frag_func_desc.get());
+        specialized_frag_func_desc->setConstantValues(function_constants.get());
+        pipeline_desc->setFragmentFunctionDescriptor(specialized_frag_func_desc.get());
+    }
     pipeline_desc->setFragmentFunctionDescriptor(frag_func_desc.get());
     pipeline_desc->setInputPrimitiveTopology(bridge_topology_class(desc.topology));
     pipeline_desc->setAlphaToCoverageState(desc.alpha_to_coverage

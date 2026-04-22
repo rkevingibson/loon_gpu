@@ -601,6 +601,17 @@ enum class SamplerAddressing : uint8_t {
     Mirrored,
 };
 
+enum class SpecializationConstantType : uint8_t {
+    UInt8,
+    UInt16,
+    UInt32,
+    Int8,
+    Int16,
+    Int32,
+    Boolean,
+    Float32,
+};
+
 enum class IndexType : uint8_t {
     UInt16,
     UInt32,
@@ -770,6 +781,16 @@ struct TextureViewDesc {
 struct TextureSizeAlign {
     size_t size;
     size_t align;
+};
+
+struct SpecializationConstant {
+    uint32_t constant_id;
+    union {
+        uint64_t int_val;
+        float    float_val;
+        bool     bool_val;
+    };
+    SpecializationConstantType type;
 };
 
 struct ShaderSource {
@@ -1061,9 +1082,12 @@ void free_depth_stencil_state(Device d, Handle<DepthStencilState> state);
  *
  * @param d
  * @param compute
+ * @param constants A list of specialization constants for the shaders
  * @return Handle<Pipeline>
  */
-Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource compute);
+Handle<Pipeline> create_compute_pipeline(Device                             d,
+                                         ShaderSource                       compute,
+                                         Span<const SpecializationConstant> constants = {});
 
 /**
  * @brief Create a graphics pipeline object
@@ -1072,12 +1096,14 @@ Handle<Pipeline> create_compute_pipeline(Device d, ShaderSource compute);
  * @param vertex
  * @param fragment
  * @param desc
+ * @param constants A list of specialization constants for the shaders
  * @return Handle<Pipeline>
  */
-Handle<Pipeline> create_graphics_pipeline(Device            d,
-                                          ShaderSource      vertex,
-                                          ShaderSource      fragment,
-                                          const RasterDesc& desc);
+Handle<Pipeline> create_graphics_pipeline(Device                             d,
+                                          ShaderSource                       vertex,
+                                          ShaderSource                       fragment,
+                                          const RasterDesc&                  desc,
+                                          Span<const SpecializationConstant> constants = {});
 
 /**
  * @brief
@@ -1380,6 +1406,7 @@ extern template class Span<const PresentMode>;
 extern template class Span<const CommandBuffer>;
 extern template class Span<const SemaphoreInfo>;
 extern template class Span<const TextureTransition>;
+extern template class Span<const SpecializationConstant>;
 extern template class Function<void>;
 
 }  // namespace loon::gpu
