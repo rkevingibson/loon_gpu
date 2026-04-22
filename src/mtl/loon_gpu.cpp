@@ -241,8 +241,9 @@ Device create_device(const DeviceDesc& desc) {
     auto blk = alloc.alloc(sizeof(DeviceImpl));
     if (blk.ptr == 0) { return nullptr; }
 
-    auto device = NS::TransferPtr(MTL::CreateSystemDefaultDevice());
-    if (!device) { return nullptr; }
+    auto device_raw = MTL::CreateSystemDefaultDevice();
+    if (!device_raw) { return nullptr; }
+    auto device = NS::TransferPtr(device_raw);
 
     NS::Error* error = nullptr;
 
