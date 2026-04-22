@@ -6,6 +6,7 @@ using loon::gpu::operator""_sv;
 
 UTEST(pipeline_tests, basic_compute_compilation) {
     auto device = gpu::create_device({});
+    ASSERT_NE(device, nullptr);
 
     auto pipeline = gpu::create_compute_pipeline(device,
                                                  {
@@ -26,6 +27,7 @@ struct ClearBufferArgs {
 
 UTEST(pipeline_tests, specialized_compute_compilation) {
     auto device = gpu::create_device({});
+    ASSERT_NE(device, nullptr);
 
     const uint32_t kClearValue = 42;
 
