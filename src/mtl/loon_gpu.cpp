@@ -250,6 +250,11 @@ Device create_device(const DeviceDesc& desc) {
     }
     fprintf(stderr, "Metal device created\n");
     auto device = NS::TransferPtr(device_raw);
+    if (!device->supportsFamily(MTL::GPUFamilyMetal4)) {
+        fprintf(stderr, "Metal device doesn't support metal 4!\n");
+        return nullptr;
+    }
+    fprintf(stderr, "Metal device supports metal4\n");
 
     NS::Error* error = nullptr;
 
