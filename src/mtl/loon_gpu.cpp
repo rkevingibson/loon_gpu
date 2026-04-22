@@ -2,11 +2,13 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 
 #include "format_info.h"
 #include "metal_compute_metadata.h"
 #include "platform_utils.h"
+
 
 // NB: This include has to be before others, as it defines the implementation of the metal lib.
 #define NS_PRIVATE_IMPLEMENTATION
@@ -242,25 +244,31 @@ Device create_device(const DeviceDesc& desc) {
     if (blk.ptr == 0) { return nullptr; }
 
     auto device_raw = MTL::CreateSystemDefaultDevice();
-    if (!device_raw) { return nullptr; }
+    if (!device_raw) {
+        fprintf(stderr, "Failed to create metal system device.\n");
+        return nullptr;
+    }
+    fprintf(stderr, "Metal device created\n");
     auto device = NS::TransferPtr(device_raw);
 
     NS::Error* error = nullptr;
 
     auto compiler_desc = make_id<MTL4::CompilerDescriptor>();
     auto compiler      = NS::TransferPtr(device->newCompiler(compiler_desc.get(), &error));
-    auto options       = make_id<MTL4::CompilerTaskOptions>();
+    fprintf(stderr, "Metal Compiler created\n");
+    auto options = make_id<MTL4::CompilerTaskOptions>();
 
     // It seems like this is a valid cast from testing.
     auto surface_metal_layer
         = NS::RetainPtr(reinterpret_cast<CA::MetalLayer*>(desc.native_window_handle));
+    fprintf(stderr, "Surface metal layer cast\n");
 
     auto residency_set_descriptor = make_id<MTL::ResidencySetDescriptor>();
     // NOTE: Not sure how much this matters, should dig in more
     residency_set_descriptor->setInitialCapacity(64);
     auto residency_set
         = NS::TransferPtr(device->newResidencySet(residency_set_descriptor.get(), nullptr));
-
+    fprintf(stderr, "Residency set created\n");
     // NOTE: Not 100% sure about if this is UB - I need a pointer to the device in order to capture
     // it in the lambdas, that are created during construction of the object. It probably is
     // technically undefined behviour. I'm also pretty certain it's totally fine in practice, if a
