@@ -72,6 +72,7 @@ jobs:
         -DLOON_GPU_BUILD_TESTS=YES
         -DLOON_GPU_BUILD_EXAMPLES=YES
         -S ${{ github.workspace }}
+        -G "Ninja Multi-Config"
 
     - name: Build
       # Build your program with the given configuration. Note that --config is needed because the default Windows generator is a multi-config generator (Visual Studio generator).
