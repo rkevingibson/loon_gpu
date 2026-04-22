@@ -36,6 +36,7 @@ jobs:
           - os: windows-latest
             c_compiler: clang-cl
             cpp_compiler: clang-cl
+            build_type: Release
           - os: macos-26
             c_compiler: clang
             cpp_compiler: clang++
@@ -44,9 +45,14 @@ jobs:
             c_compiler: cl
           - os: macos-26
             c_compiler: cl
+          - os: windows-latest
+            c_compiler: clang
 
     steps:
     - uses: actions/checkout@v4
+    - uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
 
     - name: Install xlib
       run: |
