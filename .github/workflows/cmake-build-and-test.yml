@@ -72,7 +72,6 @@ jobs:
         -DLOON_GPU_BUILD_TESTS=YES
         -DLOON_GPU_BUILD_EXAMPLES=YES
         -S ${{ github.workspace }}
-        -G "Ninja Multi-Config"
 
     - name: Build
       # Build your program with the given configuration. Note that --config is needed because the default Windows generator is a multi-config generator (Visual Studio generator).
@@ -82,4 +81,4 @@ jobs:
       working-directory: ${{ steps.strings.outputs.build-output-dir }}
       # Execute tests defined by the CMake configuration. Note that --build-config is needed because the default Windows generator is a multi-config generator (Visual Studio generator).
       # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
-      run: ./bin/Release/loon_gpu_tests.exe
+      run: ./bin/Release/loon_gpu_tests
