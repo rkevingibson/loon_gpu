@@ -1300,6 +1300,14 @@ void cmd_set_pipeline(CommandBuffer cmd, Handle<Pipeline> pipeline);
 void cmd_set_depth_stencil_state(CommandBuffer cmd, Handle<DepthStencilState> state);
 
 /**
+ * @brief Set the current viewport
+ *
+ * @param cmd
+ * @param rect
+ */
+void cmd_set_viewport(CommandBuffer cmd, const Rect2D& rect);
+
+/**
  * @brief
  *
  * @param cmd
