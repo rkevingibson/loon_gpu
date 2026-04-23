@@ -1162,6 +1162,18 @@ void cmd_set_depth_stencil_state(CommandBuffer cmd, Handle<DepthStencilState> st
     cmd->render_encoder->setDepthStencilState(d.state.get());
 }
 
+void cmd_set_viewport(CommandBuffer cmd, const Rect2D& rect) {
+    assert(is_in_render_pass(cmd));
+    cmd->render_encoder->setViewport(MTL::Viewport{
+        .originX = static_cast<double>(rect.offset_x),
+        .originY = static_cast<double>(rect.offset_y),
+        .width   = static_cast<double>(rect.width),
+        .height  = static_cast<double>(rect.height),
+        .znear   = 0.0,
+        .zfar    = 1.0,
+    });
+}
+
 void cmd_set_scissor_rect(CommandBuffer cmd, const Rect2D& rect) {
     assert(is_in_render_pass(cmd));
 

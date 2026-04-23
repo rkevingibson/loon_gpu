@@ -2933,6 +2933,19 @@ void cmd_set_depth_stencil_state(CommandBuffer cmd, Handle<DepthStencilState> st
                                   VK_COMPARE_OP_ALWAYS);
 }
 
+void cmd_set_viewport(CommandBuffer cmd, const Rect2D& rect) {
+    auto       impl = cmd->device;
+    VkViewport viewport{
+        .x        = static_cast<float>(rect.offset_x),
+        .y        = static_cast<float>(rect.offset_y + rect.height),
+        .width    = static_cast<float>(rect.width),
+        .height   = -static_cast<float>(rect.height),
+        .minDepth = 0,
+        .maxDepth = 1.0,
+    };
+    impl->m_api.vkCmdSetViewportWithCount(cmd->buffer, 1, &viewport);
+}
+
 void cmd_set_scissor_rect(CommandBuffer cmd, const Rect2D& rect) {
     auto impl = cmd->device;
     const VkRect2D vk_rect{
