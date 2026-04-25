@@ -2972,7 +2972,7 @@ void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
             .sType              = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
             .pNext              = nullptr,
             .imageView          = impl->m_texture_pool[attachment.texture].default_image_view,
-            .imageLayout        = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+            .imageLayout        = VK_IMAGE_LAYOUT_GENERAL,
             .resolveMode        = VK_RESOLVE_MODE_NONE,  // TODO: Multisampling support
             .resolveImageView   = VK_NULL_HANDLE,
             .resolveImageLayout = VK_IMAGE_LAYOUT_GENERAL,
@@ -2991,7 +2991,7 @@ void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
             .pNext = nullptr,
             .imageView = impl->m_texture_pool[desc.depth_attachment.texture].default_image_view,
-            .imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+            .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
             .resolveMode = VK_RESOLVE_MODE_NONE,
             .resolveImageView = VK_NULL_HANDLE,
             .resolveImageLayout = VK_IMAGE_LAYOUT_GENERAL,
@@ -3165,7 +3165,7 @@ void cmd_wait_for_surface_texture(CommandBuffer cmd) {
         .dstStageMask     = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
         .dstAccessMask    = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
         .oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout        = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, // TODO: this wouldn't work for shader writing, should switch to general layout instead. 
+        .newLayout        = VK_IMAGE_LAYOUT_GENERAL,
         .image            = impl->m_texture_pool[current_image].vk_image,
         .subresourceRange = VkImageSubresourceRange{
             .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -3208,7 +3208,7 @@ void cmd_signal_surface_texture(CommandBuffer cmd) {
         .srcAccessMask    = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
         .dstStageMask     = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
         .dstAccessMask    = 0,
-        .oldLayout        = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+        .oldLayout        = VK_IMAGE_LAYOUT_GENERAL,
         .newLayout        = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
         .image            = impl->m_texture_pool[current_image].vk_image,
         .subresourceRange = VkImageSubresourceRange{

@@ -405,7 +405,6 @@ VkImageLayout bridge(Layout layout) {
     switch (layout) {
         case Layout::DontCare: return VK_IMAGE_LAYOUT_UNDEFINED;
         case Layout::General: return VK_IMAGE_LAYOUT_GENERAL;
-        case Layout::Attachment: return VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
     }
     return VK_IMAGE_LAYOUT_MAX_ENUM;
 }
