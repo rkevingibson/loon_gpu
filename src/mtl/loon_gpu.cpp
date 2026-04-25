@@ -133,6 +133,9 @@ struct CommandBufferImpl {
     MTL::PrimitiveType current_topology;
     MTL::Size required_threadgroup_size;  // Required threadgroup size of the currently bound
                                           // compute pipeline.
+
+    bool waits_for_drawable = false;
+    bool signals_drawable   = false;
 };
 
 struct CommandPool {
@@ -376,14 +379,12 @@ void unconfigure_surface(Device d) {
 SurfaceTextureInfo get_current_texture(Device d) {
     id<CA::MetalDrawable> drawable = NS::RetainPtr(d->m_surface.metal_layer->nextDrawable());
 
-
     if (!drawable) {
         return SurfaceTextureInfo{
             .status  = SurfaceStatus::Error,
             .texture = {0},
         };
     }
-    d->m_queue.command_queue->wait(drawable.get());
 
     d->m_surface.current_drawable = drawable;
     d->m_surface.frame_idx++;
@@ -401,7 +402,6 @@ SurfaceTextureInfo get_current_texture(Device d) {
 }
 
 SurfaceStatus present(Device d, Queue queue) {
-    queue->command_queue->signalDrawable(d->m_surface.current_drawable.get());
     d->m_surface.current_drawable->present();
     d->m_surface.current_drawable = nullptr;
     d->m_texture_pool.erase(d->m_surface.current_texture);
@@ -996,12 +996,18 @@ void queue_submit(Queue                     q,
         q->command_queue->wait(event.get(), s.value);
     }
 
-
+    bool                       wait_for_drawable = false;
+    bool                       signal_drawable   = false;
     Span<MTL4::CommandBuffer*> commands;
     for (auto cmd : command_buffers) {
+        wait_for_drawable        = wait_for_drawable | cmd->waits_for_drawable;
+        signal_drawable          = signal_drawable | cmd->signals_drawable;
         MTL4::CommandBuffer* buf = cmd->command_buffer.get();
         commands                 = concat(&arena, commands, buf);
     }
+
+    if (wait_for_drawable) { q->command_queue->wait(d->m_surface.current_drawable.get()); }
+
     q->command_queue->commit(commands.data(), commands.size());
 
     for (auto s : signal_semaphores) {
@@ -1009,6 +1015,8 @@ void queue_submit(Queue                     q,
         id<MTL::SharedEvent> event = d->m_semaphore_pool[s.semaphore].event;
         q->command_queue->signalEvent(event.get(), s.value);
     }
+
+    if (signal_drawable) { q->command_queue->signalDrawable(d->m_surface.current_drawable.get()); }
 }
 
 void queue_cancel(Queue q, Span<const Handle<CommandBuffer>> command_buffers) {}
@@ -1322,6 +1330,16 @@ void cmd_draw_indexed_instanced_indirect_multi(CommandBuffer                cmd,
                                                const MultiDrawIndirectInfo& args) {
     // Multidraw not supported on metal.
     assert(false);
+}
+
+void cmd_wait_for_surface_texture(CommandBuffer cmd) {
+    // Because the wait/signal operations are on the queue, we just flag it to wait/signal in a
+    // submit() call.
+    cmd->waits_for_drawable = true;
+}
+
+void cmd_signal_surface_texture(CommandBuffer cmd) {
+    cmd->signals_drawable = true;
 }
 
 void cmd_finalize(CommandBuffer cmd) {

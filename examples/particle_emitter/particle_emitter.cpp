@@ -290,19 +290,15 @@ void ParticleEmitter::Update(const WindowState& window) {
                      HazardFlags::DrawArguments);
 
     // Render particles
+    gpu::cmd_wait_for_surface_texture(cmd);
     gpu::cmd_barrier(cmd,
                      StageFlags::RasterColorOut,
-                     StageFlags::PixelShader | StageFlags::RasterColorOut,
-                     {TextureTransition{
-                          .texture    = surface_texture.texture,
-                          .old_layout = Layout::DontCare,
-                          .new_layout = Layout::Attachment,
-                      },
-                      TextureTransition{
-                          .texture    = m_depth_texture,
-                          .old_layout = Layout::DontCare,
-                          .new_layout = Layout::Attachment,
-                      }});
+                     StageFlags::PixelShader,
+                     TextureTransition{
+                         .texture    = m_depth_texture,
+                         .old_layout = Layout::DontCare,
+                         .new_layout = Layout::Attachment,
+                     });
 
     gpu::cmd_begin_render_pass(cmd,{
         .color_attachments = RenderAttachment {
@@ -332,15 +328,7 @@ void ParticleEmitter::Update(const WindowState& window) {
     gpu::cmd_set_texture_heap(cmd, m_texture_heap);
     loon::imgui::Render(cmd);
     gpu::cmd_end_render_pass(cmd);
-
-    gpu::cmd_barrier(cmd,
-                     StageFlags::RasterColorOut,
-                     StageFlags::RasterColorOut,
-                     TextureTransition{
-                         .texture    = surface_texture.texture,
-                         .old_layout = Layout::Attachment,
-                         .new_layout = Layout::Present,
-                     });
+    gpu::cmd_signal_surface_texture(cmd);
     gpu::cmd_finalize(cmd);
     gpu::queue_submit(m_queue, cmd);
 
