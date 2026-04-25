@@ -171,6 +171,9 @@ struct CommandBufferImpl {
     VkCommandBuffer buffer;
 
     GpuPtr current_idx_buffer = 0;
+
+    bool wait_for_surface_texture = false;
+    bool signal_surface_texture   = false;
 };
 
 struct CommandPool {
@@ -1392,8 +1395,6 @@ SurfaceTextureInfo get_current_texture(Device d) {
     d->m_surface.frame_idx++;
     auto semaphore
         = d->m_surface.acquire_semaphores[d->m_surface.frame_idx % Surface::kMaxFramesInFlight];
-    d->m_surface.first_use_command[d->m_surface.frame_idx % Surface::kMaxFramesInFlight]
-        = VK_NULL_HANDLE;
     const uint64_t wait_value = d->m_surface.frame_idx > Surface::kMaxFramesInFlight
                                     ? d->m_surface.frame_idx - Surface::kMaxFramesInFlight
                                     : 0;
@@ -2558,7 +2559,9 @@ static CommandBufferImpl* get_command_buffer(Queue q, CommandPool* pool) {
         });
     }
 
-    CommandBufferImpl* result = &pool->command_buffers[pool->buffer_free_idx];
+    CommandBufferImpl* result        = &pool->command_buffers[pool->buffer_free_idx];
+    result->wait_for_surface_texture = false;
+    result->signal_surface_texture   = false;
     pool->buffer_free_idx++;
     return result;
 }
@@ -2629,9 +2632,7 @@ void queue_submit(Queue                     q,
                                   .deviceMask    = 1,
                               });
 
-        if (buf
-            == d->m_surface
-                   .first_use_command[d->m_surface.frame_idx % Surface::kMaxFramesInFlight]) {
+        if (command_buffers[i]->wait_for_surface_texture) {
             const auto acquire_semaphore
                 = d->m_semaphore_pool[d->m_surface.acquire_semaphores
                                           [d->m_surface.frame_idx % Surface::kMaxFramesInFlight]]
@@ -2651,11 +2652,8 @@ void queue_submit(Queue                     q,
                                    .deviceIndex = 0,
                                });
         }
-        if (buf == d->m_surface.transitioning_command[d->m_surface.current_image_idx]) {
-            // Immediately clear this so we don't accidentally signal it twice (can happen due
-            // to cmd buffer reuse,e.g.)
-            d->m_surface.transitioning_command[d->m_surface.current_image_idx] = 0;
-            VkSemaphore present_semaphore
+        if (command_buffers[i]->signal_surface_texture) {
+            const VkSemaphore present_semaphore
                 = d->m_semaphore_pool[d->m_surface
                                           .present_semaphores[d->m_surface.current_image_idx]]
                       .vk_semaphore;
@@ -2667,20 +2665,21 @@ void queue_submit(Queue                     q,
                                      .pNext       = nullptr,
                                      .semaphore   = present_semaphore,
                                      .value       = 0,
-                                     .stageMask   = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                     .stageMask   = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
                                      .deviceIndex = 0,
                                  });
-            signal_info = concat(
-                &arena,
-                signal_info,
-                VkSemaphoreSubmitInfo{
-                    .sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-                    .pNext       = nullptr,
-                    .semaphore   = d->m_semaphore_pool[d->m_surface.frame_semaphore].vk_semaphore,
-                    .value       = d->m_surface.frame_idx,
-                    .stageMask   = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
-                    .deviceIndex = 0,
-                });
+            const VkSemaphore frame_semaphore
+                = d->m_semaphore_pool[d->m_surface.frame_semaphore].vk_semaphore;
+            signal_info = concat(&arena,
+                                 signal_info,
+                                 VkSemaphoreSubmitInfo{
+                                     .sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+                                     .pNext       = nullptr,
+                                     .semaphore   = frame_semaphore,
+                                     .value       = d->m_surface.frame_idx,
+                                     .stageMask   = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+                                     .deviceIndex = 0,
+                                 });
         }
     }
 
@@ -2862,7 +2861,7 @@ void cmd_barrier(CommandBuffer                 cmd,
                                     .srcStageMask     = src_stage,
                                     .srcAccessMask    = access,
                                     .dstStageMask     = dst_stage,
-                                    .dstAccessMask    = t.new_layout == Layout::Present ? 0 : access,
+                                    .dstAccessMask    = access,
                                     .oldLayout        = bridge(t.old_layout),
                                     .newLayout        = bridge(t.new_layout),
                                     .image            = tex.vk_image,
@@ -2874,25 +2873,6 @@ void cmd_barrier(CommandBuffer                 cmd,
                                         .layerCount = VK_REMAINING_ARRAY_LAYERS,
                                     },
                                 });
-
-
-        if (t.texture == impl->m_surface.swapchain_images[impl->m_surface.current_image_idx]) {
-            if (t.old_layout == Layout::DontCare || t.old_layout == Layout::Present) {
-                auto* first_use_command
-                    = &impl->m_surface.first_use_command[impl->m_surface.frame_idx
-                                                         % Surface::kMaxFramesInFlight];
-                int64_t expected = 0;
-                // We try and set the first use command value if it hasn't already been set by
-                // an earlier barrier.
-                atomic_compare_exchange(reinterpret_cast<int64_t*>(first_use_command),
-                                        &expected,
-                                        reinterpret_cast<int64_t>(cmd->buffer));
-            }
-            if (t.new_layout == Layout::Present) {
-                impl->m_surface.transitioning_command[impl->m_surface.current_image_idx]
-                    = reinterpret_cast<VkCommandBuffer>(cmd->buffer);
-            }
-        }
     }
 
     const VkDependencyInfo info{
@@ -3167,5 +3147,92 @@ void cmd_draw_indexed_instanced_indirect_multi(CommandBuffer                cmd,
                                               args.maxDraws,
                                               sizeof(VkDrawIndexedIndirectCommand));
 }
+
+void cmd_wait_for_surface_texture(CommandBuffer cmd) {
+    // Tell us that we have to wait on the semaphore when submitting this command.
+    // As well, transition out of layout_present.
+    assert(cmd->wait_for_surface_texture == false);
+    cmd->wait_for_surface_texture = true;
+
+    auto impl = cmd->device;
+
+    const auto current_image = impl->m_surface.swapchain_images[impl->m_surface.current_image_idx];
+    const VkImageMemoryBarrier2 image_barrier{
+        .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .pNext            = nullptr,
+        .srcStageMask     = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+        .srcAccessMask    = 0,
+        .dstStageMask     = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .dstAccessMask    = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
+        .oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout        = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, // TODO: this wouldn't work for shader writing, should switch to general layout instead. 
+        .image            = impl->m_texture_pool[current_image].vk_image,
+        .subresourceRange = VkImageSubresourceRange{
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = VK_REMAINING_MIP_LEVELS,
+            .baseArrayLayer =0 ,
+            .layerCount = VK_REMAINING_ARRAY_LAYERS,
+        },
+    };
+
+    const VkDependencyInfo info{
+        .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .pNext                    = nullptr,
+        .dependencyFlags          = 0,
+        .memoryBarrierCount       = 0,
+        .pMemoryBarriers          = nullptr,
+        .bufferMemoryBarrierCount = 0,
+        .pBufferMemoryBarriers    = nullptr,
+        .imageMemoryBarrierCount  = 1,
+        .pImageMemoryBarriers     = &image_barrier,
+    };
+    impl->m_api.vkCmdPipelineBarrier2(cmd->buffer, &info);
+}
+
+void cmd_signal_surface_texture(CommandBuffer cmd) {
+    // This is doing 2 things:
+    // - Tell us that we have to wait on the semaphore when submitting this command.
+    // - Record a barrier to transition the surface texture layout to Present
+    assert(cmd->signal_surface_texture == false);
+    cmd->signal_surface_texture = true;
+
+    auto impl = cmd->device;
+
+    const auto current_image = impl->m_surface.swapchain_images[impl->m_surface.current_image_idx];
+
+    const VkImageMemoryBarrier2 image_barrier{
+        .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .pNext            = nullptr,
+        .srcStageMask     = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .srcAccessMask    = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
+        .dstStageMask     = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+        .dstAccessMask    = 0,
+        .oldLayout        = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+        .newLayout        = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .image            = impl->m_texture_pool[current_image].vk_image,
+        .subresourceRange = VkImageSubresourceRange{
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = VK_REMAINING_MIP_LEVELS,
+            .baseArrayLayer =0 ,
+            .layerCount = VK_REMAINING_ARRAY_LAYERS,
+        },
+    };
+
+    const VkDependencyInfo info{
+        .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .pNext                    = nullptr,
+        .dependencyFlags          = 0,
+        .memoryBarrierCount       = 0,
+        .pMemoryBarriers          = nullptr,
+        .bufferMemoryBarrierCount = 0,
+        .pBufferMemoryBarriers    = nullptr,
+        .imageMemoryBarrierCount  = 1,
+        .pImageMemoryBarriers     = &image_barrier,
+    };
+    impl->m_api.vkCmdPipelineBarrier2(cmd->buffer, &info);
+}
+
 
 }  // namespace loon::gpu

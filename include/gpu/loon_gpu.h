@@ -538,7 +538,6 @@ enum class Layout : uint8_t {
     DontCare = 0,
     General,
     Attachment,
-    Present,
 };
 
 enum class HazardFlags : uint8_t {
@@ -1399,6 +1398,20 @@ void cmd_draw_indexed_instanced_indirect(CommandBuffer cmd, const DrawIndexedInd
  */
 void cmd_draw_indexed_instanced_indirect_multi(CommandBuffer                cmd,
                                                const MultiDrawIndirectInfo& args);
+
+/**
+ * @brief
+ *
+ * @param cmd
+ */
+void cmd_wait_for_surface_texture(CommandBuffer cmd);
+
+/**
+ * @brief
+ *
+ * @param cmd
+ */
+void cmd_signal_surface_texture(CommandBuffer cmd);
 
 /**
  * @brief

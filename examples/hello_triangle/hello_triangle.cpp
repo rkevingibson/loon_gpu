@@ -105,36 +105,25 @@ void HelloTriangle::Update(const WindowState& window) {
 
     auto cmd = gpu::queue_start_command_recording(m_queue);
 
-    gpu::cmd_barrier(cmd,
-                     StageFlags::RasterColorOut,
-                     StageFlags::RasterColorOut,
-                     TextureTransition{
-                         .texture    = surface_texture.texture,
-                         .old_layout = loon::gpu::Layout::DontCare,
-                         .new_layout = Layout::Attachment,
-                     });
+    gpu::cmd_wait_for_surface_texture(cmd);
     gpu::cmd_begin_render_pass(cmd, {
                                    .color_attachments = RenderAttachment{
                                        .texture = surface_texture.texture,
                                        .load_op      = loon::gpu::LoadOp::Clear,
                                        .store_op     = loon::gpu::StoreOp::Store,
                                        .clear_color  = Color(0, 0, 0, 0),
-                                   }, .render_area = {.width = m_swapchain_width, .height =
-                                   m_swapchain_height},});
+                                   }, 
+                                   .render_area = Rect2D{
+                                        .width = m_swapchain_width, 
+                                        .height = m_swapchain_height,
+                                    },
+                                });
 
     gpu::cmd_set_pipeline(cmd, m_render_pipeline);
     gpu::cmd_draw(cmd, 0, 0, 3, 1);
 
     gpu::cmd_end_render_pass(cmd);
-    gpu::cmd_barrier(cmd,
-                     StageFlags::RasterColorOut,
-                     StageFlags::RasterColorOut,
-                     TextureTransition{
-                         .texture    = surface_texture.texture,
-                         .old_layout = Layout::Attachment,
-                         .new_layout = Layout::Present,
-                     });
-
+    gpu::cmd_signal_surface_texture(cmd);
     gpu::cmd_finalize(cmd);
 
     gpu::queue_submit(m_queue, cmd);
