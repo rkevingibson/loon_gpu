@@ -537,7 +537,6 @@ LOON_DEFINE_BITWISE_OPS(StageFlags);
 enum class Layout : uint8_t {
     DontCare = 0,
     General,
-    Attachment,
 };
 
 enum class HazardFlags : uint8_t {

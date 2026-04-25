@@ -297,7 +297,7 @@ void ParticleEmitter::Update(const WindowState& window) {
                      TextureTransition{
                          .texture    = m_depth_texture,
                          .old_layout = Layout::DontCare,
-                         .new_layout = Layout::Attachment,
+                         .new_layout = Layout::General,
                      });
 
     gpu::cmd_begin_render_pass(cmd,{
