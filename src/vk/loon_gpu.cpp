@@ -2862,7 +2862,7 @@ void cmd_barrier(CommandBuffer                 cmd,
                                     .srcStageMask     = src_stage,
                                     .srcAccessMask    = access,
                                     .dstStageMask     = dst_stage,
-                                    .dstAccessMask    = t.new_layout == Layout::Present ? 0 : access,
+                                    .dstAccessMask    = access,
                                     .oldLayout        = bridge(t.old_layout),
                                     .newLayout        = bridge(t.new_layout),
                                     .image            = tex.vk_image,
@@ -2874,25 +2874,6 @@ void cmd_barrier(CommandBuffer                 cmd,
                                         .layerCount = VK_REMAINING_ARRAY_LAYERS,
                                     },
                                 });
-
-
-        if (t.texture == impl->m_surface.swapchain_images[impl->m_surface.current_image_idx]) {
-            if (t.old_layout == Layout::DontCare || t.old_layout == Layout::Present) {
-                auto* first_use_command
-                    = &impl->m_surface.first_use_command[impl->m_surface.frame_idx
-                                                         % Surface::kMaxFramesInFlight];
-                int64_t expected = 0;
-                // We try and set the first use command value if it hasn't already been set by
-                // an earlier barrier.
-                atomic_compare_exchange(reinterpret_cast<int64_t*>(first_use_command),
-                                        &expected,
-                                        reinterpret_cast<int64_t>(cmd->buffer));
-            }
-            if (t.new_layout == Layout::Present) {
-                impl->m_surface.transitioning_command[impl->m_surface.current_image_idx]
-                    = reinterpret_cast<VkCommandBuffer>(cmd->buffer);
-            }
-        }
     }
 
     const VkDependencyInfo info{
