@@ -30,7 +30,6 @@ template class Span<const Format>;
 template class Span<const PresentMode>;
 template class Span<const CommandBuffer>;
 template class Span<const SemaphoreInfo>;
-template class Span<const TextureTransition>;
 template class Span<const SpecializationConstant>;
 template class Function<void>;
 
@@ -60,6 +59,7 @@ struct Texture {
     VmaAllocation   vk_allocation;
     VkImageViewType vk_type = VK_IMAGE_VIEW_TYPE_2D;
     Format          format;
+    int64_t         is_initialized     = false;  // Atomic
     bool            is_swapchain_image = false;
 };
 
@@ -116,7 +116,6 @@ struct LogicalDeviceCreateResult {
     VkResult result;
     VkDevice logical_device;
 };
-
 
 struct DepthStencilState : DepthStencilDesc {};
 
@@ -1567,7 +1566,6 @@ static BufferAndOffset buffer_and_offset_from_ptr(Device d, GpuPtr ptr) {
     };
 }
 
-
 void free(Device d, GpuPtr ptr) {
     rwlock_lock_write(&d->m_ptr_map_lock);
     const auto it = lower_bound(d->m_ptr_map.begin(), d->m_ptr_map.end(), GpuPtrMap{.ptr = ptr});
@@ -1583,7 +1581,6 @@ void* get_host_pointer(Device d, GpuPtr ptr) {
     rwlock_unlock_read(&d->m_ptr_map_lock);
     return (char*)buffer.host_ptr + (ptr - buffer.device_ptr);
 }
-
 
 // MARK: Textures
 
@@ -2824,11 +2821,7 @@ void cmd_set_texture_heap(CommandBuffer cmd, Handle<TextureHeap> heap) {
                                         nullptr);
 }
 
-void cmd_barrier(CommandBuffer                 cmd,
-                 StageFlags                    before,
-                 StageFlags                    after,
-                 Span<const TextureTransition> image_transitions,
-                 HazardFlags                   hazards) {
+void cmd_barrier(CommandBuffer cmd, StageFlags before, StageFlags after, HazardFlags hazards) {
     auto impl = cmd->device;
     // TODO: Use HazardFlags to reduce the stage/access_masks unless necessary.
     const auto src_stage = bridge_pipeline_stage(before);
@@ -2850,31 +2843,6 @@ void cmd_barrier(CommandBuffer                 cmd,
 
     Arena arena = *get_thread_local_arena(impl);
 
-    Span<VkImageMemoryBarrier2> image_barriers;
-    for (const auto& t : image_transitions) {
-        const auto& tex = impl->m_texture_pool[t.texture];
-        image_barriers = concat(&arena,
-                                image_barriers,
-                                VkImageMemoryBarrier2{
-                                    .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-                                    .pNext            = nullptr,
-                                    .srcStageMask     = src_stage,
-                                    .srcAccessMask    = access,
-                                    .dstStageMask     = dst_stage,
-                                    .dstAccessMask    = access,
-                                    .oldLayout        = bridge(t.old_layout),
-                                    .newLayout        = bridge(t.new_layout),
-                                    .image            = tex.vk_image,
-                                    .subresourceRange = VkImageSubresourceRange{
-                                        .aspectMask = aspects_for_format(tex.format),
-                                        .baseMipLevel = 0,
-                                        .levelCount = VK_REMAINING_MIP_LEVELS,
-                                        .baseArrayLayer =0 ,
-                                        .layerCount = VK_REMAINING_ARRAY_LAYERS,
-                                    },
-                                });
-    }
-
     const VkDependencyInfo info{
         .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
         .pNext                    = nullptr,
@@ -2883,8 +2851,8 @@ void cmd_barrier(CommandBuffer                 cmd,
         .pMemoryBarriers          = &barrier_info,
         .bufferMemoryBarrierCount = 0,
         .pBufferMemoryBarriers    = nullptr,
-        .imageMemoryBarrierCount  = static_cast<uint32_t>(image_barriers.size()),
-        .pImageMemoryBarriers     = image_barriers.data(),
+        .imageMemoryBarrierCount  = 0,
+        .pImageMemoryBarriers     = nullptr,
     };
     impl->m_api.vkCmdPipelineBarrier2(cmd->buffer, &info);
 }

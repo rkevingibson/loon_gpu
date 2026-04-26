@@ -286,19 +286,12 @@ void ParticleEmitter::Update(const WindowState& window) {
     gpu::cmd_barrier(cmd,
                      StageFlags::Compute,
                      StageFlags::VertexShader,
-                     {},
                      HazardFlags::DrawArguments);
 
     // Render particles
     gpu::cmd_wait_for_surface_texture(cmd);
-    gpu::cmd_barrier(cmd,
-                     StageFlags::RasterColorOut,
-                     StageFlags::PixelShader,
-                     TextureTransition{
-                         .texture    = m_depth_texture,
-                         .old_layout = Layout::DontCare,
-                         .new_layout = Layout::General,
-                     });
+    // We only have one depth buffer so we need to stall here
+    gpu::cmd_barrier(cmd, StageFlags::PixelShader, StageFlags::PixelShader);
 
     gpu::cmd_begin_render_pass(cmd,{
         .color_attachments = RenderAttachment {

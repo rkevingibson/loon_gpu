@@ -534,11 +534,6 @@ enum class StageFlags : uint16_t {
 };
 LOON_DEFINE_BITWISE_OPS(StageFlags);
 
-enum class Layout : uint8_t {
-    DontCare = 0,
-    General,
-};
-
 enum class HazardFlags : uint8_t {
     None          = 0x0,
     DrawArguments = 0x1,
@@ -821,12 +816,6 @@ struct SemaphoreInfo {
     uint64_t          value;
     StageFlags        stage = StageFlags::None;  // Ignored on signal operations, what stage must be
                                                  // blocked on the wait operation
-};
-
-struct TextureTransition {
-    Handle<Texture> texture;
-    Layout          old_layout = Layout::DontCare;
-    Layout          new_layout = Layout::General;
 };
 
 struct BufferToTextureCopyInfo {
@@ -1275,11 +1264,10 @@ void cmd_set_texture_heap(CommandBuffer cmd, Handle<TextureHeap> heap);
  * @param image_transitions
  * @param hazards
  */
-void cmd_barrier(CommandBuffer                 cmd,
-                 StageFlags                    before,
-                 StageFlags                    after,
-                 Span<const TextureTransition> image_transitions = {},
-                 HazardFlags                   hazards           = HazardFlags(0));
+void cmd_barrier(CommandBuffer cmd,
+                 StageFlags    before,
+                 StageFlags    after,
+                 HazardFlags   hazards = HazardFlags(0));
 
 /**
  * @brief
@@ -1428,7 +1416,6 @@ extern template class Span<const Format>;
 extern template class Span<const PresentMode>;
 extern template class Span<const CommandBuffer>;
 extern template class Span<const SemaphoreInfo>;
-extern template class Span<const TextureTransition>;
 extern template class Span<const SpecializationConstant>;
 extern template class Function<void>;
 
