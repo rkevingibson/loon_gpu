@@ -194,46 +194,46 @@ struct PtrMapCompare {
 };
 
 struct DeviceImpl {
-    Allocator          m_allocator;
-    ProcLogCallback    m_log_callback = nullptr;
-    void*              m_log_userdata = nullptr;
-    LogLevel           m_log_level    = LogLevel::Off;
-    loon::gpu::tls_key m_tls_key;
+    Allocator          allocator;
+    ProcLogCallback    log_callback = nullptr;
+    void*              log_userdata = nullptr;
+    LogLevel           log_level    = LogLevel::Off;
+    loon::gpu::tls_key tls_key;
 
-    id<MTL::Device> m_device = nullptr;
+    id<MTL::Device> device = nullptr;
 
-    id<MTL4::Compiler>            m_compiler;
-    id<MTL4::CompilerTaskOptions> m_options;
+    id<MTL4::Compiler>            compiler;
+    id<MTL4::CompilerTaskOptions> options;
 
-    id<MTL::ResidencySet> m_residency_set = nullptr;
-    Surface               m_surface;
+    id<MTL::ResidencySet> residency_set = nullptr;
+    Surface               surface;
 
-    QueueImpl m_queue;
+    QueueImpl queue;
 
-    SlotMap<Buffer>            m_buffer_pool;
-    SlotMap<Texture>           m_texture_pool;
-    SlotMap<TextureHeap>       m_texture_heap_pool;
-    SlotMap<Pipeline>          m_pipeline_pool;
-    SlotMap<DepthStencilState> m_depth_stencil_state_pool;
-    SlotMap<Semaphore>         m_semaphore_pool;
-    rwlock                     m_ptr_map_lock = LOON_RWLOCK_INIT;
-    Vector<GpuPtrMap>          m_ptr_map;
+    SlotMap<Buffer>            buffer_pool;
+    SlotMap<Texture>           texture_pool;
+    SlotMap<TextureHeap>       texture_heap_pool;
+    SlotMap<Pipeline>          pipeline_pool;
+    SlotMap<DepthStencilState> depth_stencil_state_pool;
+    SlotMap<Semaphore>         semaphore_pool;
+    rwlock                     ptr_map_lock = LOON_RWLOCK_INIT;
+    Vector<GpuPtrMap>          ptr_map;
 };
 
 void log(Device d, LogLevel lvl, Span<const char> msg) {
-    d->m_log_callback(lvl, msg, d->m_log_userdata);
+    d->log_callback(lvl, msg, d->log_userdata);
 };
 
 Arena* get_thread_local_arena(Device d) {
-    auto state = reinterpret_cast<ThreadLocalState*>(loon::gpu::tls_get_data(d->m_tls_key));
+    auto state = reinterpret_cast<ThreadLocalState*>(loon::gpu::tls_get_data(d->tls_key));
     if (state == nullptr) {
-        auto tls_block = d->m_allocator.alloc(sizeof(ThreadLocalState));
+        auto tls_block = d->allocator.alloc(sizeof(ThreadLocalState));
         if (tls_block.ptr == nullptr) {
             log(d, LogLevel::Error, "Allocator out of memory"_sv);
             return nullptr;
         }
-        state = ::new (tls_block.ptr) ThreadLocalState(d->m_allocator);
-        loon::gpu::tls_set_data(d->m_tls_key, state);
+        state = ::new (tls_block.ptr) ThreadLocalState(d->allocator);
+        loon::gpu::tls_set_data(d->tls_key, state);
     }
     return &state->arena;
 }
@@ -271,53 +271,53 @@ Device create_device(const DeviceDesc& desc) {
     // bit wonky.
     auto d = reinterpret_cast<DeviceImpl*>(blk.ptr);
     return new (blk.ptr) DeviceImpl{
-        .m_allocator                = alloc,
-        .m_log_callback             = desc.log_callback,
-        .m_log_userdata             = desc.log_userdata,
-        .m_log_level                = desc.log_level,
-        .m_tls_key                  = loon::gpu::tls_alloc([](void* data) {
+        .allocator                = alloc,
+        .log_callback             = desc.log_callback,
+        .log_userdata             = desc.log_userdata,
+        .log_level                = desc.log_level,
+        .tls_key                  = loon::gpu::tls_alloc([](void* data) {
             auto state = reinterpret_cast<ThreadLocalState*>(data);
             state->~ThreadLocalState();
         }),
-        .m_device                   = device,
-        .m_compiler                 = compiler,
-        .m_options                  = options,
-        .m_residency_set            = residency_set,
-        .m_surface                  = Surface{
+        .device                   = device,
+        .compiler                 = compiler,
+        .options                  = options,
+        .residency_set            = residency_set,
+        .surface                  = Surface{
             .metal_layer = surface_metal_layer,
             .current_drawable = nullptr,
         },
-        .m_buffer_pool              = SlotMap<Buffer>(alloc,
+        .buffer_pool              = SlotMap<Buffer>(alloc,
                                          [d](Buffer* b) {
                                              if (b->heap) {
-                                                 d->m_residency_set->removeAllocation(b->heap.get());
+                                                 d->residency_set->removeAllocation(b->heap.get());
                                              }
                                              b->~Buffer();
                                          }),
-        .m_texture_pool             = SlotMap<Texture>(alloc,
+        .texture_pool             = SlotMap<Texture>(alloc,
                                            [d](Texture* t) {
                                                if (t->texture) {
-                                                   d->m_residency_set->removeAllocation(t->texture.get());
+                                                   d->residency_set->removeAllocation(t->texture.get());
                                                }
                                                t->~Texture();
                                            }),
-        .m_texture_heap_pool        = SlotMap<TextureHeap>(alloc,
+        .texture_heap_pool        = SlotMap<TextureHeap>(alloc,
                                                     [](TextureHeap* t) {
                                                         t->~TextureHeap();
                                                     }),
-        .m_pipeline_pool            = SlotMap<Pipeline>(alloc,
+        .pipeline_pool            = SlotMap<Pipeline>(alloc,
                                              [](Pipeline* p) {
                                                 p->~Pipeline();
                                              }),
-        .m_depth_stencil_state_pool = SlotMap<DepthStencilState>(alloc,
+        .depth_stencil_state_pool = SlotMap<DepthStencilState>(alloc,
                                                                  [](DepthStencilState* s) {
                                                                      s->~DepthStencilState();
                                                                  }),
-        .m_semaphore_pool           = SlotMap<Semaphore>(alloc,
+        .semaphore_pool           = SlotMap<Semaphore>(alloc,
                                                [](Semaphore* s) {
                                                 s->~Semaphore();
                                                }),
-        .m_ptr_map                  = Vector<GpuPtrMap>(alloc),
+        .ptr_map                  = Vector<GpuPtrMap>(alloc),
     };
 }
 
@@ -325,15 +325,15 @@ void destroy_device(Device d) {
     device_wait_for_idle(d);
     unconfigure_surface(d);
 
-    d->m_semaphore_pool.clear();
-    d->m_depth_stencil_state_pool.clear();
-    d->m_pipeline_pool.clear();
-    d->m_texture_heap_pool.clear();
-    d->m_texture_pool.clear();
-    d->m_buffer_pool.clear();
-    tls_free(d->m_tls_key);
+    d->semaphore_pool.clear();
+    d->depth_stencil_state_pool.clear();
+    d->pipeline_pool.clear();
+    d->texture_heap_pool.clear();
+    d->texture_pool.clear();
+    d->buffer_pool.clear();
+    tls_free(d->tls_key);
 
-    auto allocator = d->m_allocator;
+    auto allocator = d->allocator;
     d->~DeviceImpl();
     allocator.free({.ptr = d, .len = sizeof(DeviceImpl)});
 }
@@ -345,7 +345,7 @@ Backend device_backend() {
 void device_wait_for_idle(Device d) {
     // NOTE: If work is being submitted concurrently, this won't behave correctly - it technically
     // only waits until any currently submitted work is done.
-    auto& q = d->m_queue;
+    auto& q = d->queue;
     if (q.command_queue) {
         q.command_queue->signalEvent(q.callback_event.get(), ++q.timeline_value);
         q.callback_event->waitUntilSignaledValue(q.timeline_value, UINT64_MAX);
@@ -362,8 +362,8 @@ SurfaceCapabilities get_surface_capabilities(Device d) {
 }
 
 bool configure_surface(Device d, const SurfaceConfiguration& config) {
-    d->m_surface.metal_layer->setPixelFormat(bridge(config.format));
-    d->m_surface.metal_layer->setDrawableSize(CGSize{
+    d->surface.metal_layer->setPixelFormat(bridge(config.format));
+    d->surface.metal_layer->setDrawableSize(CGSize{
         .width  = static_cast<float>(config.width),
         .height = static_cast<float>(config.height),
     });
@@ -372,11 +372,11 @@ bool configure_surface(Device d, const SurfaceConfiguration& config) {
 
 void unconfigure_surface(Device d) {
     // Not much to do here.
-    d->m_surface.current_drawable = nullptr;
+    d->surface.current_drawable = nullptr;
 }
 
 SurfaceTextureInfo get_current_texture(Device d) {
-    id<CA::MetalDrawable> drawable = NS::RetainPtr(d->m_surface.metal_layer->nextDrawable());
+    id<CA::MetalDrawable> drawable = NS::RetainPtr(d->surface.metal_layer->nextDrawable());
 
     if (!drawable) {
         return SurfaceTextureInfo{
@@ -385,14 +385,14 @@ SurfaceTextureInfo get_current_texture(Device d) {
         };
     }
 
-    d->m_surface.current_drawable = drawable;
-    d->m_surface.frame_idx++;
+    d->surface.current_drawable = drawable;
+    d->surface.frame_idx++;
     id<MTL::Texture> tex = NS::RetainPtr(drawable->texture());
 
-    Handle<Texture> handle       = d->m_texture_pool.emplace({
-              .texture = tex,
+    Handle<Texture> handle     = d->texture_pool.emplace({
+            .texture = tex,
     });
-    d->m_surface.current_texture = handle;
+    d->surface.current_texture = handle;
 
     return SurfaceTextureInfo{
         .status  = SurfaceStatus::Success,
@@ -401,9 +401,9 @@ SurfaceTextureInfo get_current_texture(Device d) {
 }
 
 SurfaceStatus present(Device d, Queue queue) {
-    d->m_surface.current_drawable->present();
-    d->m_surface.current_drawable = nullptr;
-    d->m_texture_pool.erase(d->m_surface.current_texture);
+    d->surface.current_drawable->present();
+    d->surface.current_drawable = nullptr;
+    d->texture_pool.erase(d->surface.current_texture);
     return SurfaceStatus::Success;
 }
 
@@ -423,7 +423,7 @@ GpuPtr malloc(Device d, size_t bytes, size_t align, Memory memory) {
     heap_info->setHazardTrackingMode(MTL::HazardTrackingModeUntracked);
     heap_info->setSize(bytes);
 
-    id<MTL::Heap> heap = NS::TransferPtr(d->m_device->newHeap(heap_info.get()));
+    id<MTL::Heap> heap = NS::TransferPtr(d->device->newHeap(heap_info.get()));
 
     const MTL::ResourceOptions resource_options
         = (memory == Memory::Gpu ? MTL::ResourceStorageModePrivate : MTL::ResourceStorageModeShared)
@@ -434,31 +434,31 @@ GpuPtr malloc(Device d, size_t bytes, size_t align, Memory memory) {
     id<MTL::Buffer> buffer = NS::TransferPtr(heap->newBuffer(bytes, resource_options, 0));
     if (!buffer) { return 0; }
 
-    auto handle = d->m_buffer_pool.emplace({
+    auto handle = d->buffer_pool.emplace({
         .buffer = buffer,
         .heap   = heap,
     });
-    d->m_residency_set->addAllocation(heap.get());
-    d->m_residency_set->commit();
+    d->residency_set->addAllocation(heap.get());
+    d->residency_set->commit();
     // TODO: Can i reduce the frenquency of commits at all?
 
-    rwlock_lock_write(&d->m_ptr_map_lock);
-    const auto insertion_pos = lower_bound<GpuPtrMap, PtrMapCompare>(d->m_ptr_map.begin(),
-                                                                     d->m_ptr_map.end(),
+    rwlock_lock_write(&d->ptr_map_lock);
+    const auto insertion_pos = lower_bound<GpuPtrMap, PtrMapCompare>(d->ptr_map.begin(),
+                                                                     d->ptr_map.end(),
                                                                      {.ptr = buffer->gpuAddress()});
-    d->m_ptr_map.insert(insertion_pos, {.ptr = buffer->gpuAddress(), .buffer = handle});
-    rwlock_unlock_write(&d->m_ptr_map_lock);
+    d->ptr_map.insert(insertion_pos, {.ptr = buffer->gpuAddress(), .buffer = handle});
+    rwlock_unlock_write(&d->ptr_map_lock);
 
     return buffer->gpuAddress();
 }
 
 BufferAndOffset buffer_and_offset_from_ptr(Device d, GpuPtr ptr) {
-    rwlock_lock_read(&d->m_ptr_map_lock);
-    const auto it = lower_bound<GpuPtrMap, PtrMapCompare>(d->m_ptr_map.begin(),
-                                                          d->m_ptr_map.end(),
+    rwlock_lock_read(&d->ptr_map_lock);
+    const auto it = lower_bound<GpuPtrMap, PtrMapCompare>(d->ptr_map.begin(),
+                                                          d->ptr_map.end(),
                                                           GpuPtrMap{.ptr = ptr});
-    auto       b  = &d->m_buffer_pool[it->buffer];
-    rwlock_unlock_read(&d->m_ptr_map_lock);
+    auto       b  = &d->buffer_pool[it->buffer];
+    rwlock_unlock_read(&d->ptr_map_lock);
 
     return {
         .buffer = b,
@@ -472,14 +472,14 @@ void* get_host_pointer(Device d, GpuPtr ptr) {
 }
 
 void free(Device d, GpuPtr ptr) {
-    rwlock_lock_write(&d->m_ptr_map_lock);
-    const auto it = lower_bound<GpuPtrMap, PtrMapCompare>(d->m_ptr_map.begin(),
-                                                          d->m_ptr_map.end(),
+    rwlock_lock_write(&d->ptr_map_lock);
+    const auto it = lower_bound<GpuPtrMap, PtrMapCompare>(d->ptr_map.begin(),
+                                                          d->ptr_map.end(),
                                                           GpuPtrMap{.ptr = ptr});
     assert(it->ptr == ptr);  // Shouldn't free from another pointer in the same allocation.
-    d->m_buffer_pool.erase(it->buffer);
-    d->m_ptr_map.erase(it, it + 1);
-    rwlock_unlock_write(&d->m_ptr_map_lock);
+    d->buffer_pool.erase(it->buffer);
+    d->ptr_map.erase(it, it + 1);
+    rwlock_unlock_write(&d->ptr_map_lock);
 }
 
 // MARK: Textures
@@ -496,7 +496,7 @@ TextureSizeAlign get_texture_size_align(Device d, const TextureDesc& desc) {
     info->setHazardTrackingMode(MTL::HazardTrackingModeUntracked);
     info->setUsage(bridge_texture_usage(desc.usage));
 
-    const auto size_align = d->m_device->heapTextureSizeAndAlign(info.get());
+    const auto size_align = d->device->heapTextureSizeAndAlign(info.get());
 
     return {.size = size_align.size, .align = size_align.align};
 }
@@ -520,12 +520,12 @@ Handle<Texture> create_texture(Device d, const TextureDesc& desc, GpuPtr locatio
         auto memory = buffer_and_offset_from_ptr(d, location);
         texture     = NS::TransferPtr(memory.buffer->heap->newTexture(info.get(), memory.offset));
     } else {
-        texture = NS::TransferPtr(d->m_device->newTexture(info.get()));
-        d->m_residency_set->addAllocation(texture.get());
-        d->m_residency_set->commit();
+        texture = NS::TransferPtr(d->device->newTexture(info.get()));
+        d->residency_set->addAllocation(texture.get());
+        d->residency_set->commit();
     }
 
-    auto handle = d->m_texture_pool.emplace({
+    auto handle = d->texture_pool.emplace({
         .texture = texture,
         .format  = desc.format,
     });
@@ -537,27 +537,27 @@ Handle<TextureHeap> create_texture_heap(Device d, const TextureHeapDesc& desc) {
     view_pool_descriptor->setResourceViewCount(desc.texture_count);
 
     auto texture_view_pool
-        = NS::TransferPtr(d->m_device->newTextureViewPool(view_pool_descriptor.get(), nullptr));
+        = NS::TransferPtr(d->device->newTextureViewPool(view_pool_descriptor.get(), nullptr));
 
-    const auto handle = d->m_texture_heap_pool.emplace(TextureHeap{
+    const auto handle = d->texture_heap_pool.emplace(TextureHeap{
         .pool           = texture_view_pool,
-        .bitset         = TwoLevelBitset(d->m_allocator, desc.texture_count),
-        .sampler_lookup = Vector<SamplerMapping>(d->m_allocator),
+        .bitset         = TwoLevelBitset(d->allocator, desc.texture_count),
+        .sampler_lookup = Vector<SamplerMapping>(d->allocator),
     });
     return handle;
 }
 
 void free(Device d, Handle<Texture> h) {
-    d->m_texture_pool.erase(h);
+    d->texture_pool.erase(h);
 }
 
 void free(Device d, Handle<TextureHeap> h) {
-    d->m_texture_heap_pool.erase(h);
+    d->texture_heap_pool.erase(h);
 }
 
 TextureView add_texture_view_to_heap(Device d, Handle<TextureHeap> h, const TextureViewDesc& desc) {
-    auto&                          heap      = d->m_texture_heap_pool[h];
-    auto&                          tex       = d->m_texture_pool[desc.texture];
+    auto&                          heap      = d->texture_heap_pool[h];
+    auto&                          tex       = d->texture_pool[desc.texture];
     id<MTL::TextureViewDescriptor> view_info = make_id<MTL::TextureViewDescriptor>();
     view_info->setLevelRange(NS::Range(desc.base_mip, desc.mip_count));
     view_info->setPixelFormat(bridge(desc.format));
@@ -571,7 +571,7 @@ TextureView add_texture_view_to_heap(Device d, Handle<TextureHeap> h, const Text
 }
 
 void remove_texture_view_from_heap(Device d, Handle<TextureHeap> h, TextureView view) {
-    auto&      heap = d->m_texture_heap_pool[h];
+    auto&      heap = d->texture_heap_pool[h];
     const auto base = heap.pool->baseResourceID()._impl;
     assert(view >= base && view < base + heap.pool->resourceViewCount());
     const auto index = view - heap.pool->baseResourceID()._impl;
@@ -579,7 +579,7 @@ void remove_texture_view_from_heap(Device d, Handle<TextureHeap> h, TextureView 
 }
 
 Sampler add_sampler_to_heap(Device d, Handle<TextureHeap> h, const SamplerDesc& sampler) {
-    auto& heap = d->m_texture_heap_pool[h];
+    auto& heap = d->texture_heap_pool[h];
 
     id<MTL::SamplerDescriptor> desc = make_id<MTL::SamplerDescriptor>();
     desc->setNormalizedCoordinates(sampler.coord == SamplerCoords::Normalized);
@@ -593,7 +593,7 @@ Sampler add_sampler_to_heap(Device d, Handle<TextureHeap> h, const SamplerDesc& 
     desc->setTAddressMode(addressing);
     desc->setMaxAnisotropy((uint32_t)sampler.max_anisotropy);
     desc->setSupportArgumentBuffers(true);
-    auto sampler_state = NS::TransferPtr(d->m_device->newSamplerState(desc.get()));
+    auto sampler_state = NS::TransferPtr(d->device->newSamplerState(desc.get()));
 
 
     Sampler result = sampler_state->gpuResourceID()._impl;
@@ -613,7 +613,7 @@ Sampler add_sampler_to_heap(Device d, Handle<TextureHeap> h, const SamplerDesc& 
 }
 
 void remove_sampler_from_heap(Device d, Handle<TextureHeap> h, Sampler s) {
-    auto& heap = d->m_texture_heap_pool[h];
+    auto& heap = d->texture_heap_pool[h];
 
     const auto it = lower_bound<SamplerMapping, SamplerMappingCompare>(heap.sampler_lookup.begin(),
                                                                        heap.sampler_lookup.end(),
@@ -691,7 +691,7 @@ Handle<Pipeline> create_compute_pipeline(Device                             d,
     NS::Error*       error   = nullptr;
     auto             options = make_id<MTL::CompileOptions>();
     id<MTL::Library> lib
-        = NS::TransferPtr(d->m_device->newLibrary(shader_source.get(), options.get(), &error));
+        = NS::TransferPtr(d->device->newLibrary(shader_source.get(), options.get(), &error));
 
     auto desc      = make_id<MTL4::ComputePipelineDescriptor>();
     auto func_desc = make_id<MTL4::LibraryFunctionDescriptor>();
@@ -709,13 +709,13 @@ Handle<Pipeline> create_compute_pipeline(Device                             d,
     }
 
     id<MTL::ComputePipelineState> compute_pipeline = NS::TransferPtr(
-        d->m_compiler->newComputePipelineState(desc.get(), d->m_options.get(), &error));
+        d->compiler->newComputePipelineState(desc.get(), d->options.get(), &error));
 
     const auto metadata = parse_metadata(*get_thread_local_arena(d),
                                          compute.spirv.cast<const char>(),
                                          compute.entry_point);
 
-    return d->m_pipeline_pool.emplace({
+    return d->pipeline_pool.emplace({
         .render_pipeline  = nullptr,
         .compute_pipeline = compute_pipeline,
         .metadata         = metadata,
@@ -737,12 +737,12 @@ Handle<Pipeline> create_graphics_pipeline(Device                             d,
     auto options = make_id<MTL::CompileOptions>();
 
     id<MTL::Library> vert_lib
-        = NS::TransferPtr(d->m_device->newLibrary(vert_source.get(), options.get(), &error));
+        = NS::TransferPtr(d->device->newLibrary(vert_source.get(), options.get(), &error));
 
     if (error != nullptr) { printf("%s\n", error->localizedDescription()->utf8String()); }
 
     id<MTL::Library> frag_lib
-        = NS::TransferPtr(d->m_device->newLibrary(frag_source.get(), options.get(), &error));
+        = NS::TransferPtr(d->device->newLibrary(frag_source.get(), options.get(), &error));
 
     if (error) { printf("%s\n", error->localizedDescription()->utf8String()); }
 
@@ -803,9 +803,9 @@ Handle<Pipeline> create_graphics_pipeline(Device                             d,
     }
 
     id<MTL::RenderPipelineState> render_pipeline = NS::TransferPtr(
-        d->m_compiler->newRenderPipelineState(pipeline_desc.get(), d->m_options.get(), &error));
+        d->compiler->newRenderPipelineState(pipeline_desc.get(), d->options.get(), &error));
 
-    return d->m_pipeline_pool.emplace({
+    return d->pipeline_pool.emplace({
         .render_pipeline  = render_pipeline,
         .compute_pipeline = nullptr,
         .topology         = desc.topology,
@@ -813,7 +813,7 @@ Handle<Pipeline> create_graphics_pipeline(Device                             d,
 }
 
 void free(Device d, Handle<Pipeline> pipeline) {
-    d->m_pipeline_pool.erase(pipeline);
+    d->pipeline_pool.erase(pipeline);
 }
 
 // MARK: State Objects
@@ -840,32 +840,32 @@ Handle<DepthStencilState> create_depth_stencil_state(Device d, const DepthStenci
     frontface_stencil->setReadMask(desc.stencil_read_mask);
     frontface_stencil->setWriteMask(desc.stencil_write_mask);
     info->setFrontFaceStencil(frontface_stencil.get());
-    auto state = NS::TransferPtr(d->m_device->newDepthStencilState(info.get()));
-    return d->m_depth_stencil_state_pool.emplace({
+    auto state = NS::TransferPtr(d->device->newDepthStencilState(info.get()));
+    return d->depth_stencil_state_pool.emplace({
         .state = state,
     });
 }
 
 void free_depth_stencil_state(Device d, Handle<DepthStencilState> state) {
-    d->m_depth_stencil_state_pool.erase(state);
+    d->depth_stencil_state_pool.erase(state);
 }
 
 // MARK: Semaphores
 
 Handle<Semaphore> create_semaphore(Device d, uint64_t initValue) {
-    auto event = NS::TransferPtr(d->m_device->newSharedEvent());
+    auto event = NS::TransferPtr(d->device->newSharedEvent());
     event->setSignaledValue(initValue);
-    return d->m_semaphore_pool.emplace({
+    return d->semaphore_pool.emplace({
         .event = event,
     });
 }
 
 void wait_semaphore(Device d, Handle<Semaphore> sema, uint64_t value) {
-    d->m_semaphore_pool[sema].event->waitUntilSignaledValue(value, UINT64_MAX);
+    d->semaphore_pool[sema].event->waitUntilSignaledValue(value, UINT64_MAX);
 }
 
 void free(Device d, Handle<Semaphore> sema) {
-    d->m_semaphore_pool.erase(sema);
+    d->semaphore_pool.erase(sema);
 }
 
 // MARK: Queue
@@ -900,10 +900,10 @@ static CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
             argument_table_desc->setMaxTextureBindCount(0);
             // Initialize the command pool here.
             *pool = CommandPool{
-                .allocator      = NS::TransferPtr(queue->device->m_device->newCommandAllocator()),
+                .allocator      = NS::TransferPtr(queue->device->device->newCommandAllocator()),
                 .argument_table = NS::TransferPtr(
-                    queue->device->m_device->newArgumentTable(argument_table_desc.get(), nullptr)),
-                .command_buffers = SegmentArray<CommandBufferImpl>(queue->device->m_allocator),
+                    queue->device->device->newArgumentTable(argument_table_desc.get(), nullptr)),
+                .command_buffers = SegmentArray<CommandBufferImpl>(queue->device->allocator),
                 .frame_idx       = 0,
                 .buffer_free_idx = 0,
             };
@@ -938,7 +938,7 @@ static CommandBufferImpl* get_command_buffer(Queue q, CommandPool* pool) {
 
     if (pool->command_buffers.size() <= pool->buffer_free_idx) {
         pool->command_buffers.emplace_back(CommandBufferImpl{
-            .command_buffer = NS::TransferPtr(device->m_device->newCommandBuffer()),
+            .command_buffer = NS::TransferPtr(device->device->newCommandBuffer()),
             .argument_table = pool->argument_table,
             .queue          = q,
             .pool           = pool,
@@ -952,23 +952,23 @@ static CommandBufferImpl* get_command_buffer(Queue q, CommandPool* pool) {
 }
 
 Queue get_queue(Device d, QueueType type) {
-    if (!d->m_queue.command_queue) {
-        d->m_queue = {
-            .command_queue  = NS::TransferPtr(d->m_device->newMTL4CommandQueue()),
-            .callback_event = NS::TransferPtr(d->m_device->newSharedEvent()),
-            .pending_events = Vector<QueueImpl::Event>(d->m_allocator),
+    if (!d->queue.command_queue) {
+        d->queue = {
+            .command_queue  = NS::TransferPtr(d->device->newMTL4CommandQueue()),
+            .callback_event = NS::TransferPtr(d->device->newSharedEvent()),
+            .pending_events = Vector<QueueImpl::Event>(d->allocator),
             .timeline_value = 0,
             .device         = d,
         };
     }
 
-    return &d->m_queue;
+    return &d->queue;
 }
 
 CommandBuffer queue_start_command_recording(Queue q) {
     auto d = q->device;
 
-    CommandPool* pool = get_command_pool(q, d->m_surface.frame_idx);
+    CommandPool* pool = get_command_pool(q, d->surface.frame_idx);
     if (pool == nullptr) { return nullptr; }
 
     CommandBuffer buffer = get_command_buffer(q, pool);
@@ -976,7 +976,7 @@ CommandBuffer queue_start_command_recording(Queue q) {
         buffer->command_buffer->beginCommandBuffer(pool->allocator.get());
         buffer->compute_encoder = nullptr;
         buffer->render_encoder  = nullptr;
-        buffer->command_buffer->useResidencySet(d->m_residency_set.get());
+        buffer->command_buffer->useResidencySet(d->residency_set.get());
     }
     return buffer;
 }
@@ -991,7 +991,7 @@ void queue_submit(Queue                     q,
     for (auto s : wait_semaphores) {
         // NOTE: Metal doesn't support waiting for a specific stage, so this is a full pipeline
         // flush?
-        id<MTL::SharedEvent> event = d->m_semaphore_pool[s.semaphore].event;
+        id<MTL::SharedEvent> event = d->semaphore_pool[s.semaphore].event;
         q->command_queue->wait(event.get(), s.value);
     }
 
@@ -1005,17 +1005,17 @@ void queue_submit(Queue                     q,
         commands                 = concat(&arena, commands, buf);
     }
 
-    if (wait_for_drawable) { q->command_queue->wait(d->m_surface.current_drawable.get()); }
+    if (wait_for_drawable) { q->command_queue->wait(d->surface.current_drawable.get()); }
 
     q->command_queue->commit(commands.data(), commands.size());
 
     for (auto s : signal_semaphores) {
         // NOTE: Metal doesn't support signaling after a specific stage.
-        id<MTL::SharedEvent> event = d->m_semaphore_pool[s.semaphore].event;
+        id<MTL::SharedEvent> event = d->semaphore_pool[s.semaphore].event;
         q->command_queue->signalEvent(event.get(), s.value);
     }
 
-    if (signal_drawable) { q->command_queue->signalDrawable(d->m_surface.current_drawable.get()); }
+    if (signal_drawable) { q->command_queue->signalDrawable(d->surface.current_drawable.get()); }
 }
 
 void queue_cancel(Queue q, Span<const Handle<CommandBuffer>> command_buffers) {}
@@ -1084,7 +1084,7 @@ void cmd_copy_to_texture(CommandBuffer                  cmd,
 
     auto             encoder     = get_compute_encoder(cmd);
     auto             src         = buffer_and_offset_from_ptr(d, srcGpu);
-    const auto&      t           = d->m_texture_pool[texture];
+    const auto&      t           = d->texture_pool[texture];
     const FormatInfo format_info = get_format_info(t.format);
     const uint64_t   pixels_per_row
         = info.source_row_pixels_stride == 0 ? info.image_extent.x : info.source_row_pixels_stride;
@@ -1131,7 +1131,7 @@ void cmd_barrier(CommandBuffer cmd, StageFlags before, StageFlags after) {
 }
 
 void cmd_set_pipeline(CommandBuffer cmd, Handle<Pipeline> pipeline) {
-    auto& p = cmd->device->m_pipeline_pool[pipeline];
+    auto& p = cmd->device->pipeline_pool[pipeline];
     assert((is_in_render_pass(cmd) && p.render_pipeline) || p.compute_pipeline);
     if (is_in_render_pass(cmd)) {
         cmd->render_encoder->setRenderPipelineState(p.render_pipeline.get());
@@ -1147,7 +1147,7 @@ void cmd_set_pipeline(CommandBuffer cmd, Handle<Pipeline> pipeline) {
 
 void cmd_set_depth_stencil_state(CommandBuffer cmd, Handle<DepthStencilState> state) {
     assert(is_in_render_pass(cmd));
-    auto& d = cmd->device->m_depth_stencil_state_pool[state];
+    auto& d = cmd->device->depth_stencil_state_pool[state];
     cmd->render_encoder->setDepthStencilState(d.state.get());
 }
 
@@ -1209,7 +1209,7 @@ void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
     for (const auto& c : desc.color_attachments) {
         id<MTL::RenderPassColorAttachmentDescriptor> attachment
             = make_id<MTL::RenderPassColorAttachmentDescriptor>();
-        auto& tex = d->m_texture_pool[c.texture];
+        auto& tex = d->texture_pool[c.texture];
         attachment->setTexture(tex.texture.get());
         attachment->setLoadAction(bridge(c.load_op));
         attachment->setStoreAction(bridge(c.store_op));
@@ -1222,7 +1222,7 @@ void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
     if (desc.depth_attachment.texture) {
         id<MTL::RenderPassDepthAttachmentDescriptor> depth_desc
             = make_id<MTL::RenderPassDepthAttachmentDescriptor>();
-        auto& depth_tex = d->m_texture_pool[desc.depth_attachment.texture];
+        auto& depth_tex = d->texture_pool[desc.depth_attachment.texture];
         depth_desc->setTexture(depth_tex.texture.get());
         depth_desc->setLoadAction(bridge(desc.depth_attachment.load_op));
         depth_desc->setStoreAction(bridge(desc.depth_attachment.store_op));
