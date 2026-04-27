@@ -524,23 +524,17 @@ enum class UsageFlags : uint16_t {
 LOON_DEFINE_BITWISE_OPS(UsageFlags);
 
 enum class StageFlags : uint16_t {
-    None           = 0,
-    Transfer       = 0x01,
-    Compute        = 0x02,
-    RasterColorOut = 0x04,
-    PixelShader    = 0x08,
-    VertexShader   = 0x10,
-    Host           = 0x20,
+    None              = 0,
+    IndirectArguments = 0x01,
+    Transfer          = 0x02,
+    Compute           = 0x04,
+    RasterColorOut    = 0x08,
+    PixelShader       = 0x10,
+    FragmentTests     = 0x20,
+    VertexShader      = 0x40,
+    Host              = 0x80,
 };
 LOON_DEFINE_BITWISE_OPS(StageFlags);
-
-enum class HazardFlags : uint8_t {
-    None          = 0x0,
-    DrawArguments = 0x1,
-    Descriptors   = 0x2,
-    DepthStencil  = 0x4,
-};
-LOON_DEFINE_BITWISE_OPS(HazardFlags);
 
 enum class LoadOp : uint8_t {
     Undefined,
@@ -1261,13 +1255,8 @@ void cmd_set_texture_heap(CommandBuffer cmd, Handle<TextureHeap> heap);
  * @param cmd
  * @param before
  * @param after
- * @param image_transitions
- * @param hazards
  */
-void cmd_barrier(CommandBuffer cmd,
-                 StageFlags    before,
-                 StageFlags    after,
-                 HazardFlags   hazards = HazardFlags(0));
+void cmd_barrier(CommandBuffer cmd, StageFlags before, StageFlags after);
 
 /**
  * @brief

@@ -2885,15 +2885,13 @@ void cmd_set_texture_heap(CommandBuffer cmd, Handle<TextureHeap> heap) {
                                         nullptr);
 }
 
-void cmd_barrier(CommandBuffer cmd, StageFlags before, StageFlags after, HazardFlags hazards) {
-    auto impl = cmd->device;
-    // TODO: Use HazardFlags to reduce the stage/access_masks unless necessary.
+void cmd_barrier(CommandBuffer cmd, StageFlags before, StageFlags after) {
+    auto       impl      = cmd->device;
     const auto src_stage = bridge_pipeline_stage(before);
-    auto       dst_stage = bridge_pipeline_stage(after);
-    if (any(hazards & HazardFlags::DrawArguments)) {
-        dst_stage |= VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
-    }
+    const auto dst_stage = bridge_pipeline_stage(after);
 
+    // TODO: There's no equivalent on Metal so I've left this conservative. May want to expose this
+    // as a parameter, but I dislike vulkan-only parameters.
     constexpr auto access = VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT;
 
     const VkMemoryBarrier2 barrier_info{
@@ -2904,8 +2902,6 @@ void cmd_barrier(CommandBuffer cmd, StageFlags before, StageFlags after, HazardF
         .dstStageMask  = dst_stage,
         .dstAccessMask = access,
     };
-
-    Arena arena = *get_thread_local_arena(impl);
 
     const VkDependencyInfo info{
         .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,

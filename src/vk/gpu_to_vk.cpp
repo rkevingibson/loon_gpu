@@ -256,23 +256,23 @@ VkPresentModeKHR bridge(PresentMode mode) {
 
 VkPipelineStageFlags2 bridge_pipeline_stage(StageFlags stage) {
     VkPipelineStageFlags2 out = 0;
-    out |= (stage & StageFlags::Transfer) != StageFlags::None ? VK_PIPELINE_STAGE_2_TRANSFER_BIT
-                                                              : 0;
-    out |= (stage & StageFlags::Compute) != StageFlags::None
-               ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT
-               : 0;
-    out |= (stage & StageFlags::RasterColorOut) != StageFlags::None
-               ? VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT
-               : 0;
-    out |= (stage & StageFlags::PixelShader) != StageFlags::None
-               ? VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
+    out |= any(stage & StageFlags::IndirectArguments) ? VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT : 0;
+    out |= any(stage & StageFlags::Transfer) ? VK_PIPELINE_STAGE_2_TRANSFER_BIT : 0;
+    out |= any(stage & StageFlags::Compute) ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT : 0;
+    out |= any(stage & StageFlags::RasterColorOut) ? VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT
+                                                   : 0;
+    out |= any(stage & StageFlags::PixelShader) ? VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
+                                                      | VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT
+                                                      | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT
+                                                : 0;
+    out |= any(stage & StageFlags::FragmentTests)
+               ? VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT
                      | VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT
-                     | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT
                : 0;
-    out |= (stage & StageFlags::VertexShader) != StageFlags::None
+    out |= any(stage & StageFlags::VertexShader)
                ? VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT
                : 0;
-    out |= (stage & StageFlags::Host) != StageFlags::None ? VK_PIPELINE_STAGE_2_HOST_BIT : 0;
+    out |= any(stage & StageFlags::Host) ? VK_PIPELINE_STAGE_2_HOST_BIT : 0;
     return out;
 }
 

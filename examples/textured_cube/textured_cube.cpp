@@ -261,8 +261,8 @@ void TexturedCube::Update(const WindowState& window) {
     gpu::cmd_wait_for_surface_texture(cmd);
     gpu::cmd_barrier(
         cmd,
-        StageFlags::PixelShader,
-        StageFlags::PixelShader);  // We only have one depth buffer so need to stall here.
+        StageFlags::FragmentTests,
+        StageFlags::FragmentTests);  // We only have one depth buffer so need to stall here.
     gpu::cmd_begin_render_pass(cmd,{
                                    .color_attachments = RenderAttachment{
                                        .texture = surface_texture.texture,

@@ -1113,7 +1113,7 @@ void cmd_set_texture_heap(CommandBuffer cmd, Handle<TextureHeap> heap) {
     // This is currently a NOOP since all textures are in the global residency set.
 }
 
-void cmd_barrier(CommandBuffer cmd, StageFlags before, StageFlags after, HazardFlags hazards) {
+void cmd_barrier(CommandBuffer cmd, StageFlags before, StageFlags after) {
     auto d = cmd->device;
 
     assert(!is_in_render_pass(
@@ -1121,22 +1121,11 @@ void cmd_barrier(CommandBuffer cmd, StageFlags before, StageFlags after, HazardF
     // If we're in a compute pass, can encode this
 
     // TODO: Avoid creating a compute encoder if we're not in one, for more efficient barriers.
-    // TODO: Ensure visibility options are correct here.
-
-    if (before == StageFlags::None || after == StageFlags::None) {
-        // In vulkan this is a valid image transition, but it's meaningless here. Skip it.
-        return;
-    } else if (before == StageFlags::RasterColorOut || after == StageFlags::RasterColorOut) {
-        // TODO: Check correctness of this in render-to-texture cases.
-        // These barriers should be covered by waiting for drawables? uncertain here, maybe needed
-        // for deferred rendering but I think there's implicit render pass synchronization.
-        return;
-    }
 
     // This isn't the optimal option, but for now this should work:
     auto encoder = get_compute_encoder(cmd);
 
-    encoder->barrierAfterStages(bridge(before), bridge(after), MTL4::VisibilityOptionDevice);
+    encoder->barrierAfterStages(bridge(before), bridge(after), MTL4::VisibilityOptionResourceAlias);
 
     end_compute_pass(cmd);
 }
