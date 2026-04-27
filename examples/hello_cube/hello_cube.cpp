@@ -232,14 +232,7 @@ void HelloCube::Update(const WindowState& window) {
 
     auto cmd = gpu::queue_start_command_recording(m_queue);
     gpu::cmd_wait_for_surface_texture(cmd);
-    gpu::cmd_barrier(cmd,
-                     StageFlags::RasterColorOut,
-                     StageFlags::PixelShader,
-                     TextureTransition{
-                         .texture    = m_depth_texture,
-                         .old_layout = loon::gpu::Layout::DontCare,
-                         .new_layout = Layout::General,
-                     });
+    gpu::cmd_barrier(cmd, StageFlags::PixelShader, StageFlags::PixelShader);
     gpu::cmd_begin_render_pass(cmd, {
                                    .color_attachments = RenderAttachment{
                                        .texture = surface_texture.texture,

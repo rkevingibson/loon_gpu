@@ -401,14 +401,6 @@ VkCompareOp bridge(Op op) {
     }
 }
 
-VkImageLayout bridge(Layout layout) {
-    switch (layout) {
-        case Layout::DontCare: return VK_IMAGE_LAYOUT_UNDEFINED;
-        case Layout::General: return VK_IMAGE_LAYOUT_GENERAL;
-    }
-    return VK_IMAGE_LAYOUT_MAX_ENUM;
-}
-
 VkIndexType bridge(IndexType t) {
     switch (t) {
         case IndexType::UInt16: return VK_INDEX_TYPE_UINT16;

@@ -90,8 +90,6 @@ static void DestroyTexture(ImTextureData* tex) {
 
 static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) {
     ImGui_ImplLoon_Data* bd = GetBackendData();
-    bool                 need_barrier_before_copy
-        = false;  // Do we need a resource barrier before we copy new data in?
 
     if (tex->Status == ImTextureStatus_WantCreate) {
         // Create and upload new texture to graphics system
@@ -123,8 +121,7 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
         // Store identifiers
         // Because invalid tex id == 0, we add one here and subtract on retrieval.
         tex->SetTexID((ImTextureID)backend_tex->tex_heap_idx + 1);
-        tex->BackendUserData     = backend_tex;
-        need_barrier_before_copy = true;
+        tex->BackendUserData = backend_tex;
     }
 
     if (tex->Status == ImTextureStatus_WantCreate || tex->Status == ImTextureStatus_WantUpdates) {
@@ -132,9 +129,6 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
         IM_ASSERT(tex->Format == ImTextureFormat_RGBA32);
 
         // Use the staging buffer to upload the texture data to the GPU.
-        // Check the need_barrier_before_copy to decide on synchronization, and
-        // insert a barrier after.
-
         // For simplicity, use a semamphore to make this update a blocking function,
         // not async.
         if (fb->buffer_size < tex->GetSizeInBytes()) {
@@ -147,17 +141,6 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
         memcpy(dst, tex->GetPixels(), tex->GetSizeInBytes());
 
         auto cmd = gpu::queue_start_command_recording(bd->queue);
-
-        if (need_barrier_before_copy) {
-            gpu::cmd_barrier(cmd,
-                             gpu::StageFlags::None,
-                             gpu::StageFlags::Transfer,
-                             gpu::TextureTransition{
-                                 .texture    = backend_tex->texture,
-                                 .old_layout = loon::gpu::Layout::DontCare,
-                                 .new_layout = loon::gpu::Layout::General,
-                             });
-        }
 
         gpu::cmd_copy_to_texture(
             cmd,

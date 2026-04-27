@@ -21,7 +21,6 @@ VkPipelineColorBlendAttachmentState bridge(const BlendDesc& state);
 VkAttachmentLoadOp                  bridge(LoadOp op);
 VkAttachmentStoreOp                 bridge(StoreOp op);
 VkCompareOp                         bridge(Op op);
-VkImageLayout                       bridge(Layout layout);
 VkIndexType                         bridge(IndexType t);
 VkCullModeFlags                     bridge(Cull c);
 

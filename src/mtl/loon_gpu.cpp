@@ -28,7 +28,6 @@ template class Span<const Format>;
 template class Span<const PresentMode>;
 template class Span<const CommandBuffer>;
 template class Span<const SemaphoreInfo>;
-template class Span<const TextureTransition>;
 template class Span<const SpecializationConstant>;
 template class Function<void>;
 
@@ -1114,15 +1113,8 @@ void cmd_set_texture_heap(CommandBuffer cmd, Handle<TextureHeap> heap) {
     // This is currently a NOOP since all textures are in the global residency set.
 }
 
-void cmd_barrier(CommandBuffer                 cmd,
-                 StageFlags                    before,
-                 StageFlags                    after,
-                 Span<const TextureTransition> image_transitions,
-                 HazardFlags                   hazards) {
+void cmd_barrier(CommandBuffer cmd, StageFlags before, StageFlags after, HazardFlags hazards) {
     auto d = cmd->device;
-    (void)image_transitions;  // Only thing we could maybe use image transitions for is waiting
-                              // for/signalling the drawable, but we're currently doing that when
-                              // getting the drawable and presenting.
 
     assert(!is_in_render_pass(
         cmd));  // To match vulkan behaviour, don't allow barriers in a render pass.

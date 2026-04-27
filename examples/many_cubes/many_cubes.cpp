@@ -159,14 +159,6 @@ ManyCubes::ManyCubes(const WindowState& window_state) {
 
     // GPU-side copy, but block on the result for simplicity
     auto cmd = gpu::queue_start_command_recording(m_queue);
-    gpu::cmd_barrier(cmd,
-                     StageFlags::None,
-                     StageFlags::Transfer,
-                     TextureTransition{
-                         .texture    = m_color_texture,
-                         .old_layout = loon::gpu::Layout::DontCare,
-                         .new_layout = Layout::General,
-                     });
     gpu::cmd_memcpy(cmd, m_vertex_ptr, staging_buffer, Cube::kSize);
 
     gpu::cmd_copy_to_texture(cmd,
@@ -295,14 +287,8 @@ void ManyCubes::Update(const WindowState& window) {
     auto cmd         = gpu::queue_start_command_recording(m_queue);
 
     gpu::cmd_wait_for_surface_texture(cmd);
-    gpu::cmd_barrier(cmd,
-                     StageFlags::RasterColorOut,
-                     StageFlags::PixelShader,
-                     TextureTransition{
-                         .texture    = m_depth_texture,
-                         .old_layout = Layout::DontCare,
-                         .new_layout = Layout::General,
-                     });
+    // Barrier to prevent the depth buffer being cleared before the last frame was done.
+    gpu::cmd_barrier(cmd, StageFlags::PixelShader, StageFlags::PixelShader);
 
     gpu::cmd_begin_render_pass(cmd,{
         .color_attachments = RenderAttachment {

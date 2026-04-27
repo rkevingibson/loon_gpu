@@ -30,7 +30,6 @@ template class Span<const Format>;
 template class Span<const PresentMode>;
 template class Span<const CommandBuffer>;
 template class Span<const SemaphoreInfo>;
-template class Span<const TextureTransition>;
 template class Span<const SpecializationConstant>;
 template class Function<void>;
 
@@ -116,7 +115,6 @@ struct LogicalDeviceCreateResult {
     VkResult result;
     VkDevice logical_device;
 };
-
 
 struct DepthStencilState : DepthStencilDesc {};
 
@@ -284,6 +282,10 @@ struct DeviceImpl {
     Vector<GpuPtrMap> m_ptr_map;
 
     QueueImpl m_queues[static_cast<size_t>(QueueType::ValidCount)];
+
+    mutex                   m_texture_initialization_lock = LOON_MUTEX_INIT;
+    Vector<Handle<Texture>> m_uninitialized_textures;
+    // TODO: For multiple queue support, would need more stuff here for texture initialization.
 };
 
 // MARK: Initialization
@@ -1122,6 +1124,7 @@ Device create_device(const DeviceDesc& desc) {
                             }),
         .m_ptr_map_lock = LOON_RWLOCK_INIT,
         .m_ptr_map            = Vector<GpuPtrMap>(alloc),
+        .m_uninitialized_textures = Vector<Handle<Texture>>(alloc),
     };
 }
 
@@ -1567,7 +1570,6 @@ static BufferAndOffset buffer_and_offset_from_ptr(Device d, GpuPtr ptr) {
     };
 }
 
-
 void free(Device d, GpuPtr ptr) {
     rwlock_lock_write(&d->m_ptr_map_lock);
     const auto it = lower_bound(d->m_ptr_map.begin(), d->m_ptr_map.end(), GpuPtrMap{.ptr = ptr});
@@ -1583,7 +1585,6 @@ void* get_host_pointer(Device d, GpuPtr ptr) {
     rwlock_unlock_read(&d->m_ptr_map_lock);
     return (char*)buffer.host_ptr + (ptr - buffer.device_ptr);
 }
-
 
 // MARK: Textures
 
@@ -1692,6 +1693,10 @@ Handle<Texture> create_texture(Device d, const TextureDesc& desc, GpuPtr locatio
         .vk_type            = bridge_view_type(desc.type),
         .format             = desc.format,
     });
+
+    mutex_lock(&d->m_texture_initialization_lock);
+    d->m_uninitialized_textures.push_back(handle);
+    mutex_unlock(&d->m_texture_initialization_lock);
 
     return handle;
 }
@@ -2508,10 +2513,12 @@ CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
                 .command_pool    = command_pool,
                 .command_buffers = SegmentArray<CommandBufferImpl>(queue->device->m_allocator),
                 .buffer_free_idx = 0,
+                .frame_idx       = frame_idx,
             };
         } else if (pool->frame_idx != frame_idx) {
             // Last time this was used was on a different frame, so reset the pool.
             reset_command_pool(queue->device->m_api, queue->device->m_device, pool);
+            pool->frame_idx = frame_idx;
         }
     } else {
         log(queue->device,
@@ -2590,7 +2597,6 @@ void cmd_finalize(CommandBuffer cmd) {
     auto d = cmd->device;
     auto q = cmd->queue;
     chk(d, d->m_api.vkEndCommandBuffer(cmd->buffer));
-
     release_command_pool(q, cmd->pool);
 }
 
@@ -2600,11 +2606,66 @@ void queue_submit(Queue                     q,
                   Span<const SemaphoreInfo> signal_semaphores) {
     auto d = q->device;
 
-    auto arena = *get_thread_local_arena(d);
-
+    auto                            arena = *get_thread_local_arena(d);
     Span<VkSemaphoreSubmitInfo>     wait_info;
     Span<VkCommandBufferSubmitInfo> command_info;
     Span<VkSemaphoreSubmitInfo>     signal_info;
+
+    // To start, we need to check if we need to initialize any textures before they can be used.
+    mutex_lock(&d->m_texture_initialization_lock);
+    Vector<Handle<Texture>> texture_list(d->m_allocator);
+    swap(d->m_uninitialized_textures, texture_list);
+    mutex_unlock(&d->m_texture_initialization_lock);
+
+    if (texture_list.size() > 0) {
+        CommandBuffer               cmd = queue_start_command_recording(q);
+        Span<VkImageMemoryBarrier2> image_barriers;
+        for (auto tex : texture_list) {
+            auto image = d->m_texture_pool[tex];
+            image_barriers = concat(&arena, image_barriers,  VkImageMemoryBarrier2{
+                .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+                .pNext            = nullptr,
+                .srcStageMask     = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+                .srcAccessMask    = 0,
+                .dstStageMask     = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                .dstAccessMask    = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+                .oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED,
+                .newLayout        = VK_IMAGE_LAYOUT_GENERAL,
+                .image            = image.vk_image,
+                .subresourceRange = VkImageSubresourceRange{
+                    .aspectMask = aspects_for_format(image.format),
+                    .baseMipLevel = 0,
+                    .levelCount = VK_REMAINING_MIP_LEVELS,
+                    .baseArrayLayer =0 ,
+                    .layerCount = VK_REMAINING_ARRAY_LAYERS,
+                },
+            });
+        }
+
+        const VkDependencyInfo dependency_info{
+            .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .pNext                    = nullptr,
+            .dependencyFlags          = 0,
+            .memoryBarrierCount       = 0,
+            .pMemoryBarriers          = nullptr,
+            .bufferMemoryBarrierCount = 0,
+            .pBufferMemoryBarriers    = nullptr,
+            .imageMemoryBarrierCount  = static_cast<uint32_t>(image_barriers.size()),
+            .pImageMemoryBarriers     = image_barriers.data(),
+        };
+        d->m_api.vkCmdPipelineBarrier2(cmd->buffer, &dependency_info);
+
+        cmd_finalize(cmd);
+        command_info = concat(&arena,
+                              command_info,
+                              VkCommandBufferSubmitInfo{
+                                  .sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+                                  .pNext         = nullptr,
+                                  .commandBuffer = cmd->buffer,
+                                  .deviceMask    = 1,
+                              });
+    }
+
 
     for (uint32_t i = 0; i < wait_semaphores.size(); ++i) {
         wait_info = concat(
@@ -2824,11 +2885,7 @@ void cmd_set_texture_heap(CommandBuffer cmd, Handle<TextureHeap> heap) {
                                         nullptr);
 }
 
-void cmd_barrier(CommandBuffer                 cmd,
-                 StageFlags                    before,
-                 StageFlags                    after,
-                 Span<const TextureTransition> image_transitions,
-                 HazardFlags                   hazards) {
+void cmd_barrier(CommandBuffer cmd, StageFlags before, StageFlags after, HazardFlags hazards) {
     auto impl = cmd->device;
     // TODO: Use HazardFlags to reduce the stage/access_masks unless necessary.
     const auto src_stage = bridge_pipeline_stage(before);
@@ -2850,31 +2907,6 @@ void cmd_barrier(CommandBuffer                 cmd,
 
     Arena arena = *get_thread_local_arena(impl);
 
-    Span<VkImageMemoryBarrier2> image_barriers;
-    for (const auto& t : image_transitions) {
-        const auto& tex = impl->m_texture_pool[t.texture];
-        image_barriers = concat(&arena,
-                                image_barriers,
-                                VkImageMemoryBarrier2{
-                                    .sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-                                    .pNext            = nullptr,
-                                    .srcStageMask     = src_stage,
-                                    .srcAccessMask    = access,
-                                    .dstStageMask     = dst_stage,
-                                    .dstAccessMask    = access,
-                                    .oldLayout        = bridge(t.old_layout),
-                                    .newLayout        = bridge(t.new_layout),
-                                    .image            = tex.vk_image,
-                                    .subresourceRange = VkImageSubresourceRange{
-                                        .aspectMask = aspects_for_format(tex.format),
-                                        .baseMipLevel = 0,
-                                        .levelCount = VK_REMAINING_MIP_LEVELS,
-                                        .baseArrayLayer =0 ,
-                                        .layerCount = VK_REMAINING_ARRAY_LAYERS,
-                                    },
-                                });
-    }
-
     const VkDependencyInfo info{
         .sType                    = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
         .pNext                    = nullptr,
@@ -2883,8 +2915,8 @@ void cmd_barrier(CommandBuffer                 cmd,
         .pMemoryBarriers          = &barrier_info,
         .bufferMemoryBarrierCount = 0,
         .pBufferMemoryBarriers    = nullptr,
-        .imageMemoryBarrierCount  = static_cast<uint32_t>(image_barriers.size()),
-        .pImageMemoryBarriers     = image_barriers.data(),
+        .imageMemoryBarrierCount  = 0,
+        .pImageMemoryBarriers     = nullptr,
     };
     impl->m_api.vkCmdPipelineBarrier2(cmd->buffer, &info);
 }

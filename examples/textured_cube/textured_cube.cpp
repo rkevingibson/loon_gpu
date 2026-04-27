@@ -164,14 +164,6 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
     stbi_image_free(image_data);
 
     auto cmd = gpu::queue_start_command_recording(m_queue);
-    gpu::cmd_barrier(cmd,
-                     StageFlags::None,
-                     StageFlags::Transfer,
-                     TextureTransition{
-                         .texture    = m_color_texture,
-                         .old_layout = loon::gpu::Layout::DontCare,
-                         .new_layout = Layout::General,
-                     });
     gpu::cmd_memcpy(cmd, m_vertex_ptr, m_constant_buffer, Cube::kSize);
 
     gpu::cmd_copy_to_texture(cmd,
@@ -267,14 +259,10 @@ void TexturedCube::Update(const WindowState& window) {
 
     gpu::cmd_set_texture_heap(cmd, m_texture_heap);
     gpu::cmd_wait_for_surface_texture(cmd);
-    gpu::cmd_barrier(cmd,
-                     StageFlags(StageFlags::PixelShader),
-                     StageFlags(StageFlags::PixelShader),
-                     TextureTransition{
-                         .texture    = m_depth_texture,
-                         .old_layout = loon::gpu::Layout::DontCare,
-                         .new_layout = Layout::General,
-                     });
+    gpu::cmd_barrier(
+        cmd,
+        StageFlags::PixelShader,
+        StageFlags::PixelShader);  // We only have one depth buffer so need to stall here.
     gpu::cmd_begin_render_pass(cmd,{
                                    .color_attachments = RenderAttachment{
                                        .texture = surface_texture.texture,
