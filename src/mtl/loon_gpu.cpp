@@ -1121,12 +1121,11 @@ void cmd_barrier(CommandBuffer cmd, StageFlags before, StageFlags after) {
     // If we're in a compute pass, can encode this
 
     // TODO: Avoid creating a compute encoder if we're not in one, for more efficient barriers.
-    // TODO: Ensure visibility options are correct here.
 
     // This isn't the optimal option, but for now this should work:
     auto encoder = get_compute_encoder(cmd);
 
-    encoder->barrierAfterStages(bridge(before), bridge(after), MTL4::VisibilityOptionDevice);
+    encoder->barrierAfterStages(bridge(before), bridge(after), MTL4::VisibilityOptionResourceAlias);
 
     end_compute_pass(cmd);
 }

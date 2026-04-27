@@ -2886,11 +2886,12 @@ void cmd_set_texture_heap(CommandBuffer cmd, Handle<TextureHeap> heap) {
 }
 
 void cmd_barrier(CommandBuffer cmd, StageFlags before, StageFlags after) {
-    auto impl = cmd->device;
-    // TODO: Use HazardFlags to reduce the stage/access_masks unless necessary.
+    auto       impl      = cmd->device;
     const auto src_stage = bridge_pipeline_stage(before);
     const auto dst_stage = bridge_pipeline_stage(after);
 
+    // TODO: There's no equivalent on Metal so I've left this conservative. May want to expose this
+    // as a parameter, but I dislike vulkan-only parameters.
     constexpr auto access = VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT;
 
     const VkMemoryBarrier2 barrier_info{
