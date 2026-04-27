@@ -283,15 +283,12 @@ void ParticleEmitter::Update(const WindowState& window) {
 
     gpu::cmd_set_pipeline(cmd, m_update_sim_pipeline);
     gpu::cmd_dispatch(cmd, sim_args, Dimension3D{.x = kMaxNumParticles / 64, .y = 1, .z = 1});
-    gpu::cmd_barrier(cmd,
-                     StageFlags::Compute,
-                     StageFlags::VertexShader,
-                     HazardFlags::DrawArguments);
+    gpu::cmd_barrier(cmd, StageFlags::Compute, StageFlags::IndirectArguments);
 
     // Render particles
     gpu::cmd_wait_for_surface_texture(cmd);
     // We only have one depth buffer so we need to stall here
-    gpu::cmd_barrier(cmd, StageFlags::PixelShader, StageFlags::PixelShader);
+    gpu::cmd_barrier(cmd, StageFlags::FragmentTests, StageFlags::FragmentTests);
 
     gpu::cmd_begin_render_pass(cmd,{
         .color_attachments = RenderAttachment {

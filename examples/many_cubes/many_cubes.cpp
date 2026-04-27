@@ -288,7 +288,7 @@ void ManyCubes::Update(const WindowState& window) {
 
     gpu::cmd_wait_for_surface_texture(cmd);
     // Barrier to prevent the depth buffer being cleared before the last frame was done.
-    gpu::cmd_barrier(cmd, StageFlags::PixelShader, StageFlags::PixelShader);
+    gpu::cmd_barrier(cmd, StageFlags::FragmentTests, StageFlags::FragmentTests);
 
     gpu::cmd_begin_render_pass(cmd,{
         .color_attachments = RenderAttachment {

@@ -237,10 +237,12 @@ MTL::Stages bridge(StageFlags s) {
         StageFlags  in;
         MTL::Stages out;
     } kStageMap[] = {
+        {StageFlags::IndirectArguments, MTL::StageVertex | MTL::StageDispatch},
         {StageFlags::Transfer, MTL::StageBlit},
         {StageFlags::Compute, MTL::StageDispatch},
         {StageFlags::RasterColorOut, MTL::StageFragment},
         {StageFlags::PixelShader, MTL::StageFragment},
+        {StageFlags::FragmentTests, MTL::StageFragment},
         {StageFlags::VertexShader, MTL::StageVertex},
     };
     MTL::Stages out = 0;
