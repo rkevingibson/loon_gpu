@@ -78,7 +78,7 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
         return gpu::create_compute_pipeline(
             m_device,
             {
-                  .spirv       = Span(spirv.data(), spirv.size()).as_bytes(),
+                  .source      = Span(spirv.data(), spirv.size()).as_bytes(),
                   .entry_point = name,
             });
     };
@@ -92,11 +92,11 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
     m_render_particle_pipeline = gpu::create_graphics_pipeline(
         m_device,
         {
-            .spirv       = Span(vertex_spirv.data(), vertex_spirv.size()),
+            .source      = Span(vertex_spirv.data(), vertex_spirv.size()),
             .entry_point = "vertex_main"_sv,
         },
         {
-            .spirv       = Span(fragment_spirv.data(), fragment_spirv.size()),
+            .source      = Span(fragment_spirv.data(), fragment_spirv.size()),
             .entry_point = "fragment_main"_sv,
         },
         RasterDesc{

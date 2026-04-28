@@ -677,7 +677,7 @@ static id<MTL::FunctionConstantValues> construct_constant_values(
 Handle<Pipeline> create_compute_pipeline(Device                             d,
                                          ShaderSource                       compute,
                                          Span<const SpecializationConstant> constants) {
-    id<NS::String> shader_source = get_span_as_string(compute.spirv.cast<const char>());
+    id<NS::String> shader_source = get_span_as_string(compute.source.cast<const char>());
     id<NS::String> entry_point   = get_span_as_string(compute.entry_point);
 
     NS::Error*       error   = nullptr;
@@ -704,7 +704,7 @@ Handle<Pipeline> create_compute_pipeline(Device                             d,
         NS::TransferPtr(d->compiler->newComputePipelineState(desc.get(), d->options.get(), &error));
 
     const auto metadata = parse_metadata(*get_thread_local_arena(d),
-                                         compute.spirv.cast<const char>(),
+                                         compute.source.cast<const char>(),
                                          compute.entry_point);
 
     return d->pipeline_pool.emplace({
@@ -720,9 +720,9 @@ Handle<Pipeline> create_graphics_pipeline(Device                             d,
                                           const RasterDesc&                  desc,
                                           Span<const SpecializationConstant> constants) {
     // TODO: Error handling/propagation
-    id<NS::String> vert_source      = get_span_as_string(vertex.spirv.cast<const char>());
+    id<NS::String> vert_source      = get_span_as_string(vertex.source.cast<const char>());
     id<NS::String> vert_entry_point = get_span_as_string(vertex.entry_point);
-    id<NS::String> frag_source      = get_span_as_string(fragment.spirv.cast<const char>());
+    id<NS::String> frag_source      = get_span_as_string(fragment.source.cast<const char>());
     id<NS::String> frag_entry_point = get_span_as_string(fragment.entry_point);
     NS::Error*     error            = nullptr;
 

@@ -61,11 +61,11 @@ HelloTriangle::HelloTriangle(const WindowState& window_state) {
     m_render_pipeline = gpu::create_graphics_pipeline(
         m_device,
         {
-            .spirv       = Span(vertex_spirv.data(), vertex_spirv.size()).as_bytes(),
+            .source      = Span(vertex_spirv.data(), vertex_spirv.size()).as_bytes(),
             .entry_point = "vertex_main"_sv,
         },
         {
-            .spirv       = Span(fragment_spirv.data(), fragment_spirv.size()).as_bytes(),
+            .source      = Span(fragment_spirv.data(), fragment_spirv.size()).as_bytes(),
             .entry_point = "fragment_main"_sv,
         },
         RasterDesc{.color_targets = {{.format = m_swapchain_format}}});

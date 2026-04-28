@@ -2012,8 +2012,8 @@ Handle<Pipeline> create_compute_pipeline(Device                             d,
         .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .pNext    = nullptr,
         .flags    = 0,
-        .codeSize = source.spirv.size(),
-        .pCode    = reinterpret_cast<const uint32_t*>(source.spirv.data()),
+        .codeSize = source.source.size(),
+        .pCode    = reinterpret_cast<const uint32_t*>(source.source.data()),
     };
 
     VkShaderModule module;
@@ -2072,8 +2072,8 @@ Handle<Pipeline> create_graphics_pipeline(Device                             d,
         .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .pNext    = nullptr,
         .flags    = 0,
-        .codeSize = vertex.spirv.size(),
-        .pCode    = reinterpret_cast<const uint32_t*>(vertex.spirv.data()),
+        .codeSize = vertex.source.size(),
+        .pCode    = reinterpret_cast<const uint32_t*>(vertex.source.data()),
     };
     VkShaderModule vert_module;
     chk(d, d->api.vkCreateShaderModule(d->device, &vert_info, nullptr, &vert_module));
@@ -2082,8 +2082,8 @@ Handle<Pipeline> create_graphics_pipeline(Device                             d,
         .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
         .pNext    = nullptr,
         .flags    = 0,
-        .codeSize = fragment.spirv.size(),
-        .pCode    = reinterpret_cast<const uint32_t*>(fragment.spirv.data()),
+        .codeSize = fragment.source.size(),
+        .pCode    = reinterpret_cast<const uint32_t*>(fragment.source.data()),
     };
     VkShaderModule frag_module;
     chk(d, d->api.vkCreateShaderModule(d->device, &frag_info, nullptr, &frag_module));

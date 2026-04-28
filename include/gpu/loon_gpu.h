@@ -671,8 +671,8 @@ struct SamplerDesc {
  *
  */
 struct DeviceDesc {
-    GpuPreference gpu_preference
-        = GpuPreference::Discrete;  ///< Preferred GPU, if more than one valid device is available.
+    GpuPreference gpu_preference =
+        GpuPreference::Discrete;  ///< Preferred GPU, if more than one valid device is available.
 
     uintptr_t native_window_handle = 0;    ///< Handle for the platform-specific window. HWND on
                                            ///< windows, CAMetalLayer* on MacOS, Window on XLib
@@ -783,7 +783,7 @@ struct SpecializationConstant {
 };
 
 struct ShaderSource {
-    Span<const uint8_t> spirv;
+    Span<const uint8_t> source;  ///< SPIR-V on the vulkan backend, MSL source on the metal backend.
     Span<const char>    entry_point;
 };
 
@@ -815,12 +815,12 @@ struct SemaphoreInfo {
 
 struct BufferToTextureCopyInfo {
     Dimension3D image_extent;
-    uint32_t    source_row_pixels_stride
-        = 0;  ///< Number of pixels between subsequent rows of data in the source buffer. If 0,
-              ///< treated as equal to image_extent.x. Otherwise, should be >= image_extent.x
-    uint32_t source_plane_rows_stride
-        = 0;  ///< Number of rows in a plane of image in the source buffer. If 0, treated as equal
-              ///< to image_extent.y. Otherwise, should be >= image_extent.y.
+    uint32_t    source_row_pixels_stride =
+        0;  ///< Number of pixels between subsequent rows of data in the source buffer. If 0,
+            ///< treated as equal to image_extent.x. Otherwise, should be >= image_extent.x
+    uint32_t source_plane_rows_stride =
+        0;  ///< Number of rows in a plane of image in the source buffer. If 0, treated as equal
+            ///< to image_extent.y. Otherwise, should be >= image_extent.y.
     Dimension3D destination_image_offset{0, 0, 0};
 
     uint8_t base_mip   = 0;
