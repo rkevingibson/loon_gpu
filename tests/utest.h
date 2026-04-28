@@ -168,8 +168,8 @@ UTEST_C_FUNC __declspec(dllimport) int __stdcall QueryPerformanceFrequency(utest
 #        endif
 #    endif
 
-#elif defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)    \
-    || defined(__DragonFly__) || defined(__sun__) || defined(__HAIKU__)
+#elif defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || \
+    defined(__DragonFly__) || defined(__sun__) || defined(__HAIKU__)
 /*
    slightly obscure include here - we need to include glibc's features.h, but
    we don't want to just include a header that might not be defined for other
@@ -253,8 +253,7 @@ UTEST_C_FUNC __declspec(dllimport) int __stdcall QueryPerformanceFrequency(utest
         static void __cdecl f(void);                                                               \
         UTEST_INITIALIZER_BEGIN_DISABLE_WARNINGS                                                   \
         __pragma(comment(linker, "/include:" UTEST_SYMBOL_PREFIX #f "_")) UTEST_C_FUNC             \
-            __declspec(allocate(".CRT$XCU")) void(__cdecl * f##_)(void)                            \
-            = f;                                                                                   \
+            __declspec(allocate(".CRT$XCU")) void(__cdecl * f##_)(void) = f;                       \
         UTEST_INITIALIZER_END_DISABLE_WARNINGS                                                     \
         static void __cdecl f(void)
 #else
@@ -343,8 +342,8 @@ static UTEST_INLINE utest_int64_t utest_ns(void) {
     return utest_mul_div(counter.QuadPart, 1000000000, frequency.QuadPart);
 #elif defined(__linux__) && defined(__STRICT_ANSI__)
     return utest_mul_div(clock(), 1000000000, CLOCKS_PER_SEC);
-#elif defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)    \
-    || defined(__DragonFly__) || defined(__sun__) || defined(__HAIKU__)
+#elif defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || \
+    defined(__DragonFly__) || defined(__sun__) || defined(__HAIKU__)
     struct timespec ts;
 #    if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L) && !defined(__HAIKU__)
     timespec_get(&ts, TIME_UTC);
@@ -631,9 +630,9 @@ UTEST_WEAK UTEST_OVERLOADABLE void utest_type_printer(const void* p) {
 /*
    long long is a c++11 extension
 */
-#    if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L)                                 \
-        || defined(__cplusplus) && (__cplusplus >= 201103L)                                        \
-        || (defined(__MINGW32__) || defined(__MINGW64__))
+#    if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L) ||                              \
+        defined(__cplusplus) && (__cplusplus >= 201103L) ||                                        \
+        (defined(__MINGW32__) || defined(__MINGW64__))
 
 #        ifdef __clang__
 #            pragma clang diagnostic push
@@ -655,9 +654,9 @@ UTEST_WEAK UTEST_OVERLOADABLE void utest_type_printer(long long unsigned int i) 
 #        endif
 
 #    endif
-#elif defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L)                                   \
-        && !(defined(__MINGW32__) || defined(__MINGW64__))                                         \
-    || defined(__TINYC__)
+#elif defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L) &&                                \
+        !(defined(__MINGW32__) || defined(__MINGW64__)) ||                                         \
+    defined(__TINYC__)
 #    define utest_type_printer(val)                                                                \
         UTEST_PRINTF(_Generic((val),                                                               \
                          signed char: "%d",                                                        \
@@ -752,9 +751,9 @@ static UTEST_INLINE char* utest_strncpy_gcc(char* const       dst,
             _Pragma("clang diagnostic push")                                                       \
                 _Pragma("clang diagnostic ignored \"-Wlanguage-extension-token\"")                 \
                     _Pragma("clang diagnostic ignored \"-Wc++98-compat-pedantic\"")                \
-                        _Pragma("clang diagnostic ignored \"-Wfloat-equal\"") UTEST_AUTO(x) xEval  \
-                = (x);                                                                             \
-            UTEST_AUTO(y) yEval = (y);                                                             \
+                        _Pragma("clang diagnostic ignored \"-Wfloat-equal\"") UTEST_AUTO(x)        \
+                            xEval = (x);                                                           \
+            UTEST_AUTO(y) yEval   = (y);                                                           \
             if (!((xEval)cond(yEval))) {                                                           \
                 const char* const xAsString = #x;                                                  \
                 const char* const yAsString = #y;                                                  \
@@ -924,8 +923,8 @@ static UTEST_INLINE char* utest_strncpy_gcc(char* const       dst,
         const char*  xEval = (x);                                                                  \
         const char*  yEval = (y);                                                                  \
         const size_t nEval = UTEST_CAST(size_t, n);                                                \
-        if (UTEST_NULL == xEval || UTEST_NULL == yEval                                             \
-            || 0 != UTEST_STRNCMP(xEval, yEval, nEval)) {                                          \
+        if (UTEST_NULL == xEval || UTEST_NULL == yEval ||                                          \
+            0 != UTEST_STRNCMP(xEval, yEval, nEval)) {                                             \
             UTEST_PRINTF("%s:%i: Failure\n", __FILE__, __LINE__);                                  \
             UTEST_PRINTF("  Expected : \"%.*s\"\n", UTEST_CAST(int, nEval), xEval);                \
             UTEST_PRINTF("    Actual : \"%.*s\"\n", UTEST_CAST(int, nEval), yEval);                \
@@ -946,8 +945,8 @@ static UTEST_INLINE char* utest_strncpy_gcc(char* const       dst,
         const char*  xEval = (x);                                                                  \
         const char*  yEval = (y);                                                                  \
         const size_t nEval = UTEST_CAST(size_t, n);                                                \
-        if (UTEST_NULL == xEval || UTEST_NULL == yEval                                             \
-            || 0 == UTEST_STRNCMP(xEval, yEval, nEval)) {                                          \
+        if (UTEST_NULL == xEval || UTEST_NULL == yEval ||                                          \
+            0 == UTEST_STRNCMP(xEval, yEval, nEval)) {                                             \
             UTEST_PRINTF("%s:%i: Failure\n", __FILE__, __LINE__);                                  \
             UTEST_PRINTF("  Expected : \"%.*s\"\n", UTEST_CAST(int, nEval), xEval);                \
             UTEST_PRINTF("    Actual : \"%.*s\"\n", UTEST_CAST(int, nEval), yEval);                \
@@ -1299,8 +1298,8 @@ UTEST_WEAK int utest_should_filter_test(const char* filter, const char* testcase
             }
         }
 
-        if (('\0' != *filter_cur)
-            || (('\0' != *testcase_cur) && ((filter == filter_cur) || ('*' != filter_cur[-1])))) {
+        if (('\0' != *filter_cur) ||
+            (('\0' != *testcase_cur) && ((filter == filter_cur) || ('*' != filter_cur[-1])))) {
             /* we have a mismatch! */
             return 1;
         }
@@ -1388,15 +1387,13 @@ int                     utest_main(int argc, const char* const argv[]) {
             }
             /* when printing the test list, don't actually run the tests */
             return 0;
-        } else if (0
-                   == UTEST_STRNCMP(argv[index],
-                                    enable_mixed_units_str,
-                                    strlen(enable_mixed_units_str))) {
+        } else if (0 == UTEST_STRNCMP(argv[index],
+                                      enable_mixed_units_str,
+                                      strlen(enable_mixed_units_str))) {
             enable_mixed_units = 1;
-        } else if (0
-                   == UTEST_STRNCMP(argv[index],
-                                    random_order_with_seed_str,
-                                    strlen(random_order_with_seed_str))) {
+        } else if (0 == UTEST_STRNCMP(argv[index],
+                                      random_order_with_seed_str,
+                                      strlen(random_order_with_seed_str))) {
             seed = UTEST_CAST(
                 utest_uint32_t,
                 strtoul(argv[index] + strlen(random_order_with_seed_str), UTEST_NULL, 10));
@@ -1408,8 +1405,8 @@ int                     utest_main(int argc, const char* const argv[]) {
             // because I really want to avoid using C's rand() because that'd mean our
             // random would be affected by any srand() usage by the user (which I
             // don't want).
-            seed = UTEST_CAST(utest_uint32_t, ns >> 32) * 31
-                   + UTEST_CAST(utest_uint32_t, ns & 0xffffffff);
+            seed = UTEST_CAST(utest_uint32_t, ns >> 32) * 31 +
+                   UTEST_CAST(utest_uint32_t, ns & 0xffffffff);
             random_order = 1;
         }
     }
@@ -1493,18 +1490,18 @@ int                     utest_main(int argc, const char* const argv[]) {
         // Record the failing test.
         if (UTEST_TEST_FAILURE == result) {
             const size_t failed_testcase_index = failed_testcases_length++;
-            failed_testcases
-                = UTEST_PTR_CAST(size_t*,
-                                 utest_realloc(UTEST_PTR_CAST(void*, failed_testcases),
-                                               sizeof(size_t) * failed_testcases_length));
+            failed_testcases =
+                UTEST_PTR_CAST(size_t*,
+                               utest_realloc(UTEST_PTR_CAST(void*, failed_testcases),
+                                             sizeof(size_t) * failed_testcases_length));
             if (UTEST_NULL != failed_testcases) { failed_testcases[failed_testcase_index] = index; }
             failed++;
         } else if (UTEST_TEST_SKIPPED == result) {
             const size_t skipped_testcase_index = skipped_testcases_length++;
-            skipped_testcases
-                = UTEST_PTR_CAST(size_t*,
-                                 utest_realloc(UTEST_PTR_CAST(void*, skipped_testcases),
-                                               sizeof(size_t) * skipped_testcases_length));
+            skipped_testcases =
+                UTEST_PTR_CAST(size_t*,
+                               utest_realloc(UTEST_PTR_CAST(void*, skipped_testcases),
+                                             sizeof(size_t) * skipped_testcases_length));
             if (UTEST_NULL != skipped_testcases) {
                 skipped_testcases[skipped_testcase_index] = index;
             }

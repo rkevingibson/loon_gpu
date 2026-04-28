@@ -28,9 +28,9 @@ struct Cube {
         {0, 0}, {1, 0}, {0, 1}, {1, 1}, {0, 0}, {1, 0}, {0, 1}, {1, 1},
         {0, 0}, {1, 0}, {0, 1}, {1, 1}, {0, 0}, {1, 0}, {0, 1}, {1, 1},
     };
-    static constexpr uint16_t kIndices[]
-        = {0,  3,  1,  0,  2,  3,  4,  6,  7,  4,  7,  5,  8,  9,  11, 8,  11, 10,
-           12, 13, 15, 12, 15, 14, 16, 17, 18, 18, 17, 19, 20, 21, 22, 22, 21, 23};
+    static constexpr uint16_t kIndices[]  = {0,  3,  1,  0,  2,  3,  4,  6,  7,  4,  7,  5,
+                                             8,  9,  11, 8,  11, 10, 12, 13, 15, 12, 15, 14,
+                                             16, 17, 18, 18, 17, 19, 20, 21, 22, 22, 21, 23};
     static constexpr uint32_t kNumIndices = sizeof(kIndices) / sizeof(kIndices[0]);
     static constexpr size_t   kSize       = sizeof(kPositions) + sizeof(kUVs) + sizeof(kIndices);
 
@@ -121,20 +121,20 @@ ManyCubes::ManyCubes(const WindowState& window_state) {
 
     // Load the texture
     int            x = 0, y = 0, n = 0;
-    unsigned char* image_data
-        = stbi_load((window_state.file_paths.asset_directory + "uv-texture.png").c_str(),
-                    &x,
-                    &y,
-                    &n,
-                    4);
+    unsigned char* image_data =
+        stbi_load((window_state.file_paths.asset_directory + "uv-texture.png").c_str(),
+                  &x,
+                  &y,
+                  &n,
+                  4);
 
-    m_color_texture = gpu::create_texture(
-        m_device,
-        TextureDesc{
-            .dimensions = {(uint32_t)x, (uint32_t)y, 1},
-            .format     = loon::gpu::Format::RGBA8UnormSrgb,
-            .usage      = UsageFlags(UsageFlags::Sampled | UsageFlags::TransferDst),
-        });
+    m_color_texture =
+        gpu::create_texture(m_device,
+                            TextureDesc{
+                                .dimensions = {(uint32_t)x, (uint32_t)y, 1},
+                                .format     = loon::gpu::Format::RGBA8UnormSrgb,
+                                .usage = UsageFlags(UsageFlags::Sampled | UsageFlags::TransferDst),
+                            });
 
     m_texture_heap = gpu::create_texture_heap(m_device,
                                               {
@@ -218,14 +218,14 @@ void ManyCubes::recreate_swapchain(uint32_t width, uint32_t height) {
 
     // Recreate depth buffer as well
     if (m_depth_texture.h) { gpu::free(m_device, m_depth_texture); }
-    m_depth_texture
-        = gpu::create_texture(m_device,
-                              {
-                                  .type       = TextureType::Tex2D,
-                                  .dimensions = {.x = width, .y = height, .z = 1},
-                                  .format     = loon::gpu::Format::Depth32Float,
-                                  .usage      = loon::gpu::UsageFlags::DepthStencilAttachment,
-                              });
+    m_depth_texture =
+        gpu::create_texture(m_device,
+                            {
+                                .type       = TextureType::Tex2D,
+                                .dimensions = {.x = width, .y = height, .z = 1},
+                                .format     = loon::gpu::Format::Depth32Float,
+                                .usage      = loon::gpu::UsageFlags::DepthStencilAttachment,
+                            });
 }
 
 void ManyCubes::Update(const WindowState& window) {
@@ -275,8 +275,8 @@ void ManyCubes::Update(const WindowState& window) {
 
     // Render
     auto surface_texture = gpu::get_current_texture(m_device);
-    if (surface_texture.status == SurfaceStatus::OutOfDate
-        || surface_texture.status == SurfaceStatus::Suboptimal) {
+    if (surface_texture.status == SurfaceStatus::OutOfDate ||
+        surface_texture.status == SurfaceStatus::Suboptimal) {
         recreate_swapchain(window.width, window.height);
         return;
     } else if (surface_texture.status == SurfaceStatus::Error) {
@@ -290,21 +290,28 @@ void ManyCubes::Update(const WindowState& window) {
     // Barrier to prevent the depth buffer being cleared before the last frame was done.
     gpu::cmd_barrier(cmd, StageFlags::FragmentTests, StageFlags::FragmentTests);
 
-    gpu::cmd_begin_render_pass(cmd,{
-        .color_attachments = RenderAttachment {
-            .texture = surface_texture.texture,
-            .load_op = LoadOp::Clear,
-            .store_op = StoreOp::Store,
-            .clear_color = Color(0,0,0,0),
-        },
-        .depth_attachment = RenderAttachment {
-            .texture = m_depth_texture,
-            .load_op = LoadOp::Clear,
-            .store_op = StoreOp::Discard,
-            .clear_color = Color(0,0,0,0),
-        },
-        .render_area = {.width = m_swapchain_width, .height = m_swapchain_height,},
-    });
+    gpu::cmd_begin_render_pass(cmd,
+                               {
+                                   .color_attachments =
+                                       RenderAttachment{
+                                           .texture     = surface_texture.texture,
+                                           .load_op     = LoadOp::Clear,
+                                           .store_op    = StoreOp::Store,
+                                           .clear_color = Color(0, 0, 0, 0),
+                                       },
+                                   .depth_attachment =
+                                       RenderAttachment{
+                                           .texture     = m_depth_texture,
+                                           .load_op     = LoadOp::Clear,
+                                           .store_op    = StoreOp::Discard,
+                                           .clear_color = Color(0, 0, 0, 0),
+                                       },
+                                   .render_area =
+                                       {
+                                           .width  = m_swapchain_width,
+                                           .height = m_swapchain_height,
+                                       },
+                               });
     gpu::cmd_set_front_face(cmd, FrontFace::CW);
     gpu::cmd_set_cull_mode(cmd, Cull::Back);
     gpu::cmd_set_depth_stencil_state(cmd, m_depth_stencil_state);
@@ -342,8 +349,8 @@ void ManyCubes::Update(const WindowState& window) {
                         {
                             .vertexDataGpu   = vert_args,
                             .fragmentDataGpu = frag,
-                            .indicesGpu
-                            = m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
+                            .indicesGpu =
+                                m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
                             .indexCount    = Cube::kNumIndices,
                             .instanceCount = num_cubes,
                         });
@@ -369,14 +376,14 @@ void ManyCubes::Update(const WindowState& window) {
     } else {
         for (int x = 0; x < m_grid_width; ++x) {
             for (int y = 0; y < m_grid_height; ++y) {
-                GpuPtr vert_args
-                    = m_ring_buffer.append(m_frame_idx,
-                                           VertArgs{
-                                               .world_from_mesh = grid_transform(x, y),
-                                               .camera          = camera,
-                                               .position        = m_vertex_ptr,
-                                               .uvs = m_vertex_ptr + sizeof(Cube::kPositions),
-                                           });
+                GpuPtr vert_args =
+                    m_ring_buffer.append(m_frame_idx,
+                                         VertArgs{
+                                             .world_from_mesh = grid_transform(x, y),
+                                             .camera          = camera,
+                                             .position        = m_vertex_ptr,
+                                             .uvs = m_vertex_ptr + sizeof(Cube::kPositions),
+                                         });
 
                 gpu::cmd_draw_indexed_instanced(
                     cmd,
@@ -401,8 +408,8 @@ void ManyCubes::Update(const WindowState& window) {
     m_frame_time_us[m_frame_idx % 300] = (int64_t)frame_duration.as_microseconds();
     m_frame_time_ms[m_frame_idx % 300] = frame_duration.as_millseconds_f32();
 
-    m_frame_time_average
-        += (m_frame_time_us[m_frame_idx % 300] - m_frame_time_us[(m_frame_idx + 1) % 300]) / 300;
+    m_frame_time_average +=
+        (m_frame_time_us[m_frame_idx % 300] - m_frame_time_us[(m_frame_idx + 1) % 300]) / 300;
 
     const auto status = gpu::present(m_device, m_queue);
     if (status == SurfaceStatus::OutOfDate || status == SurfaceStatus::Suboptimal) {

@@ -192,14 +192,14 @@ void HelloCube::recreate_swapchain(uint32_t width, uint32_t height) {
     // Recreate depth buffer as well
 
     gpu::free(m_device, m_depth_texture);
-    m_depth_texture
-        = gpu::create_texture(m_device,
-                              {
-                                  .type       = TextureType::Tex2D,
-                                  .dimensions = {.x = width, .y = height, .z = 1},
-                                  .format     = loon::gpu::Format::Depth32Float,
-                                  .usage      = loon::gpu::UsageFlags::DepthStencilAttachment,
-                              });
+    m_depth_texture =
+        gpu::create_texture(m_device,
+                            {
+                                .type       = TextureType::Tex2D,
+                                .dimensions = {.x = width, .y = height, .z = 1},
+                                .format     = loon::gpu::Format::Depth32Float,
+                                .usage      = loon::gpu::UsageFlags::DepthStencilAttachment,
+                            });
 }
 
 void HelloCube::Update(const WindowState& window) {
@@ -222,8 +222,8 @@ void HelloCube::Update(const WindowState& window) {
     };
 
     auto surface_texture = gpu::get_current_texture(m_device);
-    if (surface_texture.status == SurfaceStatus::OutOfDate
-        || surface_texture.status == SurfaceStatus::Suboptimal) {
+    if (surface_texture.status == SurfaceStatus::OutOfDate ||
+        surface_texture.status == SurfaceStatus::Suboptimal) {
         recreate_swapchain(window.width, window.height);
         return;
     } else if (surface_texture.status == SurfaceStatus::Error) {
@@ -233,21 +233,25 @@ void HelloCube::Update(const WindowState& window) {
     auto cmd = gpu::queue_start_command_recording(m_queue);
     gpu::cmd_wait_for_surface_texture(cmd);
     gpu::cmd_barrier(cmd, StageFlags::FragmentTests, StageFlags::FragmentTests);
-    gpu::cmd_begin_render_pass(cmd, {
-                                   .color_attachments = RenderAttachment{
-                                       .texture = surface_texture.texture,
-                                       .load_op      = loon::gpu::LoadOp::Clear,
-                                       .store_op     = loon::gpu::StoreOp::Store,
-                                       .clear_color  = Color(0, 0, 0, 0),
-                                   }, 
-                                   .depth_attachment = RenderAttachment{
-                                    .texture = m_depth_texture,
-                                    .load_op = loon::gpu::LoadOp::Clear,
-                                    .store_op = loon::gpu::StoreOp::Discard,
-                                    .clear_color = Color(0,0,0,0),
-                                   }, 
-                                   .render_area = {.width = m_swapchain_width, .height = m_swapchain_height},
-                                });
+    gpu::cmd_begin_render_pass(
+        cmd,
+        {
+            .color_attachments =
+                RenderAttachment{
+                    .texture     = surface_texture.texture,
+                    .load_op     = loon::gpu::LoadOp::Clear,
+                    .store_op    = loon::gpu::StoreOp::Store,
+                    .clear_color = Color(0, 0, 0, 0),
+                },
+            .depth_attachment =
+                RenderAttachment{
+                    .texture     = m_depth_texture,
+                    .load_op     = loon::gpu::LoadOp::Clear,
+                    .store_op    = loon::gpu::StoreOp::Discard,
+                    .clear_color = Color(0, 0, 0, 0),
+                },
+            .render_area = {.width = m_swapchain_width, .height = m_swapchain_height},
+        });
     gpu::cmd_set_depth_stencil_state(cmd, m_depth_stencil_state);
     gpu::cmd_set_pipeline(cmd, m_render_pipeline);
     gpu::cmd_draw_indexed_instanced(

@@ -239,8 +239,8 @@ Arena* get_thread_local_arena(Device d) {
 }
 
 Device create_device(const DeviceDesc& desc) {
-    Allocator alloc
-        = desc.alloc_callback ? Allocator(desc.alloc_callback, desc.alloc_userdata) : Allocator();
+    Allocator alloc =
+        desc.alloc_callback ? Allocator(desc.alloc_callback, desc.alloc_userdata) : Allocator();
 
     auto blk = alloc.alloc(sizeof(DeviceImpl));
     if (blk.ptr == 0) { return nullptr; }
@@ -257,67 +257,59 @@ Device create_device(const DeviceDesc& desc) {
     auto options       = make_id<MTL4::CompilerTaskOptions>();
 
     // It seems like this is a valid cast from testing.
-    auto surface_metal_layer
-        = NS::RetainPtr(reinterpret_cast<CA::MetalLayer*>(desc.native_window_handle));
+    auto surface_metal_layer =
+        NS::RetainPtr(reinterpret_cast<CA::MetalLayer*>(desc.native_window_handle));
 
     auto residency_set_descriptor = make_id<MTL::ResidencySetDescriptor>();
     // NOTE: Not sure how much this matters, should dig in more
     residency_set_descriptor->setInitialCapacity(64);
-    auto residency_set
-        = NS::TransferPtr(device->newResidencySet(residency_set_descriptor.get(), nullptr));
+    auto residency_set =
+        NS::TransferPtr(device->newResidencySet(residency_set_descriptor.get(), nullptr));
     // NOTE: Not 100% sure about if this is UB - I need a pointer to the device in order to capture
     // it in the lambdas, that are created during construction of the object. It probably is
     // technically undefined behviour. I'm also pretty certain it's totally fine in practice, if a
     // bit wonky.
     auto d = reinterpret_cast<DeviceImpl*>(blk.ptr);
     return new (blk.ptr) DeviceImpl{
-        .allocator                = alloc,
-        .log_callback             = desc.log_callback,
-        .log_userdata             = desc.log_userdata,
-        .log_level                = desc.log_level,
-        .tls_key                  = loon::gpu::tls_alloc([](void* data) {
+        .allocator     = alloc,
+        .log_callback  = desc.log_callback,
+        .log_userdata  = desc.log_userdata,
+        .log_level     = desc.log_level,
+        .tls_key       = loon::gpu::tls_alloc([](void* data) {
             auto state = reinterpret_cast<ThreadLocalState*>(data);
             state->~ThreadLocalState();
         }),
-        .device                   = device,
-        .compiler                 = compiler,
-        .options                  = options,
-        .residency_set            = residency_set,
-        .surface                  = Surface{
-            .metal_layer = surface_metal_layer,
-            .current_drawable = nullptr,
-        },
-        .buffer_pool              = SlotMap<Buffer>(alloc,
-                                         [d](Buffer* b) {
-                                             if (b->heap) {
-                                                 d->residency_set->removeAllocation(b->heap.get());
-                                             }
-                                             b->~Buffer();
-                                         }),
-        .texture_pool             = SlotMap<Texture>(alloc,
-                                           [d](Texture* t) {
-                                               if (t->texture) {
-                                                   d->residency_set->removeAllocation(t->texture.get());
-                                               }
-                                               t->~Texture();
-                                           }),
-        .texture_heap_pool        = SlotMap<TextureHeap>(alloc,
-                                                    [](TextureHeap* t) {
-                                                        t->~TextureHeap();
-                                                    }),
-        .pipeline_pool            = SlotMap<Pipeline>(alloc,
-                                             [](Pipeline* p) {
-                                                p->~Pipeline();
-                                             }),
-        .depth_stencil_state_pool = SlotMap<DepthStencilState>(alloc,
-                                                                 [](DepthStencilState* s) {
-                                                                     s->~DepthStencilState();
-                                                                 }),
-        .semaphore_pool           = SlotMap<Semaphore>(alloc,
-                                               [](Semaphore* s) {
-                                                s->~Semaphore();
-                                               }),
-        .ptr_map                  = Vector<GpuPtrMap>(alloc),
+        .device        = device,
+        .compiler      = compiler,
+        .options       = options,
+        .residency_set = residency_set,
+        .surface =
+            Surface{
+                .metal_layer      = surface_metal_layer,
+                .current_drawable = nullptr,
+            },
+        .buffer_pool = SlotMap<Buffer>(alloc,
+                                       [d](Buffer* b) {
+                                           if (b->heap) {
+                                               d->residency_set->removeAllocation(b->heap.get());
+                                           }
+                                           b->~Buffer();
+                                       }),
+        .texture_pool =
+            SlotMap<Texture>(alloc,
+                             [d](Texture* t) {
+                                 if (t->texture) {
+                                     d->residency_set->removeAllocation(t->texture.get());
+                                 }
+                                 t->~Texture();
+                             }),
+        .texture_heap_pool = SlotMap<TextureHeap>(alloc, [](TextureHeap* t) { t->~TextureHeap(); }),
+        .pipeline_pool     = SlotMap<Pipeline>(alloc, [](Pipeline* p) { p->~Pipeline(); }),
+        .depth_stencil_state_pool =
+            SlotMap<DepthStencilState>(alloc,
+                                       [](DepthStencilState* s) { s->~DepthStencilState(); }),
+        .semaphore_pool = SlotMap<Semaphore>(alloc, [](Semaphore* s) { s->~Semaphore(); }),
+        .ptr_map        = Vector<GpuPtrMap>(alloc),
     };
 }
 
@@ -425,10 +417,10 @@ GpuPtr malloc(Device d, size_t bytes, size_t align, Memory memory) {
 
     id<MTL::Heap> heap = NS::TransferPtr(d->device->newHeap(heap_info.get()));
 
-    const MTL::ResourceOptions resource_options
-        = (memory == Memory::Gpu ? MTL::ResourceStorageModePrivate : MTL::ResourceStorageModeShared)
-          | (memory == Memory::Default ? MTL::ResourceCPUCacheModeWriteCombined
-                                       : MTL::ResourceCPUCacheModeDefaultCache);
+    const MTL::ResourceOptions resource_options =
+        (memory == Memory::Gpu ? MTL::ResourceStorageModePrivate : MTL::ResourceStorageModeShared) |
+        (memory == Memory::Default ? MTL::ResourceCPUCacheModeWriteCombined
+                                   : MTL::ResourceCPUCacheModeDefaultCache);
 
 
     id<MTL::Buffer> buffer = NS::TransferPtr(heap->newBuffer(bytes, resource_options, 0));
@@ -536,8 +528,8 @@ Handle<TextureHeap> create_texture_heap(Device d, const TextureHeapDesc& desc) {
     auto view_pool_descriptor = make_id<MTL::ResourceViewPoolDescriptor>();
     view_pool_descriptor->setResourceViewCount(desc.texture_count);
 
-    auto texture_view_pool
-        = NS::TransferPtr(d->device->newTextureViewPool(view_pool_descriptor.get(), nullptr));
+    auto texture_view_pool =
+        NS::TransferPtr(d->device->newTextureViewPool(view_pool_descriptor.get(), nullptr));
 
     const auto handle = d->texture_heap_pool.emplace(TextureHeap{
         .pool           = texture_view_pool,
@@ -564,8 +556,8 @@ TextureView add_texture_view_to_heap(Device d, Handle<TextureHeap> h, const Text
     view_info->setSliceRange(NS::Range(desc.base_layer, desc.layer_count));
     view_info->setTextureType(tex.texture->textureType());
     const auto      index = heap.bitset.set_leading_zero();
-    MTL::ResourceID texture_view
-        = heap.pool->setTextureView(tex.texture.get(), view_info.get(), index);
+    MTL::ResourceID texture_view =
+        heap.pool->setTextureView(tex.texture.get(), view_info.get(), index);
 
     return texture_view._impl;
 }
@@ -599,10 +591,10 @@ Sampler add_sampler_to_heap(Device d, Handle<TextureHeap> h, const SamplerDesc& 
     Sampler result = sampler_state->gpuResourceID()._impl;
     // Need to add to some list so we can free it easily. For now using a sorted list, could be a
     // hash map if we expect a lot of creation/freeing.
-    const auto insertion_pos
-        = lower_bound<SamplerMapping, SamplerMappingCompare>(heap.sampler_lookup.begin(),
-                                                             heap.sampler_lookup.end(),
-                                                             {.sampler = result});
+    const auto insertion_pos =
+        lower_bound<SamplerMapping, SamplerMappingCompare>(heap.sampler_lookup.begin(),
+                                                           heap.sampler_lookup.end(),
+                                                           {.sampler = result});
     heap.sampler_lookup.insert(insertion_pos,
                                {
                                    .sampler = result,
@@ -623,8 +615,8 @@ void remove_sampler_from_heap(Device d, Handle<TextureHeap> h, Sampler s) {
 }
 
 static id<NS::String> get_span_as_string(Span<const char> span) {
-    id<NS::String> source_view
-        = make_id<NS::String>((void*)span.data(), span.size(), NS::UTF8StringEncoding, false);
+    id<NS::String> source_view =
+        make_id<NS::String>((void*)span.data(), span.size(), NS::UTF8StringEncoding, false);
     id<NS::String> copy = make_id<NS::String>(source_view.get());
     return copy;
 }
@@ -690,8 +682,8 @@ Handle<Pipeline> create_compute_pipeline(Device                             d,
 
     NS::Error*       error   = nullptr;
     auto             options = make_id<MTL::CompileOptions>();
-    id<MTL::Library> lib
-        = NS::TransferPtr(d->device->newLibrary(shader_source.get(), options.get(), &error));
+    id<MTL::Library> lib =
+        NS::TransferPtr(d->device->newLibrary(shader_source.get(), options.get(), &error));
 
     auto desc      = make_id<MTL4::ComputePipelineDescriptor>();
     auto func_desc = make_id<MTL4::LibraryFunctionDescriptor>();
@@ -708,8 +700,8 @@ Handle<Pipeline> create_compute_pipeline(Device                             d,
         desc->setComputeFunctionDescriptor(specialized_func_desc.get());
     }
 
-    id<MTL::ComputePipelineState> compute_pipeline = NS::TransferPtr(
-        d->compiler->newComputePipelineState(desc.get(), d->options.get(), &error));
+    id<MTL::ComputePipelineState> compute_pipeline =
+        NS::TransferPtr(d->compiler->newComputePipelineState(desc.get(), d->options.get(), &error));
 
     const auto metadata = parse_metadata(*get_thread_local_arena(d),
                                          compute.spirv.cast<const char>(),
@@ -736,13 +728,13 @@ Handle<Pipeline> create_graphics_pipeline(Device                             d,
 
     auto options = make_id<MTL::CompileOptions>();
 
-    id<MTL::Library> vert_lib
-        = NS::TransferPtr(d->device->newLibrary(vert_source.get(), options.get(), &error));
+    id<MTL::Library> vert_lib =
+        NS::TransferPtr(d->device->newLibrary(vert_source.get(), options.get(), &error));
 
     if (error != nullptr) { printf("%s\n", error->localizedDescription()->utf8String()); }
 
-    id<MTL::Library> frag_lib
-        = NS::TransferPtr(d->device->newLibrary(frag_source.get(), options.get(), &error));
+    id<MTL::Library> frag_lib =
+        NS::TransferPtr(d->device->newLibrary(frag_source.get(), options.get(), &error));
 
     if (error) { printf("%s\n", error->localizedDescription()->utf8String()); }
 
@@ -785,10 +777,10 @@ Handle<Pipeline> create_graphics_pipeline(Device                             d,
         auto attachment = color_attachments->object(color_attachment_idx++);
         attachment->setPixelFormat(bridge(c.format));
         const auto& state = c.blendstate;
-        const bool  blend_disabled
-            = state.color_op == Blend::Add && state.src_color_factor == Factor::One
-              && state.dst_color_factor == Factor::Zero && state.alpha_op == Blend::Add
-              && state.src_alpha_factor == Factor::One && state.dst_color_factor == Factor::Zero;
+        const bool  blend_disabled =
+            state.color_op == Blend::Add && state.src_color_factor == Factor::One &&
+            state.dst_color_factor == Factor::Zero && state.alpha_op == Blend::Add &&
+            state.src_alpha_factor == Factor::One && state.dst_color_factor == Factor::Zero;
 
         attachment->setBlendingState(blend_disabled ? MTL4::BlendStateDisabled
                                                     : MTL4::BlendStateEnabled);
@@ -889,8 +881,8 @@ static CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
     }
 
     if (index_good) {
-        pool = &superpool.pools[CommandSuperpool::kPoolsPerGroup * idx
-                                + (frame_idx % CommandSuperpool::kPoolsPerGroup)];
+        pool = &superpool.pools[CommandSuperpool::kPoolsPerGroup * idx +
+                                (frame_idx % CommandSuperpool::kPoolsPerGroup)];
 
         if (!pool->allocator) {
             auto argument_table_desc = make_id<MTL4::ArgumentTableDescriptor>();
@@ -1086,10 +1078,10 @@ void cmd_copy_to_texture(CommandBuffer                  cmd,
     auto             src         = buffer_and_offset_from_ptr(d, srcGpu);
     const auto&      t           = d->texture_pool[texture];
     const FormatInfo format_info = get_format_info(t.format);
-    const uint64_t   pixels_per_row
-        = info.source_row_pixels_stride == 0 ? info.image_extent.x : info.source_row_pixels_stride;
-    const uint64_t rows_per_image
-        = info.source_plane_rows_stride == 0 ? info.image_extent.y : info.source_plane_rows_stride;
+    const uint64_t   pixels_per_row =
+        info.source_row_pixels_stride == 0 ? info.image_extent.x : info.source_row_pixels_stride;
+    const uint64_t rows_per_image =
+        info.source_plane_rows_stride == 0 ? info.image_extent.y : info.source_plane_rows_stride;
     encoder->copyFromBuffer(
         src.buffer->buffer.get(),
         src.offset,
@@ -1207,8 +1199,8 @@ void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
     uint32_t attachment_idx   = 0;
     auto     pass_attachments = pass->colorAttachments();
     for (const auto& c : desc.color_attachments) {
-        id<MTL::RenderPassColorAttachmentDescriptor> attachment
-            = make_id<MTL::RenderPassColorAttachmentDescriptor>();
+        id<MTL::RenderPassColorAttachmentDescriptor> attachment =
+            make_id<MTL::RenderPassColorAttachmentDescriptor>();
         auto& tex = d->texture_pool[c.texture];
         attachment->setTexture(tex.texture.get());
         attachment->setLoadAction(bridge(c.load_op));
@@ -1220,8 +1212,8 @@ void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
     }
 
     if (desc.depth_attachment.texture) {
-        id<MTL::RenderPassDepthAttachmentDescriptor> depth_desc
-            = make_id<MTL::RenderPassDepthAttachmentDescriptor>();
+        id<MTL::RenderPassDepthAttachmentDescriptor> depth_desc =
+            make_id<MTL::RenderPassDepthAttachmentDescriptor>();
         auto& depth_tex = d->texture_pool[desc.depth_attachment.texture];
         depth_desc->setTexture(depth_tex.texture.get());
         depth_desc->setLoadAction(bridge(desc.depth_attachment.load_op));
@@ -1282,8 +1274,8 @@ void cmd_draw_indexed_instanced(CommandBuffer cmd, const DrawIndexedInstancedInf
 
     set_graphics_ptrs(cmd, args.vertexDataGpu, args.fragmentDataGpu);
 
-    const uint32_t index_buffer_size
-        = args.indexCount * (args.type == IndexType::UInt16 ? sizeof(uint16_t) : sizeof(uint32_t));
+    const uint32_t index_buffer_size =
+        args.indexCount * (args.type == IndexType::UInt16 ? sizeof(uint16_t) : sizeof(uint32_t));
     cmd->render_encoder->drawIndexedPrimitives(
         cmd->current_topology,
         args.indexCount,

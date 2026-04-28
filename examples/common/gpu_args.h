@@ -49,8 +49,8 @@ class RingBuffer {
 
 template <class T>
 gpu::GpuPtr RingBuffer::append(uint64_t frame_idx, const T& t) {
-    while (frame_idx - m_allocated_ranges[m_allocated_range_tail & kAllocatedRangesMask].frame_idx
-           > m_num_frames_in_flight) {
+    while (frame_idx - m_allocated_ranges[m_allocated_range_tail & kAllocatedRangesMask].frame_idx >
+           m_num_frames_in_flight) {
         m_allocated_range_tail++;  // Effectively "free" this range.
     }
 
@@ -65,8 +65,8 @@ gpu::GpuPtr RingBuffer::append(uint64_t frame_idx, const T& t) {
         // Allocate a new range, initializing it to the end of the previous range.
         const auto& prev_range = m_allocated_ranges[m_allocated_range_head & kAllocatedRangesMask];
         m_allocated_range_head++;
-        assert((m_allocated_range_head & kAllocatedRangesMask)
-               != (m_allocated_range_tail & kAllocatedRangesMask));
+        assert((m_allocated_range_head & kAllocatedRangesMask) !=
+               (m_allocated_range_tail & kAllocatedRangesMask));
 
         range  = &m_allocated_ranges[m_allocated_range_head & kAllocatedRangesMask];
         *range = {

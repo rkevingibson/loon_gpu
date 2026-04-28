@@ -73,8 +73,12 @@ transform3d transform3d::from_basis_and_origin(float3 basis[3], const float3& or
     const float3 new_z = rot(bz);
 
     return {
-        .basis
-        = {{new_x.x, new_y.x, new_z.x}, {new_x.y, new_y.y, new_z.y}, {new_x.z, new_y.z, new_z.z},},
+        .basis =
+            {
+                {new_x.x, new_y.x, new_z.x},
+                {new_x.y, new_y.y, new_z.y},
+                {new_x.z, new_y.z, new_z.z},
+            },
         .origin = origin,
     };
 }
@@ -88,13 +92,14 @@ transform3d transform3d::from_basis_and_origin(float3 basis[3], const float3& or
 }
 
 [[nodiscard]] float4x4 transform3d::to_matrix() const {
-    return float4x4 {
-        .columns = {
-            float4::make(basis[0], 0),
-            float4::make(basis[1], 0),
-            float4::make(basis[2], 0),
-            float4::make(origin, 1),
-        },
+    return float4x4{
+        .columns =
+            {
+                float4::make(basis[0], 0),
+                float4::make(basis[1], 0),
+                float4::make(basis[2], 0),
+                float4::make(origin, 1),
+            },
     };
 }
 
@@ -110,7 +115,13 @@ float4x4 projection(const ProjectionInfo& info) {
     const float sy           = -fov;
     if (std::isinf(f)) {
         return float4x4{
-            .columns = {{sx, 0,0,0}, {0,sy, 0,0}, {0.f, 0.f, 0.f, -1.f}, {0, 0, n, 0.f},},
+            .columns =
+                {
+                    {sx, 0, 0, 0},
+                    {0, sy, 0, 0},
+                    {0.f, 0.f, 0.f, -1.f},
+                    {0, 0, n, 0.f},
+                },
         };
     } else {
     }

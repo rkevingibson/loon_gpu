@@ -9,12 +9,12 @@
 extern "C" {
 typedef void(__stdcall* PFLS_CALLBACK_FUNCTION)(void* lpFlsData);
 __declspec(dllimport) unsigned long __stdcall FlsAlloc(PFLS_CALLBACK_FUNCTION lpCallback);
-__declspec(dllimport) void* __stdcall FlsGetValue(unsigned long dwFlsIndex);
-__declspec(dllimport) int __stdcall FlsSetValue(unsigned long dwFlsIndex, void* lpFlsData);
-__declspec(dllimport) int __stdcall FlsFree(unsigned long dwFlsIndex);
+__declspec(dllimport) void* __stdcall         FlsGetValue(unsigned long dwFlsIndex);
+__declspec(dllimport) int __stdcall  FlsSetValue(unsigned long dwFlsIndex, void* lpFlsData);
+__declspec(dllimport) int __stdcall  FlsFree(unsigned long dwFlsIndex);
 __declspec(dllimport) void __stdcall AcquireSRWLockExclusive(void* SRWLock);
 __declspec(dllimport) void __stdcall AcquireSRWLockShared(void* SRWLock);
-__declspec(dllimport) int __stdcall TryAcquireSRWLockExclusive(void* SRWLock);
+__declspec(dllimport) int __stdcall  TryAcquireSRWLockExclusive(void* SRWLock);
 __declspec(dllimport) void __stdcall ReleaseSRWLockExclusive(void* SRWLock);
 __declspec(dllimport) void __stdcall ReleaseSRWLockShared(void* SWRLock);
 }

@@ -738,6 +738,7 @@ struct RenderAttachment {
 struct RenderPassDesc {
     Span<const RenderAttachment> color_attachments;
     RenderAttachment             depth_attachment;
+    RenderAttachment             stencil_attachment;
     Rect2D                       render_area;
 };
 

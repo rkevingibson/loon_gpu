@@ -261,14 +261,13 @@ VkPipelineStageFlags2 bridge_pipeline_stage(StageFlags stage) {
     out |= any(stage & StageFlags::Compute) ? VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT : 0;
     out |= any(stage & StageFlags::RasterColorOut) ? VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT
                                                    : 0;
-    out |= any(stage & StageFlags::PixelShader) ? VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
-                                                      | VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT
-                                                      | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT
+    out |= any(stage & StageFlags::PixelShader) ? VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+                                                      VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                                                      VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT
                                                 : 0;
-    out |= any(stage & StageFlags::FragmentTests)
-               ? VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT
-                     | VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT
-               : 0;
+    out |= any(stage & StageFlags::FragmentTests) ? VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT |
+                                                        VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT
+                                                  : 0;
     out |= any(stage & StageFlags::VertexShader)
                ? VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT
                : 0;
@@ -352,10 +351,10 @@ VkBlendOp bridge(Blend op) {
 }
 
 VkPipelineColorBlendAttachmentState bridge(const BlendDesc& state) {
-    const bool blend_disabled
-        = state.color_op == Blend::Add && state.src_color_factor == Factor::One
-          && state.dst_color_factor == Factor::Zero && state.alpha_op == Blend::Add
-          && state.src_alpha_factor == Factor::One && state.dst_color_factor == Factor::Zero;
+    const bool blend_disabled =
+        state.color_op == Blend::Add && state.src_color_factor == Factor::One &&
+        state.dst_color_factor == Factor::Zero && state.alpha_op == Blend::Add &&
+        state.src_alpha_factor == Factor::One && state.dst_color_factor == Factor::Zero;
 
     return VkPipelineColorBlendAttachmentState{
         .blendEnable         = !blend_disabled,
