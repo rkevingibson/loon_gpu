@@ -1,9 +1,10 @@
 #pragma once
 
-#include <memory>
+#include <cstdint>
 #include <string_view>
 #include <vector>
 
+#include "common/box.h"
 
 namespace slang {
 struct TypeLayoutReflection;
@@ -13,7 +14,7 @@ struct ShaderModuleImpl;
 struct ShaderModuleDeleter {
     void operator()(ShaderModuleImpl* ptr);
 };
-using ShaderModule = std::unique_ptr<ShaderModuleImpl, ShaderModuleDeleter>;
+using ShaderModule = loon::Box<ShaderModuleImpl, ShaderModuleDeleter>;
 
 std::vector<uint8_t> get_spirv(ShaderModuleImpl* module, const char* entry_point);
 
@@ -28,5 +29,5 @@ class ShaderLoader {
 
    private:
     class Impl;
-    std::unique_ptr<Impl> m_impl;
+    loon::Box<Impl> m_impl;
 };

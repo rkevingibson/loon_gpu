@@ -14,9 +14,9 @@ extern "C" __declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void
 #    include <unistd.h>
 #endif
 
-#include <memory>
 #include <vector>
 
+#include "common/box.h"
 #include "hello_cube/hello_cube.h"
 #include "hello_triangle/hello_triangle.h"
 #include "many_cubes/many_cubes.h"
@@ -76,13 +76,13 @@ void log_callback(loon::gpu::LogLevel lvl, loon::gpu::Span<const char> message, 
     fprintf(stderr, "%.*s\n", static_cast<int>(message.size()), message.data());
 }
 
-std::unique_ptr<Example> create_example(ExampleName name, const WindowState& state) {
+loon::Box<Example> create_example(ExampleName name, const WindowState& state) {
     switch (name) {
-        case ExampleName::HelloTriangle: return std::make_unique<HelloTriangle>(state);
-        case ExampleName::HelloCube: return std::make_unique<HelloCube>(state);
-        case ExampleName::TexturedCube: return std::make_unique<TexturedCube>(state);
-        case ExampleName::ParticleEmitter: return std::make_unique<ParticleEmitter>(state);
-        case ExampleName::ManyCubes: return std::make_unique<ManyCubes>(state);
+        case ExampleName::HelloTriangle: return loon::make_box<HelloTriangle>(state);
+        case ExampleName::HelloCube: return loon::make_box<HelloCube>(state);
+        case ExampleName::TexturedCube: return loon::make_box<TexturedCube>(state);
+        case ExampleName::ParticleEmitter: return loon::make_box<ParticleEmitter>(state);
+        case ExampleName::ManyCubes: return loon::make_box<ManyCubes>(state);
         default: return nullptr;
     }
 }

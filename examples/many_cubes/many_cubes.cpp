@@ -3,11 +3,11 @@
 #include <gpu/loon_gpu.h>
 
 #include <cassert>
-#include <chrono>
 #include <cstring>
 
 #include "common/geometry.h"
 #include "common/shaders.h"
+#include "common/timer.h"
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_loon.h"
 #include "stb_image.h"
@@ -283,7 +283,7 @@ void ManyCubes::Update(const WindowState& window) {
         return;
     }
 
-    auto frame_start = std::chrono::high_resolution_clock::now();
+    auto frame_start = loon::Instant::now();
     auto cmd         = gpu::queue_start_command_recording(m_queue);
 
     gpu::cmd_wait_for_surface_texture(cmd);
@@ -397,12 +397,9 @@ void ManyCubes::Update(const WindowState& window) {
     gpu::cmd_finalize(cmd);
     gpu::queue_submit(m_queue, cmd);
 
-
-    auto                            frame_end = std::chrono::high_resolution_clock::now();
-    const std::chrono::microseconds diff
-        = std::chrono::duration_cast<std::chrono::microseconds>(frame_end - frame_start);
-    m_frame_time_us[m_frame_idx % 300] = diff.count();
-    m_frame_time_ms[m_frame_idx % 300] = diff.count() / 1000.f;
+    auto frame_duration                = frame_start.elapsed();
+    m_frame_time_us[m_frame_idx % 300] = (int64_t)frame_duration.as_microseconds();
+    m_frame_time_ms[m_frame_idx % 300] = frame_duration.as_millseconds_f32();
 
     m_frame_time_average
         += (m_frame_time_us[m_frame_idx % 300] - m_frame_time_us[(m_frame_idx + 1) % 300]) / 300;
