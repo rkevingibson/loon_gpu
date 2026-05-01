@@ -2,8 +2,9 @@
 
 #include <gpu/loon_gpu.h>
 
-#include <memory>
 #include <string>
+
+#include "common/box.h"
 
 
 class ShaderLoader;
@@ -14,12 +15,12 @@ struct FilePaths {
 };
 
 struct WindowState {
-    uintptr_t                     native_window_handle;
-    uintptr_t                     native_instance_handle;
-    uint16_t                      width;
-    uint16_t                      height;
-    std::unique_ptr<ShaderLoader> shader_loader;
-    FilePaths                     file_paths;
+    uintptr_t               native_window_handle;
+    uintptr_t               native_instance_handle;
+    uint16_t                width;
+    uint16_t                height;
+    loon::Box<ShaderLoader> shader_loader;
+    FilePaths               file_paths;
 };
 
 class Example {
@@ -42,4 +43,4 @@ FilePaths default_file_paths();
 
 void log_callback(loon::gpu::LogLevel lvl, loon::gpu::Span<const char> message, void* userdata);
 
-std::unique_ptr<Example> create_example(ExampleName name, const WindowState& state);
+loon::Box<Example> create_example(ExampleName name, const WindowState& state);

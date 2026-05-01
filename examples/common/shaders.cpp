@@ -181,7 +181,7 @@ class ShaderLoader::Impl {
 };
 
 ShaderLoader::ShaderLoader(std::string_view search_path, bool use_metal) {
-    m_impl = std::make_unique<Impl>(search_path, use_metal);
+    m_impl = loon::make_box<Impl>(search_path, use_metal);
 }
 
 ShaderLoader::~ShaderLoader() = default;

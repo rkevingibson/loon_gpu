@@ -5,11 +5,11 @@
 #include <shellapi.h>
 
 #include <cstdint>
-#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "common/box.h"
 #include "common/example.h"
 #include "common/shaders.h"
 #include "imgui/imgui_impl_win32.h"
@@ -116,7 +116,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     }
 
     window_state.shader_loader
-        = std::make_unique<ShaderLoader>(window_state.file_paths.shader_directory.c_str());
+        = loon::make_box<ShaderLoader>(window_state.file_paths.shader_directory.c_str());
 
     const char  CLASS_NAME[] = "LoonWebGPU Examples";
     WNDCLASSEXA wc           = {.cbSize        = sizeof(WNDCLASSEXA),
@@ -169,7 +169,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
 
     ExampleName selected_example = ExampleName::ManyCubes;
 
-    std::unique_ptr<Example> current_example = create_example(selected_example, window_state);
+    loon::Box<Example> current_example = create_example(selected_example, window_state);
 
     RawInput input;
 

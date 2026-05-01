@@ -9,17 +9,17 @@
 #import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
 
+#import "common/box.h"
 #import "common/example.h"
 #import "common/shaders.h"
 #import "imgui/imgui_impl_osx.h"
-#import <memory>
 #import <string>
 
 // MAKE: AppViewController
 
 @interface AppViewController : NSViewController <NSWindowDelegate> {
   WindowState window_state;
-  std::unique_ptr<Example> current_example;
+  loon::Box<Example> current_example;
   ExampleName selected_example;
 }
 @end
@@ -43,7 +43,7 @@
         .native_instance_handle = 0,
         .width = 1200,
         .height = 800,
-        .shader_loader = std::make_unique<ShaderLoader>(
+        .shader_loader = loon::make_box<ShaderLoader>(
             file_paths.shader_directory.c_str(),
             loon::gpu::device_backend() == loon::gpu::Backend::Metal),
         .file_paths = file_paths,
