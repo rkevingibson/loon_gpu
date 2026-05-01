@@ -16,7 +16,7 @@ static uint64_t current_time_ns() {
     int64_t qpc = 0;
     QueryPerformanceCounter(&qpc);
 
-    return static_cast<uint64_t>(qpc * 1'000'000'000 / freq);
+    return static_cast<uint64_t>(qpc * 1'000'000'000 / qpc_frequency);
 }
 
 #elif __APPLE__
