@@ -1,7 +1,5 @@
 #include "timer.h"
 
-#include <_time.h>
-
 #if _WIN32
 extern "C" {
 __declspec(dllimport) bool __stdcall QueryPerformanceCounter(int64_t* lpPerformanceCount);
@@ -34,7 +32,8 @@ static uint64_t current_time_ns() {
 static uint64_t current_time_ns() {
     timespec result;
     clock_gettime(CLOCK_MONOTONIC, &result);
-    return static_cast<uint64_t>(result.tv_sec) * 1'000'000'000ull + static_cast<uint64_t>(tv_nsec);
+    return static_cast<uint64_t>(result.tv_sec) * 1'000'000'000ull
+           + static_cast<uint64_t>(result.tv_nsec);
 }
 
 #endif
