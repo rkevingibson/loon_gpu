@@ -145,7 +145,7 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
         gpu::cmd_copy_to_texture(cmd,
                                  fb->buffer,
                                  backend_tex->texture,
-                                 gpu::BufferToTextureCopyInfo{
+                                 gpu::BufferTextureCopyInfo{
                                      .image_extent = {static_cast<uint32_t>(tex->Width),
                                                       static_cast<uint32_t>(tex->Height),
                                                       1},

@@ -169,7 +169,7 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
     gpu::cmd_copy_to_texture(cmd,
                              m_constant_buffer + Cube::kSize,
                              m_color_texture,
-                             BufferToTextureCopyInfo{
+                             BufferTextureCopyInfo{
                                  .image_extent = {(uint32_t)x, (uint32_t)y, 1},
                              });
     //  A little excessive, but wait for the copy to be done before returning.

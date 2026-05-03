@@ -164,7 +164,7 @@ ManyCubes::ManyCubes(const WindowState& window_state) {
     gpu::cmd_copy_to_texture(cmd,
                              staging_buffer + Cube::kSize,
                              m_color_texture,
-                             BufferToTextureCopyInfo{
+                             BufferTextureCopyInfo{
                                  .image_extent = {(uint32_t)x, (uint32_t)y, 1},
                              });
     gpu::cmd_barrier(cmd, StageFlags::Transfer, StageFlags::VertexShader);
