@@ -44,7 +44,7 @@ jobs:
           -DCMAKE_CXX_COMPILER=clang++
           -DCMAKE_C_COMPILER=clang
           -DCMAKE_BUILD_TYPE=Release
-          -LOON_GPU_BUILD_DOCS=YES
+          -DLOON_GPU_BUILD_DOCS=YES
           -S ${{ github.workspace }}
           -G "Ninja"
       - name: Build
