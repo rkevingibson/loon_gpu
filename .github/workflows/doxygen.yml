@@ -17,7 +17,6 @@ defaults:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
