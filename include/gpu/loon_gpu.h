@@ -813,15 +813,15 @@ struct SemaphoreInfo {
                                                  // blocked on the wait operation
 };
 
-struct BufferToTextureCopyInfo {
+struct BufferTextureCopyInfo {
     Dimension3D image_extent;
-    uint32_t    source_row_pixels_stride =
-        0;  ///< Number of pixels between subsequent rows of data in the source buffer. If 0,
+    uint32_t    buffer_row_pixels_stride =
+        0;  ///< Number of pixels between subsequent rows of data in the buffer. If 0,
             ///< treated as equal to image_extent.x. Otherwise, should be >= image_extent.x
-    uint32_t source_plane_rows_stride =
-        0;  ///< Number of rows in a plane of image in the source buffer. If 0, treated as equal
+    uint32_t buffer_plane_rows_stride =
+        0;  ///< Number of rows in a plane of image in the buffer. If 0, treated as equal
             ///< to image_extent.y. Otherwise, should be >= image_extent.y.
-    Dimension3D destination_image_offset{0, 0, 0};
+    Dimension3D texture_image_offset{0, 0, 0};
 
     uint8_t base_mip   = 0;
     uint8_t base_layer = 0;
@@ -1224,10 +1224,10 @@ void cmd_memcpy(CommandBuffer cmd, GpuPtr destGpu, GpuPtr srcGpu, size_t size);
  * @param texture
  * @param info
  */
-void cmd_copy_to_texture(CommandBuffer                  cmd,
-                         GpuPtr                         src,
-                         Handle<Texture>                texture,
-                         const BufferToTextureCopyInfo& info);
+void cmd_copy_to_texture(CommandBuffer                cmd,
+                         GpuPtr                       src,
+                         Handle<Texture>              texture,
+                         const BufferTextureCopyInfo& info);
 
 /**
  * @brief Copy from a texture to gpu memory.
@@ -1237,10 +1237,10 @@ void cmd_copy_to_texture(CommandBuffer                  cmd,
  * @param srcGpu
  * @param texture
  */
-void cmd_copy_from_texture(CommandBuffer   cmd,
-                           GpuPtr          destGpu,
-                           GpuPtr          srcGpu,
-                           Handle<Texture> texture);
+void cmd_copy_from_texture(CommandBuffer                cmd,
+                           Handle<Texture>              texture,
+                           GpuPtr                       destGpu,
+                           const BufferTextureCopyInfo& info);
 
 /**
  * @brief

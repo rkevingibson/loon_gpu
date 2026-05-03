@@ -1068,10 +1068,10 @@ void cmd_memcpy(CommandBuffer cmd, GpuPtr destGpu, GpuPtr srcGpu, size_t size) {
                             size);
 }
 
-void cmd_copy_to_texture(CommandBuffer                  cmd,
-                         GpuPtr                         srcGpu,
-                         Handle<Texture>                texture,
-                         const BufferToTextureCopyInfo& info) {
+void cmd_copy_to_texture(CommandBuffer                cmd,
+                         GpuPtr                       srcGpu,
+                         Handle<Texture>              texture,
+                         const BufferTextureCopyInfo& info) {
     auto d = cmd->device;
 
     auto             encoder     = get_compute_encoder(cmd);
@@ -1079,9 +1079,9 @@ void cmd_copy_to_texture(CommandBuffer                  cmd,
     const auto&      t           = d->texture_pool[texture];
     const FormatInfo format_info = get_format_info(t.format);
     const uint64_t   pixels_per_row =
-        info.source_row_pixels_stride == 0 ? info.image_extent.x : info.source_row_pixels_stride;
+        info.buffer_row_pixels_stride == 0 ? info.image_extent.x : info.buffer_row_pixels_stride;
     const uint64_t rows_per_image =
-        info.source_plane_rows_stride == 0 ? info.image_extent.y : info.source_plane_rows_stride;
+        info.buffer_plane_rows_stride == 0 ? info.image_extent.y : info.buffer_plane_rows_stride;
     encoder->copyFromBuffer(
         src.buffer->buffer.get(),
         src.offset,
@@ -1091,15 +1091,38 @@ void cmd_copy_to_texture(CommandBuffer                  cmd,
         t.texture.get(),
         info.base_layer,
         info.base_mip,
-        MTL::Origin::Make(info.destination_image_offset.x,
-                          info.destination_image_offset.y,
-                          info.destination_image_offset.z));
+        MTL::Origin::Make(info.texture_image_offset.x,
+                          info.texture_image_offset.y,
+                          info.texture_image_offset.z));
 }
 
-void cmd_copy_from_texture(CommandBuffer   cmd,
-                           GpuPtr          destGpu,
-                           GpuPtr          srcGpu,
-                           Handle<Texture> texture) {}
+void cmd_copy_from_texture(CommandBuffer                cmd,
+                           Handle<Texture>              texture,
+                           GpuPtr                       destGpu,
+                           const BufferTextureCopyInfo& info) {
+    auto d       = cmd->device;
+    auto encoder = get_compute_encoder(cmd);
+
+    const auto&      t           = d->texture_pool[texture];
+    auto             dst         = buffer_and_offset_from_ptr(d, destGpu);
+    const FormatInfo format_info = get_format_info(t.format);
+    const uint64_t   pixels_per_row =
+        info.buffer_row_pixels_stride == 0 ? info.image_extent.x : info.buffer_row_pixels_stride;
+    const uint64_t rows_per_image =
+        info.buffer_plane_rows_stride == 0 ? info.image_extent.y : info.buffer_plane_rows_stride;
+    encoder->copyFromTexture(
+        t.texture.get(),
+        info.base_layer,
+        info.base_mip,
+        MTL::Origin::Make(info.texture_image_offset.x,
+                          info.texture_image_offset.y,
+                          info.texture_image_offset.z),
+        MTL::Size::Make(info.image_extent.x, info.image_extent.y, info.image_extent.z),
+        dst.buffer->buffer.get(),
+        dst.offset,
+        pixels_per_row * format_info.block_size_bytes,
+        rows_per_image * pixels_per_row * format_info.block_size_bytes);
+}
 
 void cmd_set_texture_heap(CommandBuffer cmd, Handle<TextureHeap> heap) {
     // This is currently a NOOP since all textures are in the global residency set.

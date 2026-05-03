@@ -2848,18 +2848,18 @@ void cmd_memcpy(CommandBuffer cmd, GpuPtr destGpu, GpuPtr srcGpu, size_t size) {
     impl->api.vkCmdCopyBuffer(cmd->buffer, src.buffer, dst.buffer, 1, &region);
 }
 
-void cmd_copy_to_texture(CommandBuffer                  cmd,
-                         GpuPtr                         srcPtr,
-                         Handle<Texture>                texture,
-                         const BufferToTextureCopyInfo& info) {
+void cmd_copy_to_texture(CommandBuffer                cmd,
+                         GpuPtr                       srcPtr,
+                         Handle<Texture>              texture,
+                         const BufferTextureCopyInfo& info) {
     auto impl = cmd->device;
 
     auto                    src = buffer_and_offset_from_ptr(impl, srcPtr);
     const auto&             tex = impl->texture_pool[texture];
     const VkBufferImageCopy region{
         .bufferOffset      = src.offset,
-        .bufferRowLength   = info.source_row_pixels_stride,
-        .bufferImageHeight = info.source_plane_rows_stride,
+        .bufferRowLength   = info.buffer_row_pixels_stride,
+        .bufferImageHeight = info.buffer_plane_rows_stride,
         .imageSubresource =
             {
                 .aspectMask     = aspects_for_format(tex.format),
@@ -2869,9 +2869,9 @@ void cmd_copy_to_texture(CommandBuffer                  cmd,
             },
         .imageOffset =
             {
-                .x = static_cast<int32_t>(info.destination_image_offset.x),
-                .y = static_cast<int32_t>(info.destination_image_offset.y),
-                .z = static_cast<int32_t>(info.destination_image_offset.z),
+                .x = static_cast<int32_t>(info.texture_image_offset.x),
+                .y = static_cast<int32_t>(info.texture_image_offset.y),
+                .z = static_cast<int32_t>(info.texture_image_offset.z),
             },
         .imageExtent =
             {
@@ -2889,11 +2889,45 @@ void cmd_copy_to_texture(CommandBuffer                  cmd,
                                      &region);
 }
 
-void cmd_copy_from_texture(CommandBuffer   cmd,
-                           GpuPtr          destGpu,
-                           GpuPtr          srcGpu,
-                           Handle<Texture> texture) {
-    assert(false);
+void cmd_copy_from_texture(CommandBuffer                cmd,
+                           Handle<Texture>              texture,
+                           GpuPtr                       destGpu,
+                           const BufferTextureCopyInfo& info) {
+    auto impl = cmd->device;
+
+    auto                    dst = buffer_and_offset_from_ptr(impl, destGpu);
+    const auto&             tex = impl->texture_pool[texture];
+    const VkBufferImageCopy region{
+        .bufferOffset      = dst.offset,
+        .bufferRowLength   = info.buffer_row_pixels_stride,
+        .bufferImageHeight = info.buffer_plane_rows_stride,
+        .imageSubresource =
+            {
+                .aspectMask     = aspects_for_format(tex.format),
+                .mipLevel       = 0,
+                .baseArrayLayer = 0,
+                .layerCount     = 1,
+            },
+        .imageOffset =
+            {
+                .x = static_cast<int32_t>(info.texture_image_offset.x),
+                .y = static_cast<int32_t>(info.texture_image_offset.y),
+                .z = static_cast<int32_t>(info.texture_image_offset.z),
+            },
+        .imageExtent =
+            {
+                .width  = info.image_extent.x,
+                .height = info.image_extent.y,
+                .depth  = info.image_extent.z,
+            },
+    };
+
+    impl->api.vkCmdCopyImageToBuffer(cmd->buffer,
+                                     tex.vk_image,
+                                     VK_IMAGE_LAYOUT_GENERAL,
+                                     dst.buffer,
+                                     1,
+                                     &region);
 }
 
 void cmd_set_texture_heap(CommandBuffer cmd, Handle<TextureHeap> heap) {
