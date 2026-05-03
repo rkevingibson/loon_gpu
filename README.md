@@ -43,7 +43,3 @@ While the library should build for linux, it is not tested and currently there i
 ## Running examples
 
 The build should produce a `loon_gpu_examples(.exe)` executable, which can be run from the command line. Use the `M/N` keys to cycle between different examples.
-
-## Documentation
-
-There is Doxygen-generated documentation built by default. I currently am not hosting the documentation anywhere, but it should appear in `<build dir>/docs/html/index.html`.
