@@ -1222,6 +1222,16 @@ void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
         pass->setDepthAttachment(depth_desc.get());
     }
 
+    if (desc.stencil_attachment.texture) {
+        auto  stencil_desc = make_id<MTL::RenderPassStencilAttachmentDescriptor>();
+        auto& stencil_tex  = d->texture_pool[desc.stencil_attachment.texture];
+        stencil_desc->setTexture(stencil_tex.texture.get());
+        stencil_desc->setLoadAction(bridge(desc.stencil_attachment.load_op));
+        stencil_desc->setStoreAction(bridge(desc.stencil_attachment.store_op));
+        stencil_desc->setClearStencil(desc.stencil_attachment.clear_color.r);
+        pass->setStencilAttachment(stencil_desc.get());
+    }
+
     cmd->render_encoder = NS::RetainPtr(cmd->command_buffer->renderCommandEncoder(pass.get()));
 
     cmd->render_encoder->setViewport(MTL::Viewport{
