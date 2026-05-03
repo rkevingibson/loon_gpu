@@ -111,13 +111,13 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
                 .usage      = loon::gpu::UsageFlags::Sampled | loon::gpu::UsageFlags::TransferDst,
             });
 
-        backend_tex->tex_heap_idx
-            = gpu::add_texture_view_to_heap(bd->device,
-                                            bd->texture_heap,
-                                            {
-                                                .texture = backend_tex->texture,
-                                                .format  = loon::gpu::Format::RGBA8Unorm,
-                                            });
+        backend_tex->tex_heap_idx =
+            gpu::add_texture_view_to_heap(bd->device,
+                                          bd->texture_heap,
+                                          {
+                                              .texture = backend_tex->texture,
+                                              .format  = loon::gpu::Format::RGBA8Unorm,
+                                          });
         // Store identifiers
         // Because invalid tex id == 0, we add one here and subtract on retrieval.
         tex->SetTexID((ImTextureID)backend_tex->tex_heap_idx + 1);
@@ -142,14 +142,14 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
 
         auto cmd = gpu::queue_start_command_recording(bd->queue);
 
-        gpu::cmd_copy_to_texture(
-            cmd,
-            fb->buffer,
-            backend_tex->texture,
-            gpu::BufferToTextureCopyInfo{
-                .image_extent
-                = {static_cast<uint32_t>(tex->Width), static_cast<uint32_t>(tex->Height), 1},
-            });
+        gpu::cmd_copy_to_texture(cmd,
+                                 fb->buffer,
+                                 backend_tex->texture,
+                                 gpu::BufferToTextureCopyInfo{
+                                     .image_extent = {static_cast<uint32_t>(tex->Width),
+                                                      static_cast<uint32_t>(tex->Height),
+                                                      1},
+                                 });
         gpu::cmd_barrier(cmd, gpu::StageFlags::Transfer, gpu::StageFlags::PixelShader);
         gpu::cmd_finalize(cmd);
         auto copy_semaphore = gpu::create_semaphore(bd->device, 0);
@@ -168,8 +168,8 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
         tex->SetStatus(ImTextureStatus_OK);
     }
 
-    if (tex->Status == ImTextureStatus_WantDestroy
-        && tex->UnusedFrames >= (int)bd->num_frames_in_flight)
+    if (tex->Status == ImTextureStatus_WantDestroy &&
+        tex->UnusedFrames >= (int)bd->num_frames_in_flight)
         DestroyTexture(tex);
 }
 
@@ -184,40 +184,41 @@ static bool CreateDeviceObjects() {
     ShaderModule shader         = bd->shader_loader->load_module("imgui");
     const auto   vertex_spirv   = get_spirv(shader.get(), "vertex_main");
     const auto   fragment_spirv = get_spirv(shader.get(), "fragment_main");
-    bd->pipelineState = gpu::create_graphics_pipeline(bd->device,
-      {
-          .spirv = Span(vertex_spirv.data(), vertex_spirv.size()).as_bytes(),
-          .entry_point = "vertex_main"_sv,
-      },
-      {
-          .spirv =
-              Span(fragment_spirv.data(), fragment_spirv.size()).as_bytes(),
-          .entry_point = "fragment_main"_sv,
-      },
-      RasterDesc{
-          .depth_format = bd->depth_format,
-          .color_targets = ColorTarget{
-            .format = bd->color_format,
-            .blendstate =
-              BlendDesc{
-                  .color_op = Blend::Add,
-                  .src_color_factor = Factor::SrcAlpha,
-                  .dst_color_factor = Factor::OneMinusSrcAlpha,
-                  .src_alpha_factor = Factor::One,
-                  .dst_alpha_factor = Factor::OneMinusSrcAlpha,
-              },
+    bd->pipelineState           = gpu::create_graphics_pipeline(
+        bd->device,
+        {
+                      .source      = Span(vertex_spirv.data(), vertex_spirv.size()).as_bytes(),
+                      .entry_point = "vertex_main"_sv,
         },
-      });
+        {
+                      .source      = Span(fragment_spirv.data(), fragment_spirv.size()).as_bytes(),
+                      .entry_point = "fragment_main"_sv,
+        },
+        RasterDesc{
+                      .depth_format = bd->depth_format,
+                      .color_targets =
+                ColorTarget{
+                              .format = bd->color_format,
+                              .blendstate =
+                        BlendDesc{
+                                      .color_op         = Blend::Add,
+                                      .src_color_factor = Factor::SrcAlpha,
+                                      .dst_color_factor = Factor::OneMinusSrcAlpha,
+                                      .src_alpha_factor = Factor::One,
+                                      .dst_alpha_factor = Factor::OneMinusSrcAlpha,
+                        },
+                },
+        });
 
     bd->sampler = gpu::add_sampler_to_heap(bd->device, bd->texture_heap, SamplerDesc{});
 
     // Create depth-stencil State
-    bd->depth_stencil_state
-        = gpu::create_depth_stencil_state(bd->device,
-                                          DepthStencilDesc{
-                                              .depth_mode = loon::gpu::DepthFlags::None,
-                                              .depth_test = loon::gpu::Op::Always,
-                                          });
+    bd->depth_stencil_state =
+        gpu::create_depth_stencil_state(bd->device,
+                                        DepthStencilDesc{
+                                            .depth_mode = loon::gpu::DepthFlags::None,
+                                            .depth_test = loon::gpu::Op::Always,
+                                        });
 
     return true;
 }
@@ -293,16 +294,17 @@ void Shutdown() {
 
     io.BackendRendererName     = nullptr;
     io.BackendRendererUserData = nullptr;
-    io.BackendFlags
-        &= ~(ImGuiBackendFlags_RendererHasVtxOffset | ImGuiBackendFlags_RendererHasTextures);
+    io.BackendFlags &=
+        ~(ImGuiBackendFlags_RendererHasVtxOffset | ImGuiBackendFlags_RendererHasTextures);
     platform_io.ClearRendererHandlers();
     IM_DELETE(bd);
 }
 
 void NewFrame() {
     ImGui_ImplLoon_Data* bd = GetBackendData();
-    IM_ASSERT(bd != nullptr && "Context or backend not initialized! Did you call "
-                             "ImGui_ImplLoon_Init()?");
+    IM_ASSERT(bd != nullptr &&
+              "Context or backend not initialized! Did you call "
+              "ImGui_ImplLoon_Init()?");
 
     if (!bd->pipelineState)
         if (!CreateDeviceObjects()) IM_ASSERT(0 && "ImGui_ImplLoon_CreateDeviceObjects() failed!");
@@ -340,8 +342,8 @@ void Render(gpu::CommandBuffer cmd) {
 
     ImGui_ImplLoon_Data* bd = GetBackendData();
     bd->frameIndex          = bd->frameIndex + 1;
-    ImGui_ImplLoon_RenderBuffers* fr
-        = &bd->pFrameResources[bd->frameIndex % bd->num_frames_in_flight];
+    ImGui_ImplLoon_RenderBuffers* fr =
+        &bd->pFrameResources[bd->frameIndex % bd->num_frames_in_flight];
 
     // Catch up with texture updates. Most of the times, the list will have 1
     // element with an OK status, aka nothing to do. (This almost always points to
@@ -448,15 +450,18 @@ void Render(gpu::CommandBuffer cmd) {
                 gpu::GpuPtr vertex_buf = global_vtx_ptr + (pcmd->VtxOffset * sizeof(ImDrawVert));
                 gpu::GpuPtr index_buf  = global_idx_ptr + (pcmd->IdxOffset * sizeof(ImDrawIdx));
 
-                *draw_args = DrawArgs{.vert{
-                                  .scale         = scale,
-                                  .translate     = translate,
-                                  .vertex_buffer = vertex_buf,
-                              },
-                              .frag = {
-                                  .texture = tex_id,
-                                  .sampler = bd->sampler,
-                              },};
+                *draw_args = DrawArgs{
+                    .vert{
+                        .scale         = scale,
+                        .translate     = translate,
+                        .vertex_buffer = vertex_buf,
+                    },
+                    .frag =
+                        {
+                            .texture = tex_id,
+                            .sampler = bd->sampler,
+                        },
+                };
 
                 gpu::cmd_draw_indexed_instanced(
                     cmd,

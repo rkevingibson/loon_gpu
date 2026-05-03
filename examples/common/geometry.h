@@ -146,15 +146,15 @@ struct ProjectionInfo {
 float4x4 projection(const ProjectionInfo& info);
 
 constexpr inline bool operator==(const float4x4& a, const float4x4& b) {
-    return a.columns[0] == b.columns[0] && a.columns[1] == b.columns[1]
-           && a.columns[2] == b.columns[2] && a.columns[3] == b.columns[3];
+    return a.columns[0] == b.columns[0] && a.columns[1] == b.columns[1] &&
+           a.columns[2] == b.columns[2] && a.columns[3] == b.columns[3];
 }
 
 // MARK: transform3d operations
 
 [[nodiscard]] constexpr inline bool operator==(const transform3d& a, const transform3d& b) {
-    return a.basis[0] == b.basis[0] && a.basis[1] == b.basis[1] && a.basis[2] == b.basis[2]
-           && a.origin == b.origin;
+    return a.basis[0] == b.basis[0] && a.basis[1] == b.basis[1] && a.basis[2] == b.basis[2] &&
+           a.origin == b.origin;
 }
 
 

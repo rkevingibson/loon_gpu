@@ -68,9 +68,8 @@ configure_file("shaders/test_shaders.in.h"
                ${CMAKE_CURRENT_BINARY_DIR}/test_shaders.h @ONLY)
 
 add_executable(
-  loon_gpu_tests
-  main.cpp utilities_tests.cpp example_tests.cpp pipeline_tests.cpp
-  ${CMAKE_CURRENT_BINARY_DIR}/test_shaders.cpp)
+  loon_gpu_tests main.cpp utilities_tests.cpp example_tests.cpp api_tests.cpp
+                 ${CMAKE_CURRENT_BINARY_DIR}/test_shaders.cpp)
 
 add_dependencies(loon_gpu_tests shaders)
 

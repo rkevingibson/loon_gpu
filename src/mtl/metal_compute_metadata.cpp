@@ -46,8 +46,8 @@ ShaderMetadata parse_metadata(Arena            arena,
             attribute_pos += attribute.size();
             const auto attribute_end = source.find(')', attribute_pos);
 
-            const std::string_view triplet
-                = source.substr(attribute_pos, attribute_end - attribute_pos);
+            const std::string_view triplet =
+                source.substr(attribute_pos, attribute_end - attribute_pos);
 
             return {.required_threadgroup_size = parse_dim(triplet)};
         }

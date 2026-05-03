@@ -21,3 +21,18 @@ void clear_buffer(device ClearBufferArgs *args [[buffer(0)]], uint gid [[thread_
         args->buffer[gid] = kClearValue;
     }
 }
+
+
+[[vertex]]
+float4 fullscreen_quad_vert(uint vertexIdx [[vertex_id]])
+{
+   const float2 verts[3] =  {float2(-1,-1), float2(3,-1), float2(-1,3)};
+
+   return float4(verts[vertexIdx], 0.5, 1.0);
+}
+
+[[fragment]]
+float4 fullscreen_quad_frag()
+{
+    return float4(1.0, 0.0, 0.0, 1.0);
+}

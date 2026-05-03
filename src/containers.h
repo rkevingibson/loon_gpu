@@ -480,8 +480,8 @@ Handle<T> SlotMap<T>::emplace(T&& val) {
     if (m_head == kEndOfList) { add_segment(); }
 
     const uint32_t idx = m_head;
-    assert(idx != kNotInFreelist
-           && idx != kEndOfList);  // Out of memory, need to identify a leak somewhere.
+    assert(idx != kNotInFreelist &&
+           idx != kEndOfList);  // Out of memory, need to identify a leak somewhere.
 
     Entry* entry = get(idx);
     assert(entry->next != kNotInFreelist);

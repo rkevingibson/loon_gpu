@@ -99,8 +99,8 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
 
     for (int arg_idx = 0; arg_idx < argc; ++arg_idx) {
         if (std::wstring_view(argv[arg_idx]) == L"--shader_dir" && arg_idx + 1 < argc) {
-            int string_size
-                = WideCharToMultiByte(CP_UTF8, 0, argv[arg_idx + 1], -1, nullptr, 0, NULL, NULL);
+            int string_size =
+                WideCharToMultiByte(CP_UTF8, 0, argv[arg_idx + 1], -1, nullptr, 0, NULL, NULL);
 
             std::vector<char> bytes(string_size, 0);
             WideCharToMultiByte(CP_UTF8,
@@ -115,8 +115,8 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
         }
     }
 
-    window_state.shader_loader
-        = loon::make_box<ShaderLoader>(window_state.file_paths.shader_directory.c_str());
+    window_state.shader_loader =
+        loon::make_box<ShaderLoader>(window_state.file_paths.shader_directory.c_str());
 
     const char  CLASS_NAME[] = "LoonWebGPU Examples";
     WNDCLASSEXA wc           = {.cbSize        = sizeof(WNDCLASSEXA),
@@ -202,14 +202,14 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
             current_example.reset();
             window_state.shader_loader->reset_cache();
             selected_example = ExampleName(
-                (static_cast<int>(selected_example) + static_cast<int>(ExampleName::Count) - 1)
-                % static_cast<int>(ExampleName::Count));
+                (static_cast<int>(selected_example) + static_cast<int>(ExampleName::Count) - 1) %
+                static_cast<int>(ExampleName::Count));
             current_example = create_example(selected_example, window_state);
         } else if (input.keys['M'] & kButtonStatePressed) {
             current_example.reset();
             window_state.shader_loader->reset_cache();
-            selected_example = ExampleName((static_cast<int>(selected_example) + 1)
-                                           % static_cast<int>(ExampleName::Count));
+            selected_example = ExampleName((static_cast<int>(selected_example) + 1) %
+                                           static_cast<int>(ExampleName::Count));
             current_example  = create_example(selected_example, window_state);
         }
 
