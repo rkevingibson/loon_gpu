@@ -6,6 +6,8 @@ A bindless wrapper for Vulkan and Metal, targetting modern GPUs.
 
 The API design is inspired by Sebastian Aaltonen's blog post [No Graphics API](https://www.sebastianaaltonen.com/blog/no-graphics-api), adapted to the realities of what is possible in Vulkan today. 
 
+Some (very rough) generated documentation is available at [https://www.kevin-gibson.com/loon_gpu/](https://www.kevin-gibson.com/loon_gpu/)
+
 Currently it targets a roughly Vulkan 1.3 feature set, with a couple of required features:
 - Dynamic Rendering
 - Buffer Device Addresses
