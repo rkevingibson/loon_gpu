@@ -26,8 +26,8 @@ jobs:
       - name: Setup Pages
         id: pages
         uses: actions/configure-pages@v6
-      - name: Install doxygen
-        run: sudo apt install -y doxygen
+      - name: Install doxygen and xlib
+        run: sudo apt install -y doxygen libx11-dev
         shell: bash
       - name: Set reusable strings
         # Turn repeated input strings (such as the build output directory) into step outputs. These step outputs can be used throughout the workflow file.
