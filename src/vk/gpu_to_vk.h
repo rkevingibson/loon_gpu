@@ -23,5 +23,6 @@ VkAttachmentStoreOp                 bridge(StoreOp op);
 VkCompareOp                         bridge(Op op);
 VkIndexType                         bridge(IndexType t);
 VkCullModeFlags                     bridge(Cull c);
+VkStencilOp                         bridge(StencilOp op);
 
 };  // namespace loon::gpu

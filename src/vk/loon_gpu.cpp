@@ -2207,6 +2207,8 @@ Handle<Pipeline> create_graphics_pipeline(Device                             d,
         VK_DYNAMIC_STATE_STENCIL_REFERENCE,
         VK_DYNAMIC_STATE_CULL_MODE,
         VK_DYNAMIC_STATE_FRONT_FACE,
+        VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK,
+        VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,
     };
 
     VkPipelineViewportStateCreateInfo viewport_state{
@@ -2962,14 +2964,34 @@ void cmd_set_depth_stencil_state(CommandBuffer cmd, Handle<DepthStencilState> st
     impl->api.vkCmdSetDepthWriteEnable(cmd->buffer, bool(desc.depth_mode & DepthFlags::Write));
     impl->api.vkCmdSetDepthTestEnable(cmd->buffer, bool(desc.depth_mode & DepthFlags::Read));
     impl->api.vkCmdSetDepthCompareOp(cmd->buffer, bridge(desc.depth_test));
-    // TODO: More stuff here.
-    impl->api.vkCmdSetStencilTestEnable(cmd->buffer, false);
+
+    // TODO: Consider saving this state locally and only calling vulkan on diffs, to reduce API
+    // calls.
+    impl->api.vkCmdSetStencilTestEnable(cmd->buffer, true);
     impl->api.vkCmdSetStencilOp(cmd->buffer,
-                                VK_STENCIL_FACE_FRONT_AND_BACK,
-                                VK_STENCIL_OP_KEEP,
-                                VK_STENCIL_OP_KEEP,
-                                VK_STENCIL_OP_KEEP,
-                                VK_COMPARE_OP_ALWAYS);
+                                VK_STENCIL_FACE_FRONT_BIT,
+                                bridge(desc.stencil_front.fail_op),
+                                bridge(desc.stencil_front.pass_op),
+                                bridge(desc.stencil_front.depth_fail_op),
+                                bridge(desc.stencil_front.test));
+    impl->api.vkCmdSetStencilReference(cmd->buffer,
+                                       VK_STENCIL_FACE_FRONT_BIT,
+                                       desc.stencil_front.reference);
+    impl->api.vkCmdSetStencilOp(cmd->buffer,
+                                VK_STENCIL_FACE_BACK_BIT,
+                                bridge(desc.stencil_back.fail_op),
+                                bridge(desc.stencil_back.pass_op),
+                                bridge(desc.stencil_back.depth_fail_op),
+                                bridge(desc.stencil_back.test));
+    impl->api.vkCmdSetStencilReference(cmd->buffer,
+                                       VK_STENCIL_FACE_BACK_BIT,
+                                       desc.stencil_back.reference);
+    impl->api.vkCmdSetStencilWriteMask(cmd->buffer,
+                                       VK_STENCIL_FACE_FRONT_AND_BACK,
+                                       desc.stencil_write_mask);
+    impl->api.vkCmdSetStencilCompareMask(cmd->buffer,
+                                         VK_STENCIL_FACE_FRONT_AND_BACK,
+                                         desc.stencil_read_mask);
 }
 
 void cmd_set_viewport(CommandBuffer cmd, const Rect2D& rect) {
@@ -3048,16 +3070,17 @@ void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
                            {
                                .color =
                                    {
-                                       .uint32 = {attachment.clear_color.r,
-                                                  attachment.clear_color.g,
-                                                  attachment.clear_color.b,
-                                                  attachment.clear_color.a},
+                                       .uint32 =
+                                           {
+                                               attachment.clear_color.r,
+                                               attachment.clear_color.g,
+                                               attachment.clear_color.b,
+                                               attachment.clear_color.a,
+                                           },
                                    },
                            },
                    });
     }
-
-    // TODO: stencil attachment
 
     const bool                has_depth_attachment = desc.depth_attachment.texture.h != 0;
     VkRenderingAttachmentInfo depth_attachment{};
@@ -3076,10 +3099,41 @@ void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
                 {
                     .color =
                         {
-                            .uint32 = {desc.depth_attachment.clear_color.r,
-                                       desc.depth_attachment.clear_color.g,
-                                       desc.depth_attachment.clear_color.b,
-                                       desc.depth_attachment.clear_color.a},
+                            .uint32 =
+                                {
+                                    desc.depth_attachment.clear_color.r,
+                                    desc.depth_attachment.clear_color.g,
+                                    desc.depth_attachment.clear_color.b,
+                                    desc.depth_attachment.clear_color.a,
+                                },
+                        },
+                },
+        };
+    }
+    const bool                has_stencil_attachment = desc.stencil_attachment.texture.h != 0;
+    VkRenderingAttachmentInfo stencil_attachment{};
+    if (has_stencil_attachment) {
+        stencil_attachment = VkRenderingAttachmentInfo{
+            .sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+            .pNext       = nullptr,
+            .imageView   = impl->texture_pool[desc.stencil_attachment.texture].default_image_view,
+            .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+            .resolveMode = VK_RESOLVE_MODE_NONE,
+            .resolveImageView   = VK_NULL_HANDLE,
+            .resolveImageLayout = VK_IMAGE_LAYOUT_GENERAL,
+            .loadOp             = bridge(desc.stencil_attachment.load_op),
+            .storeOp            = bridge(desc.stencil_attachment.store_op),
+            .clearValue =
+                {
+                    .color =
+                        {
+                            .uint32 =
+                                {
+                                    desc.stencil_attachment.clear_color.r,
+                                    desc.stencil_attachment.clear_color.g,
+                                    desc.stencil_attachment.clear_color.b,
+                                    desc.stencil_attachment.clear_color.a,
+                                },
                         },
                 },
         };
@@ -3107,7 +3161,7 @@ void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
         .colorAttachmentCount = static_cast<uint32_t>(color_attachments.size()),
         .pColorAttachments    = color_attachments.data(),
         .pDepthAttachment     = has_depth_attachment ? &depth_attachment : nullptr,
-        .pStencilAttachment   = nullptr,
+        .pStencilAttachment   = has_stencil_attachment ? &stencil_attachment : nullptr,
     };
 
     auto buf = cmd->buffer;

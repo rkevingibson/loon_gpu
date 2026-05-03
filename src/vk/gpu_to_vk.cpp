@@ -414,6 +414,21 @@ VkCullModeFlags bridge(Cull c) {
         case Cull::Back: return VK_CULL_MODE_BACK_BIT;
         case Cull::None: return VK_CULL_MODE_NONE;
     }
+    return VK_CULL_MODE_FLAG_BITS_MAX_ENUM;
+}
+
+VkStencilOp bridge(StencilOp op) {
+    switch (op) {
+        case StencilOp::Keep: return VK_STENCIL_OP_KEEP;
+        case StencilOp::Zero: return VK_STENCIL_OP_ZERO;
+        case StencilOp::Replace: return VK_STENCIL_OP_REPLACE;
+        case StencilOp::IncrementClamp: return VK_STENCIL_OP_INCREMENT_AND_CLAMP;
+        case StencilOp::DecrementClamp: return VK_STENCIL_OP_DECREMENT_AND_CLAMP;
+        case StencilOp::Invert: return VK_STENCIL_OP_INVERT;
+        case StencilOp::IncrementWrap: return VK_STENCIL_OP_INCREMENT_AND_WRAP;
+        case StencilOp::DecrementWrap: return VK_STENCIL_OP_DECREMENT_AND_WRAP;
+    }
+    return VK_STENCIL_OP_MAX_ENUM;
 }
 
 }  // namespace loon::gpu
