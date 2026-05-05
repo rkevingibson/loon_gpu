@@ -284,6 +284,18 @@ struct DeviceImpl {
     // TODO: For multiple queue support, would need more stuff here for texture initialization.
 };
 
+static void null_log_callback(LogLevel         lvl,
+                              Span<const char> message,
+                              uint32_t         line_number,
+                              Span<const char> filename,
+                              void*            userdata) {
+    (void)lvl;
+    (void)message;
+    (void)line_number;
+    (void)filename;
+    (void)userdata;
+}
+
 static void log_impl(Device           d,
                      LogLevel         lvl,
                      Span<const char> msg,
@@ -1088,7 +1100,7 @@ Device create_device(const DeviceDesc& desc) {
     auto d = reinterpret_cast<DeviceImpl*>(blk.ptr);
     return new (blk.ptr) DeviceImpl{
         .allocator                  = alloc,
-        .log_callback               = desc.log_callback,
+        .log_callback               = desc.log_callback ? desc.log_callback : null_log_callback,
         .log_userdata               = desc.log_userdata,
         .log_level                  = desc.log_level,
         .tls_key                    = loon::gpu::tls_alloc([](void* data) {

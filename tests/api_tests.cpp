@@ -1,3 +1,5 @@
+#include <string>
+
 #include "gpu/loon_gpu.h"
 #include "test_shaders.h"
 #include "utest.h"
@@ -5,8 +7,22 @@
 using namespace loon;
 using loon::gpu::operator""_sv;
 
+static void test_log_callback(gpu::LogLevel         lvl,
+                              gpu::Span<const char> message,
+                              uint32_t              line_number,
+                              gpu::Span<const char> filename,
+                              void*                 userdata) {
+    int*        utest_result = reinterpret_cast<int*>(userdata);
+    std::string msg_string(message.data(), message.size());
+    ASSERT_NE_MSG(lvl, gpu::LogLevel::Error, msg_string.c_str());
+}
+
+
 UTEST(pipeline_tests, basic_compute_compilation) {
-    auto device = gpu::create_device({});
+    auto device = gpu::create_device({
+        .log_callback = test_log_callback,
+        .log_userdata = utest_result,
+    });
     if (!device) { UTEST_SKIP("Unable to create device, likely running in CI without GPU."); }
 
     auto pipeline = gpu::create_compute_pipeline(device,
@@ -26,7 +42,10 @@ struct ClearBufferArgs {
 };
 
 UTEST(pipeline_tests, specialized_compute_compilation) {
-    auto device = gpu::create_device({});
+    auto device = gpu::create_device({
+        .log_callback = test_log_callback,
+        .log_userdata = utest_result,
+    });
     if (!device) { UTEST_SKIP("Unable to create device, likely running in CI without GPU."); }
 
     const uint32_t kClearValue = 42;
@@ -71,7 +90,10 @@ UTEST(pipeline_tests, specialized_compute_compilation) {
 }
 
 UTEST(api_tests, stencil_buffer) {
-    auto device = gpu::create_device({});
+    auto device = gpu::create_device({
+        .log_callback = test_log_callback,
+        .log_userdata = utest_result,
+    });
     if (!device) { UTEST_SKIP("Unable to create device, likely running in CI without GPU."); }
 
     auto color_target = gpu::create_texture(
