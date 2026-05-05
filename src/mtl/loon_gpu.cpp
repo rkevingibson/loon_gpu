@@ -1,6 +1,5 @@
 #include <gpu/loon_gpu.h>
 
-#include <cassert>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -172,10 +171,10 @@ struct ThreadLocalState {
     loon::gpu::Allocator    allocator;
     MemoryBlock             arena_memory;
     loon::gpu::Arena        arena;
-    ThreadLocalState(const loon::gpu::Allocator& alloc) :
+    ThreadLocalState(const loon::gpu::Allocator& alloc, ProcLogCallback cb, void* userdata) :
         allocator{alloc},
         arena_memory{allocator.alloc(kArenaSize)},
-        arena(arena_memory.ptr, arena_memory.len) {}
+        arena(arena_memory.ptr, arena_memory.len, cb, userdata) {}
     ~ThreadLocalState() { allocator.free(arena_memory); }
 };
 
@@ -220,19 +219,72 @@ struct DeviceImpl {
     Vector<GpuPtrMap>          ptr_map;
 };
 
-void log(Device d, LogLevel lvl, Span<const char> msg) {
-    d->log_callback(lvl, msg, d->log_userdata);
+static void null_log_callback(LogLevel         lvl,
+                              Span<const char> message,
+                              uint32_t         line_number,
+                              Span<const char> filename,
+                              void*            userdata) {
+    (void)lvl;
+    (void)message;
+    (void)line_number;
+    (void)filename;
+    (void)userdata;
+}
+
+static void log_impl(Device           d,
+                     LogLevel         lvl,
+                     Span<const char> msg,
+                     uint32_t         line_number,
+                     Span<const char> filename) {
+    d->log_callback(lvl, msg, line_number, filename, d->log_userdata);
 };
+
+static void log_ns_impl(Device           d,
+                        NS::Error*       error,
+                        Span<const char> msg,
+                        uint32_t         line_number,
+                        Span<const char> filename) {
+    char  arena_mem[512];
+    Arena arena(arena_mem, 512, d->log_callback, d->log_userdata);
+
+    NS::String*      err_string = error->localizedDescription();
+    Span<const char> err_span   = Span<const char>(err_string->utf8String(), err_string->length());
+    Span<const char> msg_out    = concat(&arena, msg, " ["_sv);
+    msg_out                     = concat(&arena, msg_out, err_span);
+    msg_out                     = concat(&arena, msg_out, "]"_sv);
+    d->log_callback(LogLevel::Error, msg_out, line_number, filename, d->log_userdata);
+}
+
+#define LOON_SV_IMPL(x)       x##_sv
+#define LOON_MAKE_SV(x)       LOON_SV_IMPL(x)
+#define LOON_LOG(d, lvl, msg) log_impl(d, lvl, LOON_MAKE_SV(msg), __LINE__, LOON_MAKE_SV(__FILE__));
+#define LOON_CHK(d, err, msg)                                                                      \
+    [&]() {                                                                                        \
+        if (err) {                                                                                 \
+            log_ns_impl(d, err, LOON_MAKE_SV(msg), __LINE__, LOON_MAKE_SV(__FILE__));              \
+            return false;                                                                          \
+        } else {                                                                                   \
+            return true;                                                                           \
+        }                                                                                          \
+    }()
+#define LOON_ASSERT(d, expr, msg, ...)                                                             \
+    do {                                                                                           \
+        if (!(expr)) {                                                                             \
+            LOON_LOG(d, LogLevel::Error, msg);                                                     \
+            return __VA_ARGS__;                                                                    \
+        }                                                                                          \
+    } while (false)
 
 Arena* get_thread_local_arena(Device d) {
     auto state = reinterpret_cast<ThreadLocalState*>(loon::gpu::tls_get_data(d->tls_key));
     if (state == nullptr) {
         auto tls_block = d->allocator.alloc(sizeof(ThreadLocalState));
         if (tls_block.ptr == nullptr) {
-            log(d, LogLevel::Error, "Allocator out of memory"_sv);
+            LOON_LOG(d, LogLevel::Error, "Allocator out of memory");
             return nullptr;
         }
-        state = ::new (tls_block.ptr) ThreadLocalState(d->allocator);
+        state =
+            ::new (tls_block.ptr) ThreadLocalState(d->allocator, d->log_callback, d->log_userdata);
         loon::gpu::tls_set_data(d->tls_key, state);
     }
     return &state->arena;
@@ -255,7 +307,6 @@ Device create_device(const DeviceDesc& desc) {
     auto compiler_desc = make_id<MTL4::CompilerDescriptor>();
     auto compiler      = NS::TransferPtr(device->newCompiler(compiler_desc.get(), &error));
     auto options       = make_id<MTL4::CompilerTaskOptions>();
-
     // It seems like this is a valid cast from testing.
     auto surface_metal_layer =
         NS::RetainPtr(reinterpret_cast<CA::MetalLayer*>(desc.native_window_handle));
@@ -272,7 +323,7 @@ Device create_device(const DeviceDesc& desc) {
     auto d = reinterpret_cast<DeviceImpl*>(blk.ptr);
     return new (blk.ptr) DeviceImpl{
         .allocator     = alloc,
-        .log_callback  = desc.log_callback,
+        .log_callback  = desc.log_callback ? desc.log_callback : null_log_callback,
         .log_userdata  = desc.log_userdata,
         .log_level     = desc.log_level,
         .tls_key       = loon::gpu::tls_alloc([](void* data) {
@@ -468,7 +519,7 @@ void free(Device d, GpuPtr ptr) {
     const auto it = lower_bound<GpuPtrMap, PtrMapCompare>(d->ptr_map.begin(),
                                                           d->ptr_map.end(),
                                                           GpuPtrMap{.ptr = ptr});
-    assert(it->ptr == ptr);  // Shouldn't free from another pointer in the same allocation.
+    LOON_ASSERT(d, it->ptr == ptr, "gpu::free: Pointer not from call to malloc");
     d->buffer_pool.erase(it->buffer);
     d->ptr_map.erase(it, it + 1);
     rwlock_unlock_write(&d->ptr_map_lock);
@@ -565,7 +616,9 @@ TextureView add_texture_view_to_heap(Device d, Handle<TextureHeap> h, const Text
 void remove_texture_view_from_heap(Device d, Handle<TextureHeap> h, TextureView view) {
     auto&      heap = d->texture_heap_pool[h];
     const auto base = heap.pool->baseResourceID()._impl;
-    assert(view >= base && view < base + heap.pool->resourceViewCount());
+    LOON_ASSERT(d,
+                view >= base && view < base + heap.pool->resourceViewCount(),
+                "gpu::remove_texture_view_from_heap: TextureView not in heap");
     const auto index = view - heap.pool->baseResourceID()._impl;
     heap.bitset.clear_bit(index);
 }
@@ -610,7 +663,7 @@ void remove_sampler_from_heap(Device d, Handle<TextureHeap> h, Sampler s) {
     const auto it = lower_bound<SamplerMapping, SamplerMappingCompare>(heap.sampler_lookup.begin(),
                                                                        heap.sampler_lookup.end(),
                                                                        {.sampler = s});
-    assert(it->sampler == s);
+    LOON_ASSERT(d, it->sampler == s, "gpu::remove_sampler_from_heap: Sampler not found in heap.");
     heap.sampler_lookup.erase(it, it + 1);
 }
 
@@ -684,6 +737,9 @@ Handle<Pipeline> create_compute_pipeline(Device                             d,
     auto             options = make_id<MTL::CompileOptions>();
     id<MTL::Library> lib =
         NS::TransferPtr(d->device->newLibrary(shader_source.get(), options.get(), &error));
+    if (!LOON_CHK(d, error, "gpu::create_compute_pipeline: Error creating library from source")) {
+        return {};
+    }
 
     auto desc      = make_id<MTL4::ComputePipelineDescriptor>();
     auto func_desc = make_id<MTL4::LibraryFunctionDescriptor>();
@@ -702,6 +758,9 @@ Handle<Pipeline> create_compute_pipeline(Device                             d,
 
     id<MTL::ComputePipelineState> compute_pipeline =
         NS::TransferPtr(d->compiler->newComputePipelineState(desc.get(), d->options.get(), &error));
+    if (!LOON_CHK(d, error, "gpu::create_compute_pipeline: Error create pipeline state")) {
+        return {};
+    }
 
     const auto metadata = parse_metadata(*get_thread_local_arena(d),
                                          compute.source.cast<const char>(),
@@ -730,14 +789,15 @@ Handle<Pipeline> create_graphics_pipeline(Device                             d,
 
     id<MTL::Library> vert_lib =
         NS::TransferPtr(d->device->newLibrary(vert_source.get(), options.get(), &error));
-
-    if (error != nullptr) { printf("%s\n", error->localizedDescription()->utf8String()); }
+    if (!LOON_CHK(d, error, "gpu::create_graphics_pipeline: Error creating vertex library")) {
+        return {};
+    }
 
     id<MTL::Library> frag_lib =
         NS::TransferPtr(d->device->newLibrary(frag_source.get(), options.get(), &error));
-
-    if (error) { printf("%s\n", error->localizedDescription()->utf8String()); }
-
+    if (!LOON_CHK(d, error, "gpu::create_graphics_pipeline: Error creating fragment library")) {
+        return {};
+    }
     auto vert_func_desc = make_id<MTL4::LibraryFunctionDescriptor>();
     vert_func_desc->setLibrary(vert_lib.get());
     vert_func_desc->setName(vert_entry_point.get());
@@ -796,6 +856,11 @@ Handle<Pipeline> create_graphics_pipeline(Device                             d,
 
     id<MTL::RenderPipelineState> render_pipeline = NS::TransferPtr(
         d->compiler->newRenderPipelineState(pipeline_desc.get(), d->options.get(), &error));
+    if (!LOON_CHK(d,
+                  error,
+                  "gpu::create_graphics_pipeline: Error creating render pipeline state")) {
+        return {};
+    }
 
     return d->pipeline_pool.emplace({
         .render_pipeline  = render_pipeline,
@@ -904,9 +969,9 @@ static CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
             reset_command_pool(pool);
         }
     } else {
-        log(queue->device,
-            LogLevel::Error,
-            "Unable to get command pool - too many command buffers in flight at once"_sv);
+        LOON_LOG(queue->device,
+                 LogLevel::Error,
+                 "Unable to get command pool - too many command buffers in flight at once");
     }
 
     return pool;
@@ -1041,7 +1106,10 @@ static bool is_in_render_pass(CommandBuffer cmd) {
 }
 
 static id<MTL4::ComputeCommandEncoder> get_compute_encoder(CommandBuffer cmd) {
-    assert(!is_in_render_pass(cmd));
+    LOON_ASSERT(cmd->device,
+                !is_in_render_pass(cmd),
+                "Invalid command called while in render pass",
+                nullptr);
     if (!cmd->compute_encoder) {
         cmd->compute_encoder = NS::RetainPtr(cmd->command_buffer->computeCommandEncoder());
     }
@@ -1050,7 +1118,9 @@ static id<MTL4::ComputeCommandEncoder> get_compute_encoder(CommandBuffer cmd) {
 }
 
 static void end_compute_pass(CommandBuffer cmd) {
-    assert(is_in_compute_pass(cmd));
+    LOON_ASSERT(cmd->device,
+                is_in_compute_pass(cmd),
+                "Internal error: end_compute_pass called while not in compute_pass");
     cmd->compute_encoder->endEncoding();
     cmd->compute_encoder = nullptr;
 }
@@ -1131,9 +1201,7 @@ void cmd_set_texture_heap(CommandBuffer cmd, Handle<TextureHeap> heap) {
 void cmd_barrier(CommandBuffer cmd, StageFlags before, StageFlags after) {
     auto d = cmd->device;
 
-    assert(!is_in_render_pass(
-        cmd));  // To match vulkan behaviour, don't allow barriers in a render pass.
-    // If we're in a compute pass, can encode this
+    LOON_ASSERT(d, !is_in_render_pass(cmd), "Barriers not allowed while in a render pass.");
 
     // TODO: Avoid creating a compute encoder if we're not in one, for more efficient barriers.
 
@@ -1146,8 +1214,15 @@ void cmd_barrier(CommandBuffer cmd, StageFlags before, StageFlags after) {
 }
 
 void cmd_set_pipeline(CommandBuffer cmd, Handle<Pipeline> pipeline) {
+    if (!pipeline) {
+        LOON_LOG(cmd->device, LogLevel::Error, "gpu::cmd_set_pipeline: Invalid pipeline");
+        return;
+    }
     auto& p = cmd->device->pipeline_pool[pipeline];
-    assert((is_in_render_pass(cmd) && p.render_pipeline) || p.compute_pipeline);
+    LOON_ASSERT(cmd->device,
+                (is_in_render_pass(cmd) && p.render_pipeline) || p.compute_pipeline,
+                "gpu::cmd_set_pipeline: Invalid pipeline - attempting to set a render pipeline "
+                "while outside of a render pass, or compute pipeline while in a render pass.");
     if (is_in_render_pass(cmd)) {
         cmd->render_encoder->setRenderPipelineState(p.render_pipeline.get());
         cmd->current_topology = bridge(p.topology);
@@ -1161,13 +1236,18 @@ void cmd_set_pipeline(CommandBuffer cmd, Handle<Pipeline> pipeline) {
 }
 
 void cmd_set_depth_stencil_state(CommandBuffer cmd, Handle<DepthStencilState> state) {
-    assert(is_in_render_pass(cmd));
+    LOON_ASSERT(
+        cmd->device,
+        is_in_render_pass(cmd),
+        "gpu::cmd_set_depth_stencil_state: Cannot be called from outside of a render pass.");
     auto& d = cmd->device->depth_stencil_state_pool[state];
     cmd->render_encoder->setDepthStencilState(d.state.get());
 }
 
 void cmd_set_viewport(CommandBuffer cmd, const Rect2D& rect) {
-    assert(is_in_render_pass(cmd));
+    LOON_ASSERT(cmd->device,
+                is_in_render_pass(cmd),
+                "gpu::cmd_set_viewport: Cannot be called from outside of a render pass.");
     cmd->render_encoder->setViewport(MTL::Viewport{
         .originX = static_cast<double>(rect.offset_x),
         .originY = static_cast<double>(rect.offset_y),
@@ -1179,7 +1259,9 @@ void cmd_set_viewport(CommandBuffer cmd, const Rect2D& rect) {
 }
 
 void cmd_set_scissor_rect(CommandBuffer cmd, const Rect2D& rect) {
-    assert(is_in_render_pass(cmd));
+    LOON_ASSERT(cmd->device,
+                is_in_render_pass(cmd),
+                "gpu::cmd_set_scissor_rect: Cannot be called from outside of a render pass.");
 
     cmd->render_encoder->setScissorRect(MTL::ScissorRect{
         .x      = rect.offset_x,
@@ -1195,7 +1277,9 @@ static void set_compute_ptrs(CommandBuffer cmd, GpuPtr computeDataGpu) {
 }
 
 void cmd_dispatch(CommandBuffer cmd, GpuPtr dataGpu, const Dimension3D& gridDimensions) {
-    assert(!is_in_render_pass(cmd));
+    LOON_ASSERT(cmd->device,
+                !is_in_render_pass(cmd),
+                "gpu::cmd_dispatch: Cannot be called from inside of a render pass.");
 
     auto encoder = get_compute_encoder(cmd);
     set_compute_ptrs(cmd, dataGpu);
@@ -1205,7 +1289,10 @@ void cmd_dispatch(CommandBuffer cmd, GpuPtr dataGpu, const Dimension3D& gridDime
 }
 
 void cmd_dispatch_indirect(CommandBuffer cmd, GpuPtr dataGpu, GpuPtr gridDimensionsGpu) {
-    assert(!is_in_render_pass(cmd));
+    LOON_ASSERT(cmd->device,
+                !is_in_render_pass(cmd),
+                "gpu::cmd_dispatch_indirect: Cannot be called from inside of a render pass.");
+
 
     auto encoder = get_compute_encoder(cmd);
     set_compute_ptrs(cmd, dataGpu);
@@ -1213,7 +1300,10 @@ void cmd_dispatch_indirect(CommandBuffer cmd, GpuPtr dataGpu, GpuPtr gridDimensi
 }
 
 void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
-    assert(!is_in_render_pass(cmd));
+    LOON_ASSERT(cmd->device,
+                !is_in_render_pass(cmd),
+                "gpu::cmd_begin_render_pass: Cannot be called from inside of a render pass.");
+
     if (is_in_compute_pass(cmd)) { end_compute_pass(cmd); }
 
     auto                           d    = cmd->device;
@@ -1268,19 +1358,28 @@ void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {
 }
 
 void cmd_end_render_pass(CommandBuffer cmd) {
-    assert(is_in_render_pass(cmd));
+    LOON_ASSERT(cmd->device,
+                is_in_render_pass(cmd),
+                "gpu::cmd_end_render_pass: Cannot be called from outside of a render pass.");
+
     cmd->render_encoder->endEncoding();
     cmd->render_encoder = nullptr;
 }
 
 void cmd_set_front_face(CommandBuffer cmd, FrontFace front) {
-    assert(is_in_render_pass(cmd));
+    LOON_ASSERT(cmd->device,
+                is_in_render_pass(cmd),
+                "gpu::cmd_set_front_face: Cannot be called from outside of a render pass.");
+
     cmd->render_encoder->setFrontFacingWinding(
         front == FrontFace::CCW ? MTL::WindingCounterClockwise : MTL::WindingClockwise);
 }
 
 void cmd_set_cull_mode(CommandBuffer cmd, Cull cull) {
-    assert(is_in_render_pass(cmd));
+    LOON_ASSERT(cmd->device,
+                is_in_render_pass(cmd),
+                "gpu::cmd_set_cull_mode: Cannot be called from outside of a render pass.");
+
     cmd->render_encoder->setCullMode(bridge(cull));
 }
 
@@ -1296,14 +1395,20 @@ void cmd_draw(CommandBuffer cmd,
               GpuPtr        fragmentDataGpu,
               uint32_t      vertexCount,
               uint32_t      instanceCount) {
-    assert(is_in_render_pass(cmd));
+    LOON_ASSERT(cmd->device,
+                is_in_render_pass(cmd),
+                "gpu::cmd_draw: Cannot be called from outside of a render pass.");
+
 
     set_graphics_ptrs(cmd, vertexDataGpu, fragmentDataGpu);
     cmd->render_encoder->drawPrimitives(cmd->current_topology, 0, vertexCount, instanceCount);
 }
 
 void cmd_draw_indexed_instanced(CommandBuffer cmd, const DrawIndexedInstancedInfo& args) {
-    assert(is_in_render_pass(cmd));
+    LOON_ASSERT(cmd->device,
+                is_in_render_pass(cmd),
+                "gpu::cmd_draw_indexed_instanced: Cannot be called from outside of a render pass.");
+
 
     set_graphics_ptrs(cmd, args.vertexDataGpu, args.fragmentDataGpu);
 
@@ -1319,7 +1424,11 @@ void cmd_draw_indexed_instanced(CommandBuffer cmd, const DrawIndexedInstancedInf
 }
 
 void cmd_draw_indexed_instanced_indirect(CommandBuffer cmd, const DrawIndexedIndirectInfo& args) {
-    assert(is_in_render_pass(cmd));
+    LOON_ASSERT(cmd->device,
+                is_in_render_pass(cmd),
+                "gpu::cmd_draw_indexed_instanced_indirect: Cannot be called from outside of a "
+                "render pass.");
+
 
     set_graphics_ptrs(cmd, args.vertexDataGpu, args.fragmentDataGpu);
     auto index_info = buffer_and_offset_from_ptr(cmd->device, args.indicesGpu);
@@ -1334,8 +1443,10 @@ void cmd_draw_indexed_instanced_indirect(CommandBuffer cmd, const DrawIndexedInd
 
 void cmd_draw_indexed_instanced_indirect_multi(CommandBuffer                cmd,
                                                const MultiDrawIndirectInfo& args) {
-    // Multidraw not supported on metal.
-    assert(false);
+    LOON_ASSERT(
+        cmd->device,
+        false,
+        "gpu::cmd_draw_indexed_instanced_indirect_multi: Multidraw not supported on metal.");
 }
 
 void cmd_wait_for_surface_texture(CommandBuffer cmd) {
@@ -1349,7 +1460,10 @@ void cmd_signal_surface_texture(CommandBuffer cmd) {
 }
 
 void cmd_finalize(CommandBuffer cmd) {
-    assert(!is_in_render_pass(cmd));
+    LOON_ASSERT(
+        cmd->device,
+        !is_in_render_pass(cmd),
+        "gpu::cmd_finalized: Must call cmd_end_render_pass before finalizing the command buffer.");
     if (is_in_compute_pass(cmd)) { end_compute_pass(cmd); }
     cmd->command_buffer->endCommandBuffer();
 

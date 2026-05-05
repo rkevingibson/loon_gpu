@@ -41,6 +41,10 @@ enum class ExampleName {
 
 FilePaths default_file_paths();
 
-void log_callback(loon::gpu::LogLevel lvl, loon::gpu::Span<const char> message, void* userdata);
+void log_callback(loon::gpu::LogLevel         lvl,
+                  loon::gpu::Span<const char> message,
+                  uint32_t                    line_number,
+                  loon::gpu::Span<const char> filename,
+                  void*                       userdata);
 
 loon::Box<Example> create_example(ExampleName name, const WindowState& state);
