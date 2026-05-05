@@ -117,11 +117,6 @@ struct LogicalDeviceCreateResult {
 };
 
 struct DepthStencilState : DepthStencilDesc {};
-
-static void              log(Device d, LogLevel lvl, Span<const char> msg);
-static bool              chk(Device d, VkResult result);
-static loon::gpu::Arena* get_thread_local_arena(Device d);
-
 struct Surface {
     static constexpr uint32_t kMaxSwapchainImages = 8;
     static constexpr uint32_t kMaxFramesInFlight  = 3;
@@ -288,6 +283,57 @@ struct DeviceImpl {
     Vector<Handle<Texture>> uninitialized_textures;
     // TODO: For multiple queue support, would need more stuff here for texture initialization.
 };
+
+static void log_impl(Device           d,
+                     LogLevel         lvl,
+                     Span<const char> msg,
+                     uint32_t         line_number,
+                     Span<const char> filename) {
+    d->log_callback(lvl, msg, line_number, filename, d->log_userdata);
+};
+
+static void log_vk_impl(Device           d,
+                        VkResult         chk_result,
+                        Span<const char> msg,
+                        uint32_t         line_number,
+                        Span<const char> filename) {
+    char             arena_mem[512];
+    Arena            arena(arena_mem, 512);
+    Span<const char> msg_out = concat(&arena, msg, " ["_sv);
+    msg_out                  = concat(&arena, msg_out, string_from_result(chk_result));
+    msg_out                  = concat(&arena, msg_out, "]"_sv);
+
+    d->log_callback(LogLevel::Error, msg_out, line_number, filename, d->log_userdata);
+}
+
+
+#define LOON_SV_IMPL(x)       x##_sv
+#define LOON_MAKE_SV(x)       LOON_SV_IMPL(x)
+#define LOON_LOG(d, lvl, msg) log_impl(d, lvl, LOON_MAKE_SV(msg), __LINE__, LOON_MAKE_SV(__FILE__));
+#define LOON_CHK(d, expr, msg)                                                                     \
+    [&]() {                                                                                        \
+        VkResult chk_result = (expr);                                                              \
+        if (chk_result != VK_SUCCESS) {                                                            \
+            log_vk_impl(d, chk_result, LOON_MAKE_SV(msg), __LINE__, LOON_MAKE_SV(__FILE__));       \
+            return false;                                                                          \
+        } else {                                                                                   \
+            return true;                                                                           \
+        }                                                                                          \
+    }()
+
+Arena* get_thread_local_arena(Device d) {
+    auto state = reinterpret_cast<ThreadLocalState*>(loon::gpu::tls_get_data(d->tls_key));
+    if (state == nullptr) {
+        auto tls_block = d->allocator.alloc(sizeof(ThreadLocalState));
+        if (tls_block.ptr == nullptr) {
+            LOON_LOG(d, LogLevel::Error, "Allocator out of memory");
+            return nullptr;
+        }
+        state = ::new (tls_block.ptr) ThreadLocalState(d->allocator);
+        loon::gpu::tls_set_data(d->tls_key, state);
+    }
+    return &state->arena;
+}
 
 // MARK: Initialization
 
@@ -1179,7 +1225,9 @@ Backend device_backend() {
 }
 
 void device_wait_for_idle(Device d) {
-    chk(d, d->api.vkDeviceWaitIdle(d->device));
+    LOON_CHK(d,
+             d->api.vkDeviceWaitIdle(d->device),
+             "gpu::device_wait_for_idle: Failed in call to vkDeviceWaitIdle");
 }
 
 // MARK: Surface
@@ -1286,38 +1334,34 @@ bool configure_surface(Device d, const SurfaceConfiguration& config) {
         .oldSwapchain          = d->surface.swapchain,
     };
 
-    if (!chk(d,
-             d->api.vkCreateSwapchainKHR(d->device,
-                                         &swapchain_info,
-                                         nullptr,
-                                         &d->surface.swapchain))) {
-        log(d, LogLevel::Error, "Failed in call to vkCreateSwapchainKHR"_sv);
+    if (!LOON_CHK(
+            d,
+            d->api.vkCreateSwapchainKHR(d->device, &swapchain_info, nullptr, &d->surface.swapchain),
+            "gpu::configure_surface: Error in call to vkCreateSwapchainKHR")) {
         return false;
     }
 
     image_count = 0;
-    if (!chk(d,
-             d->api.vkGetSwapchainImagesKHR(d->device,
-                                            d->surface.swapchain,
-                                            &image_count,
-                                            nullptr))) {
-        log(d, LogLevel::Error, "Failed in call to vkGetSwapchainImagesKHR"_sv);
+    if (!LOON_CHK(
+            d,
+            d->api.vkGetSwapchainImagesKHR(d->device, d->surface.swapchain, &image_count, nullptr),
+            "gpu::configure_surface: Error in call to vkGetSwapchainImagesKHR")) {
         return false;
     }
 
     if (image_count > Surface::kMaxSwapchainImages) {
-        log(d, LogLevel::Error, "Swapchain creating too many images"_sv);
+        LOON_LOG(d, LogLevel::Error, "gpu::configure_surface: Swapchain creating too many images");
         return false;
     }
 
     VkImage swapchain_images[Surface::kMaxSwapchainImages];
 
-    if (!chk(d,
-             d->api.vkGetSwapchainImagesKHR(d->device,
-                                            d->surface.swapchain,
-                                            &image_count,
-                                            swapchain_images))) {
-        log(d, LogLevel::Error, "Swapchain failed to retrieve images"_sv);
+    if (!LOON_CHK(d,
+                  d->api.vkGetSwapchainImagesKHR(d->device,
+                                                 d->surface.swapchain,
+                                                 &image_count,
+                                                 swapchain_images),
+                  "gpu::configure_surface: Swapchain failed to retrieve images")) {
         return false;
     }
 
@@ -1329,7 +1373,9 @@ bool configure_surface(Device d, const SurfaceConfiguration& config) {
     // Create the acquire semaphores
     for (uint32_t i = 0; i < Surface::kMaxFramesInFlight; ++i) {
         VkSemaphore s = VK_NULL_HANDLE;
-        chk(d, d->api.vkCreateSemaphore(d->device, &semaphore_create_info, nullptr, &s));
+        LOON_CHK(d,
+                 d->api.vkCreateSemaphore(d->device, &semaphore_create_info, nullptr, &s),
+                 "gpu::configure_surface: Failed to create swapchain semaphore");
         d->surface.acquire_semaphores[i] = d->semaphore_pool.emplace({s});
     }
 
@@ -1363,7 +1409,9 @@ bool configure_surface(Device d, const SurfaceConfiguration& config) {
                     },
             };
 
-            chk(d, d->api.vkCreateImageView(d->device, &view_info, nullptr, &default_image_view));
+            LOON_CHK(d,
+                     d->api.vkCreateImageView(d->device, &view_info, nullptr, &default_image_view),
+                     "gpu::configure_surface: Failed to create image view for swapchain image");
         }
 
         d->surface.swapchain_images[i] = d->texture_pool.emplace({
@@ -1374,7 +1422,9 @@ bool configure_surface(Device d, const SurfaceConfiguration& config) {
         });
 
         VkSemaphore s = VK_NULL_HANDLE;
-        chk(d, d->api.vkCreateSemaphore(d->device, &semaphore_create_info, nullptr, &s));
+        LOON_CHK(d,
+                 d->api.vkCreateSemaphore(d->device, &semaphore_create_info, nullptr, &s),
+                 "gpu::configure_surface: Failed to create swapchain semaphore");
         d->surface.present_semaphores[i] = d->semaphore_pool.emplace({s});
     }
 
@@ -1432,10 +1482,10 @@ SurfaceTextureInfo get_current_texture(Device d) {
     } else if (result == VK_SUBOPTIMAL_KHR) {
         info.status = SurfaceStatus::Suboptimal;
     } else if (result < 0) {
-        log(d, LogLevel::Error, "Error in swapchain acquireNextImage"_sv);
+        LOON_LOG(d, LogLevel::Error, "Error in swapchain acquireNextImage");
         info.status = SurfaceStatus::Error;
     } else if (result != VK_SUCCESS) {
-        log(d, LogLevel::Error, "Unknown swapchain status"_sv);
+        LOON_LOG(d, LogLevel::Error, "Unknown swapchain status");
         info.status = SurfaceStatus::OutOfDate;
     }
 
@@ -1463,7 +1513,9 @@ SurfaceStatus present(Device d, Queue q) {
         case VK_SUCCESS: return SurfaceStatus::Success;
         case VK_SUBOPTIMAL_KHR: return SurfaceStatus::Suboptimal;
         case VK_ERROR_OUT_OF_DATE_KHR: return SurfaceStatus::OutOfDate;
-        default: chk(d, res); return SurfaceStatus::Error;
+        default:
+            LOON_CHK(d, res, "gpu::present: Error while presenting swapchain image");
+            return SurfaceStatus::Error;
     }
 }
 
@@ -1530,16 +1582,21 @@ GpuPtr malloc(Device d, size_t bytes, size_t align, Memory memory) {
         memory_requirements.alignment > align ? memory_requirements.alignment : align;
     memory_requirements.size = bytes;
 
-    chk(d, d->api.vkCreateBuffer(d->device, &create_info, nullptr, &vk_buffer));
+    LOON_CHK(d,
+             d->api.vkCreateBuffer(d->device, &create_info, nullptr, &vk_buffer),
+             "gpu::malloc: Error calling vkCreateBuffer");
 
-    chk(d,
-        vmaAllocateMemory(d->vma,
-                          &memory_requirements,
-                          &alloc_info,
-                          &vk_allocation,
-                          &vma_alloc_info));
+    LOON_CHK(d,
+             vmaAllocateMemory(d->vma,
+                               &memory_requirements,
+                               &alloc_info,
+                               &vk_allocation,
+                               &vma_alloc_info),
+             "gpu::malloc: Error calling vmaAllocateMemory");
 
-    chk(d, vmaBindBufferMemory(d->vma, vk_allocation, vk_buffer));
+    LOON_CHK(d,
+             vmaBindBufferMemory(d->vma, vk_allocation, vk_buffer),
+             "gpu::malloc: Error calling vmaBindBufferMemory");
 
     VkBufferDeviceAddressInfo addr_info{
         .sType  = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
@@ -1616,7 +1673,9 @@ TextureSizeAlign get_texture_size_align(Device d, const TextureDesc& desc) {
     };
 
     VkImage vk_image;
-    chk(d, d->api.vkCreateImage(d->device, &info, nullptr, &vk_image));
+    LOON_CHK(d,
+             d->api.vkCreateImage(d->device, &info, nullptr, &vk_image),
+             "gpu::get_texture_size_align: Error calling vkCreateImage");
 
     VkMemoryRequirements requirements{};
     d->api.vkGetImageMemoryRequirements(d->device, vk_image, &requirements);
@@ -1648,10 +1707,14 @@ Handle<Texture> create_texture(Device d, const TextureDesc& desc, GpuPtr locatio
     VkImage       image      = VK_NULL_HANDLE;
     VmaAllocation allocation = nullptr;
     if (location != 0) {
-        chk(d, d->api.vkCreateImage(d->device, &info, nullptr, &image));
+        LOON_CHK(d,
+                 d->api.vkCreateImage(d->device, &info, nullptr, &image),
+                 "gpu::create_texture: Error calling vkCreateImage");
 
         auto memory = buffer_and_offset_from_ptr(d, location);
-        vmaBindImageMemory2(d->vma, memory.alloc, memory.offset, image, nullptr);
+        LOON_CHK(d,
+                 vmaBindImageMemory2(d->vma, memory.alloc, memory.offset, image, nullptr),
+                 "gpu::create_texture: Error calling vmaBindImageMemory2");
     } else {
         VmaAllocationCreateInfo alloc_info{
             .flags          = 0,
@@ -1664,7 +1727,9 @@ Handle<Texture> create_texture(Device d, const TextureDesc& desc, GpuPtr locatio
             .priority       = 0.,
         };
 
-        if (!chk(d, vmaCreateImage(d->vma, &info, &alloc_info, &image, &allocation, nullptr))) {
+        if (!LOON_CHK(d,
+                      vmaCreateImage(d->vma, &info, &alloc_info, &image, &allocation, nullptr),
+                      "gpu::create_texture: Error calling vmaCreateImage")) {
             return {};
         }
     }
@@ -1696,7 +1761,9 @@ Handle<Texture> create_texture(Device d, const TextureDesc& desc, GpuPtr locatio
                 },
         };
 
-        chk(d, d->api.vkCreateImageView(d->device, &view_info, nullptr, &default_image_view));
+        LOON_CHK(d,
+                 d->api.vkCreateImageView(d->device, &view_info, nullptr, &default_image_view),
+                 "gpu::create_texture: Error calling vkCreateImageView");
     }
 
     const auto handle = d->texture_pool.emplace(Texture{
@@ -1724,7 +1791,9 @@ Handle<TextureHeap> create_texture_heap(Device d, const TextureHeapDesc& desc) {
     };
 
     VkDescriptorSet set;
-    chk(d, d->api.vkAllocateDescriptorSets(d->device, &info, &set));
+    LOON_CHK(d,
+             d->api.vkAllocateDescriptorSets(d->device, &info, &set),
+             "gpu::create_texture_heap: Error calling vkAllocateDescriptorSets");
 
     const auto handle = d->texture_heap_pool.emplace(TextureHeap{
         .vk_descriptor_set    = set,
@@ -1770,7 +1839,11 @@ TextureView add_texture_view_to_heap(Device                 d,
             },
     };
     VkImageView image_view;
-    if (!chk(d, d->api.vkCreateImageView(d->device, &info, nullptr, &image_view))) { return -1; }
+    if (!LOON_CHK(d,
+                  d->api.vkCreateImageView(d->device, &info, nullptr, &image_view),
+                  "gpu::add_texture_view_to_heap: Error creating image view")) {
+        return -1;
+    }
 
     uint32_t free_slot                  = texture_heap.sampled_image_bitset.set_leading_zero();
     texture_heap.image_views[free_slot] = image_view;
@@ -1829,7 +1902,11 @@ TextureView add_rw_texture_view_to_heap(Device                 d,
             },
     };
     VkImageView image_view;
-    if (!chk(d, d->api.vkCreateImageView(d->device, &info, nullptr, &image_view))) { return -1; }
+    if (!LOON_CHK(d,
+                  d->api.vkCreateImageView(d->device, &info, nullptr, &image_view),
+                  "gpu::add_rw_texture_view_to_heap: Error creating image view")) {
+        return -1;
+    }
 
     uint32_t free_slot                     = texture_heap.rw_image_bitset.set_leading_zero();
     texture_heap.rw_image_views[free_slot] = image_view;
@@ -1861,7 +1938,7 @@ Sampler add_sampler_to_heap(Device d, Handle<TextureHeap> heap, const SamplerDes
     auto& texture_heap = d->texture_heap_pool[heap];
 
     VkSampler sampler = create_sampler(d->api, d->device, desc);
-    if (sampler == VK_NULL_HANDLE) { log(d, LogLevel::Error, "Failed to create sampler"_sv); }
+    if (sampler == VK_NULL_HANDLE) { LOON_LOG(d, LogLevel::Error, "Failed to create sampler"); }
 
     uint32_t free_slot               = texture_heap.sampler_bitset.set_leading_zero();
     texture_heap.samplers[free_slot] = sampler;
@@ -2017,7 +2094,9 @@ Handle<Pipeline> create_compute_pipeline(Device                             d,
     };
 
     VkShaderModule module;
-    chk(d, d->api.vkCreateShaderModule(d->device, &module_info, nullptr, &module));
+    LOON_CHK(d,
+             d->api.vkCreateShaderModule(d->device, &module_info, nullptr, &module),
+             "gpu::create_compute_pipeline: Error in vkCreateShaderModule");
 
     Arena                      arena = *get_thread_local_arena(d);
     const VkSpecializationInfo specialization_info =
@@ -2044,13 +2123,11 @@ Handle<Pipeline> create_compute_pipeline(Device                             d,
     };
 
     VkPipeline pipeline;
-    if (!chk(d,
-             d->api.vkCreateComputePipelines(d->device,
-                                             VK_NULL_HANDLE,
-                                             1,
-                                             &info,
-                                             nullptr,
-                                             &pipeline))) {
+    if (!LOON_CHK(
+            d,
+            d->api
+                .vkCreateComputePipelines(d->device, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline),
+            "gpu::create_compute_pipeline: Error in vkCreateComputePipeline")) {
         return {};
     }
 
@@ -2076,7 +2153,9 @@ Handle<Pipeline> create_graphics_pipeline(Device                             d,
         .pCode    = reinterpret_cast<const uint32_t*>(vertex.source.data()),
     };
     VkShaderModule vert_module;
-    chk(d, d->api.vkCreateShaderModule(d->device, &vert_info, nullptr, &vert_module));
+    LOON_CHK(d,
+             d->api.vkCreateShaderModule(d->device, &vert_info, nullptr, &vert_module),
+             "gpu::create_graphics_pipeline: Error in vkCreateShaderModule for vertex shader");
 
     VkShaderModuleCreateInfo frag_info{
         .sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
@@ -2086,7 +2165,9 @@ Handle<Pipeline> create_graphics_pipeline(Device                             d,
         .pCode    = reinterpret_cast<const uint32_t*>(fragment.source.data()),
     };
     VkShaderModule frag_module;
-    chk(d, d->api.vkCreateShaderModule(d->device, &frag_info, nullptr, &frag_module));
+    LOON_CHK(d,
+             d->api.vkCreateShaderModule(d->device, &frag_info, nullptr, &frag_module),
+             "gpu::create_graphics_pipeline: Error in vkCreateShaderModule for fragment shader");
 
     Arena                      arena = *get_thread_local_arena(d);
     const VkSpecializationInfo specialization_info =
@@ -2259,13 +2340,14 @@ Handle<Pipeline> create_graphics_pipeline(Device                             d,
         .basePipelineIndex   = 0,
     };
     VkPipeline vk_pipeline;
-    chk(d,
-        d->api.vkCreateGraphicsPipelines(d->device,
-                                         VK_NULL_HANDLE,
-                                         1,
-                                         &create_info,
-                                         nullptr,
-                                         &vk_pipeline));
+    LOON_CHK(d,
+             d->api.vkCreateGraphicsPipelines(d->device,
+                                              VK_NULL_HANDLE,
+                                              1,
+                                              &create_info,
+                                              nullptr,
+                                              &vk_pipeline),
+             "gpu::create_graphics_pipeline: Error in vkCreateGraphicsPipelines");
 
     d->api.vkDestroyShaderModule(d->device, vert_module, nullptr);
     d->api.vkDestroyShaderModule(d->device, frag_module, nullptr);
@@ -2340,7 +2422,9 @@ Handle<Semaphore> create_semaphore(Device d, uint64_t initValue) {
     };
 
     VkSemaphore s = VK_NULL_HANDLE;
-    chk(d, d->api.vkCreateSemaphore(d->device, &timeline_create_info, nullptr, &s));
+    LOON_CHK(d,
+             d->api.vkCreateSemaphore(d->device, &timeline_create_info, nullptr, &s),
+             "gpu::create_semaphore: Error in vkCreateSemaphore");
 
     return d->semaphore_pool.emplace({.vk_semaphore = s});
 }
@@ -2355,139 +2439,13 @@ void wait_semaphore(Device d, Handle<Semaphore> sema, uint64_t value) {
         .pSemaphores    = &s,
         .pValues        = &value,
     };
-    chk(d, d->api.vkWaitSemaphores(d->device, &wait_info, UINT64_MAX));
+    LOON_CHK(d,
+             d->api.vkWaitSemaphores(d->device, &wait_info, UINT64_MAX),
+             "gpu::wait_semaphore: Error in vkWaitSemaphores");
 }
 
 void free(Device d, Handle<Semaphore> sema) {
     d->semaphore_pool.erase(sema);
-}
-
-void log(Device d, LogLevel lvl, Span<const char> msg) {
-    d->log_callback(lvl, msg, d->log_userdata);
-};
-
-bool chk(Device d, VkResult result) {
-    if (result == VK_SUCCESS) { return true; }
-
-    switch (result) {
-        case VK_NOT_READY: log(d, LogLevel::Error, "VK_NOT_READY"_sv); break;
-        case VK_TIMEOUT: log(d, LogLevel::Error, "VK_TIMEOUT"_sv); break;
-        case VK_EVENT_SET: log(d, LogLevel::Error, "VK_EVENT_SET"_sv); break;
-        case VK_EVENT_RESET: log(d, LogLevel::Error, "VK_EVENT_RESET"_sv); break;
-        case VK_INCOMPLETE: log(d, LogLevel::Error, "VK_INCOMPLETE"_sv); break;
-        case VK_ERROR_OUT_OF_HOST_MEMORY:
-            log(d, LogLevel::Error, "VK_ERROR_OUT_OF_HOST_MEMORY"_sv);
-            break;
-        case VK_ERROR_OUT_OF_DEVICE_MEMORY:
-            log(d, LogLevel::Error, "VK_ERROR_OUT_OF_DEVICE_MEMORY");
-            break;
-        case VK_ERROR_INITIALIZATION_FAILED:
-            log(d, LogLevel::Error, "VK_ERROR_INITIALIZATION_FAILED");
-            break;
-        case VK_ERROR_DEVICE_LOST: log(d, LogLevel::Error, "VK_ERROR_DEVICE_LOST"); break;
-        case VK_ERROR_MEMORY_MAP_FAILED:
-            log(d, LogLevel::Error, "VK_ERROR_MEMORY_MAP_FAILED");
-            break;
-        case VK_ERROR_LAYER_NOT_PRESENT:
-            log(d, LogLevel::Error, "VK_ERROR_LAYER_NOT_PRESENT");
-            break;
-        case VK_ERROR_EXTENSION_NOT_PRESENT:
-            log(d, LogLevel::Error, "VK_ERROR_EXTENSION_NOT_PRESENT");
-            break;
-        case VK_ERROR_FEATURE_NOT_PRESENT:
-            log(d, LogLevel::Error, "VK_ERROR_FEATURE_NOT_PRESENT");
-            break;
-        case VK_ERROR_INCOMPATIBLE_DRIVER:
-            log(d, LogLevel::Error, "VK_ERROR_INCOMPATIBLE_DRIVER");
-            break;
-        case VK_ERROR_TOO_MANY_OBJECTS: log(d, LogLevel::Error, "VK_ERROR_TOO_MANY_OBJECTS"); break;
-        case VK_ERROR_FORMAT_NOT_SUPPORTED:
-            log(d, LogLevel::Error, "VK_ERROR_FORMAT_NOT_SUPPORTED");
-            break;
-        case VK_ERROR_FRAGMENTED_POOL: log(d, LogLevel::Error, "VK_ERROR_FRAGMENTED_POOL"); break;
-        case VK_ERROR_UNKNOWN: log(d, LogLevel::Error, "VK_ERROR_UNKNOWN"); break;
-        case VK_ERROR_OUT_OF_POOL_MEMORY:
-            log(d, LogLevel::Error, "VK_ERROR_OUT_OF_POOL_MEMORY");
-            break;
-        case VK_ERROR_INVALID_EXTERNAL_HANDLE:
-            log(d, LogLevel::Error, "VK_ERROR_INVALID_EXTERNAL_HANDLE");
-            break;
-        case VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS:
-            log(d, LogLevel::Error, "VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS");
-            break;
-        case VK_ERROR_FRAGMENTATION: log(d, LogLevel::Error, "VK_ERROR_FRAGMENTATION"); break;
-        case VK_PIPELINE_COMPILE_REQUIRED:
-            log(d, LogLevel::Error, "VK_PIPELINE_COMPILE_REQUIRED");
-            break;
-        case VK_ERROR_SURFACE_LOST_KHR: log(d, LogLevel::Error, "VK_ERROR_SURFACE_LOST_KHR"); break;
-        case VK_ERROR_NATIVE_WINDOW_IN_USE_KHR:
-            log(d, LogLevel::Error, "VK_ERROR_NATIVE_WINDOW_IN_USE_KHR");
-            break;
-        case VK_SUBOPTIMAL_KHR: log(d, LogLevel::Error, "VK_SUBOPTIMAL_KHR"); break;
-        case VK_ERROR_OUT_OF_DATE_KHR: log(d, LogLevel::Error, "VK_ERROR_OUT_OF_DATE_KHR"); break;
-        case VK_ERROR_INCOMPATIBLE_DISPLAY_KHR:
-            log(d, LogLevel::Error, "VK_ERROR_INCOMPATIBLE_DISPLAY_KHR");
-            break;
-        case VK_ERROR_INVALID_SHADER_NV:
-            log(d, LogLevel::Error, "VK_ERROR_INVALID_SHADER_NV");
-            break;
-        case VK_ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR:
-            log(d, LogLevel::Error, "VK_ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR");
-            break;
-        case VK_ERROR_VIDEO_PICTURE_LAYOUT_NOT_SUPPORTED_KHR:
-            log(d, LogLevel::Error, "VK_ERROR_VIDEO_PICTURE_LAYOUT_NOT_SUPPORTED_KHR");
-            break;
-        case VK_ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR:
-            log(d, LogLevel::Error, "VK_ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR");
-            break;
-        case VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR:
-            log(d, LogLevel::Error, "VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR");
-            break;
-        case VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR:
-            log(d, LogLevel::Error, "VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR");
-            break;
-        case VK_ERROR_VIDEO_STD_VERSION_NOT_SUPPORTED_KHR:
-            log(d, LogLevel::Error, "VK_ERROR_VIDEO_STD_VERSION_NOT_SUPPORTED_KHR");
-            break;
-        case VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT:
-            log(d, LogLevel::Error, "VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT");
-            break;
-        case VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT:
-            log(d, LogLevel::Error, "VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT");
-            break;
-        case VK_THREAD_IDLE_KHR: log(d, LogLevel::Error, "VK_THREAD_IDLE_KHR"); break;
-        case VK_THREAD_DONE_KHR: log(d, LogLevel::Error, "VK_THREAD_DONE_KHR"); break;
-        case VK_OPERATION_DEFERRED_KHR: log(d, LogLevel::Error, "VK_OPERATION_DEFERRED_KHR"); break;
-        case VK_OPERATION_NOT_DEFERRED_KHR:
-            log(d, LogLevel::Error, "VK_OPERATION_NOT_DEFERRED_KHR");
-            break;
-        case VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR:
-            log(d, LogLevel::Error, "VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR");
-            break;
-        case VK_ERROR_COMPRESSION_EXHAUSTED_EXT:
-            log(d, LogLevel::Error, "VK_ERROR_COMPRESSION_EXHAUSTED_EXT");
-            break;
-        case VK_ERROR_INCOMPATIBLE_SHADER_BINARY_EXT:
-            log(d, LogLevel::Error, "VK_INCOMPATIBLE_SHADER_BINARY_EXT");
-            break;
-        default: log(d, LogLevel::Error, "Unknown error"_sv); break;
-    }
-
-    return false;
-}
-
-Arena* get_thread_local_arena(Device d) {
-    auto state = reinterpret_cast<ThreadLocalState*>(loon::gpu::tls_get_data(d->tls_key));
-    if (state == nullptr) {
-        auto tls_block = d->allocator.alloc(sizeof(ThreadLocalState));
-        if (tls_block.ptr == nullptr) {
-            log(d, LogLevel::Error, "Allocator out of memory"_sv);
-            return nullptr;
-        }
-        state = ::new (tls_block.ptr) ThreadLocalState(d->allocator);
-        loon::gpu::tls_set_data(d->tls_key, state);
-    }
-    return &state->arena;
 }
 
 // MARK: Queue
@@ -2524,11 +2482,12 @@ CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
                 .queueFamilyIndex = queue->queue_family,
             };
             VkCommandPool command_pool = VK_NULL_HANDLE;
-            chk(queue->device,
-                queue->device->api.vkCreateCommandPool(queue->device->device,
-                                                       &pool_info,
-                                                       nullptr,
-                                                       &command_pool));
+            LOON_CHK(queue->device,
+                     queue->device->api.vkCreateCommandPool(queue->device->device,
+                                                            &pool_info,
+                                                            nullptr,
+                                                            &command_pool),
+                     "gpu::get_command_pool: Error in vkCreateCommandPool");
             *pool = CommandPool{
                 .command_pool    = command_pool,
                 .command_buffers = SegmentArray<CommandBufferImpl>(queue->device->allocator),
@@ -2541,9 +2500,9 @@ CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
             pool->frame_idx = frame_idx;
         }
     } else {
-        log(queue->device,
-            LogLevel::Error,
-            "Unable to get command pool - too many command buffers in flight at once"_sv);
+        LOON_LOG(queue->device,
+                 LogLevel::Error,
+                 "Unable to get command pool - too many command buffers in flight at once");
     }
 
     return pool;
@@ -2574,7 +2533,9 @@ static CommandBufferImpl* get_command_buffer(Queue q, CommandPool* pool) {
             .commandBufferCount = 1,
         };
         VkCommandBuffer buf;
-        if (!chk(device, device->api.vkAllocateCommandBuffers(device->device, &info, &buf))) {
+        if (!LOON_CHK(device,
+                      device->api.vkAllocateCommandBuffers(device->device, &info, &buf),
+                      "gpu::get_command_buffer: Error in vkAllocateCommandBuffers")) {
             return nullptr;
         }
         pool->command_buffers.emplace_back(CommandBufferImpl{
@@ -2608,7 +2569,9 @@ CommandBuffer queue_start_command_recording(Queue q) {
             .flags            = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
             .pInheritanceInfo = nullptr,
         };
-        chk(d, d->api.vkBeginCommandBuffer(buffer->buffer, &begin_info));
+        LOON_CHK(d,
+                 d->api.vkBeginCommandBuffer(buffer->buffer, &begin_info),
+                 "gpu::queue_start_command_recording: Error in vkBeginCommandBuffer");
     }
     return buffer;
 }
@@ -2616,7 +2579,9 @@ CommandBuffer queue_start_command_recording(Queue q) {
 void cmd_finalize(CommandBuffer cmd) {
     auto d = cmd->device;
     auto q = cmd->queue;
-    chk(d, d->api.vkEndCommandBuffer(cmd->buffer));
+    LOON_CHK(d,
+             d->api.vkEndCommandBuffer(cmd->buffer),
+             "gpu::cmd_finalize: Error in vkEndCommandBuffer");
     release_command_pool(q, cmd->pool);
 }
 
@@ -2818,10 +2783,11 @@ void queue_on_submitted_work_completed(Queue q, Function<void>&& fn) {
 void queue_process_events(Queue q) {
     auto     d            = q->device;
     uint64_t current_time = 0;
-    chk(d,
-        d->api.vkGetSemaphoreCounterValue(d->device,
-                                          d->semaphore_pool[q->timeline].vk_semaphore,
-                                          &current_time));
+    LOON_CHK(d,
+             d->api.vkGetSemaphoreCounterValue(d->device,
+                                               d->semaphore_pool[q->timeline].vk_semaphore,
+                                               &current_time),
+             "gpu::queue_process_events: Error in vkGetSemaphoreCounterValue");
     uint32_t i = 0;
     while (i < q->pending_events.size() && q->pending_events[i].completed_time <= current_time) {
         q->pending_events[i].callback();

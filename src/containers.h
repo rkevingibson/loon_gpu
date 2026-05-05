@@ -86,6 +86,8 @@ class Arena {
    private:
     template <class T>
     friend Span<T> concat(Arena* a, Span<T> head, Span<const T> tail);
+    template <class T>
+    friend Span<const T> concat(Arena* a, Span<const T> head, Span<const T> tail);
 
     uintptr_t m_ptr{0};
     uintptr_t m_begin{0};
@@ -106,6 +108,12 @@ template <class T>
 
 template <class T>
 [[nodiscard]] Span<T> concat(Arena* a, Span<T> head, Span<const T> tail) {
+    if ((uintptr_t)head.end() != a->m_ptr) { head = clone<T>(a, head); }
+    return {head.data(), head.size() + clone<T>(a, tail).size()};
+}
+
+template <class T>
+[[nodiscard]] Span<const T> concat(Arena* a, Span<const T> head, Span<const T> tail) {
     if ((uintptr_t)head.end() != a->m_ptr) { head = clone<T>(a, head); }
     return {head.data(), head.size() + clone<T>(a, tail).size()};
 }

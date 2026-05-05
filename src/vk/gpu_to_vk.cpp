@@ -293,12 +293,12 @@ UsageFlags bridge_usage_flags(VkImageUsageFlags flags) {
 
 VkImageUsageFlags bridge_usage_flags(UsageFlags usage) {
     VkImageUsageFlags flags = 0;
-    flags |= bool(usage & UsageFlags::TransferSrc) ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0;
-    flags |= bool(usage & UsageFlags::TransferDst) ? VK_IMAGE_USAGE_TRANSFER_DST_BIT : 0;
-    flags |= bool(usage & UsageFlags::Sampled) ? VK_IMAGE_USAGE_SAMPLED_BIT : 0;
-    flags |= bool(usage & UsageFlags::Storage) ? VK_IMAGE_USAGE_STORAGE_BIT : 0;
-    flags |= bool(usage & UsageFlags::ColorAttachment) ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0;
-    flags |= bool(usage & UsageFlags::DepthStencilAttachment)
+    flags |= any(usage & UsageFlags::TransferSrc) ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0;
+    flags |= any(usage & UsageFlags::TransferDst) ? VK_IMAGE_USAGE_TRANSFER_DST_BIT : 0;
+    flags |= any(usage & UsageFlags::Sampled) ? VK_IMAGE_USAGE_SAMPLED_BIT : 0;
+    flags |= any(usage & UsageFlags::Storage) ? VK_IMAGE_USAGE_STORAGE_BIT : 0;
+    flags |= any(usage & UsageFlags::ColorAttachment) ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0;
+    flags |= any(usage & UsageFlags::DepthStencilAttachment)
                  ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
                  : 0;
     return flags;
@@ -429,6 +429,73 @@ VkStencilOp bridge(StencilOp op) {
         case StencilOp::DecrementWrap: return VK_STENCIL_OP_DECREMENT_AND_WRAP;
     }
     return VK_STENCIL_OP_MAX_ENUM;
+}
+
+Span<const char> string_from_result(VkResult result) {
+    switch (result) {
+        case VK_SUCCESS: return "VK_SUCCESS"_sv;
+        case VK_NOT_READY: return "VK_NOT_READY"_sv;
+        case VK_TIMEOUT: return "VK_TIMEOUT"_sv;
+        case VK_EVENT_SET: return "VK_EVENT_SET"_sv;
+        case VK_EVENT_RESET: return "VK_EVENT_RESET"_sv;
+        case VK_INCOMPLETE: return "VK_INCOMPLETE"_sv;
+        case VK_ERROR_OUT_OF_HOST_MEMORY: return "VK_ERROR_OUT_OF_HOST_MEMORY"_sv;
+        case VK_ERROR_OUT_OF_DEVICE_MEMORY: return "VK_ERROR_OUT_OF_DEVICE_MEMORY"_sv;
+        case VK_ERROR_INITIALIZATION_FAILED: return "VK_ERROR_INITIALIZATION_FAILED"_sv;
+        case VK_ERROR_DEVICE_LOST: return "VK_ERROR_DEVICE_LOST"_sv;
+        case VK_ERROR_MEMORY_MAP_FAILED: return "VK_ERROR_MEMORY_MAP_FAILED"_sv;
+        case VK_ERROR_LAYER_NOT_PRESENT: return "VK_ERROR_LAYER_NOT_PRESENT"_sv;
+        case VK_ERROR_EXTENSION_NOT_PRESENT: return "VK_ERROR_EXTENSION_NOT_PRESENT"_sv;
+        case VK_ERROR_FEATURE_NOT_PRESENT: return "VK_ERROR_FEATURE_NOT_PRESENT"_sv;
+        case VK_ERROR_INCOMPATIBLE_DRIVER: return "VK_ERROR_INCOMPATIBLE_DRIVER"_sv;
+        case VK_ERROR_TOO_MANY_OBJECTS: return "VK_ERROR_TOO_MANY_OBJECTS"_sv;
+        case VK_ERROR_FORMAT_NOT_SUPPORTED: return "VK_ERROR_FORMAT_NOT_SUPPORTED"_sv;
+        case VK_ERROR_FRAGMENTED_POOL: return "VK_ERROR_FRAGMENTED_POOL"_sv;
+        case VK_ERROR_UNKNOWN: return "VK_ERROR_UNKNOWN"_sv;
+        case VK_ERROR_VALIDATION_FAILED: return "VK_ERROR_VALIDATION_FAILED"_sv;
+        case VK_ERROR_OUT_OF_POOL_MEMORY: return "VK_ERROR_OUT_OF_POOL_MEMORY"_sv;
+        case VK_ERROR_INVALID_EXTERNAL_HANDLE: return "VK_ERROR_INVALID_EXTERNAL_HANDLE"_sv;
+        case VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS:
+            return "VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS"_sv;
+        case VK_ERROR_FRAGMENTATION: return "VK_ERROR_FRAGMENTATION"_sv;
+        case VK_PIPELINE_COMPILE_REQUIRED: return "VK_PIPELINE_COMPILE_REQUIRED"_sv;
+        case VK_ERROR_NOT_PERMITTED: return "VK_ERROR_NOT_PERMITTED"_sv;
+        case VK_ERROR_SURFACE_LOST_KHR: return "VK_ERROR_SURFACE_LOST_KHR"_sv;
+        case VK_ERROR_NATIVE_WINDOW_IN_USE_KHR: return "VK_ERROR_NATIVE_WINDOW_IN_USE_KHR"_sv;
+        case VK_SUBOPTIMAL_KHR: return "VK_SUBOPTIMAL_KHR"_sv;
+        case VK_ERROR_OUT_OF_DATE_KHR: return "VK_ERROR_OUT_OF_DATE_KHR"_sv;
+        case VK_ERROR_INCOMPATIBLE_DISPLAY_KHR: return "VK_ERROR_INCOMPATIBLE_DISPLAY_KHR"_sv;
+        case VK_ERROR_INVALID_SHADER_NV: return "VK_ERROR_INVALID_SHADER_NV"_sv;
+        case VK_ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR:
+            return "VK_ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR"_sv;
+        case VK_ERROR_VIDEO_PICTURE_LAYOUT_NOT_SUPPORTED_KHR:
+            return "VK_ERROR_VIDEO_PICTURE_LAYOUT_NOT_SUPPORTED_KHR"_sv;
+        case VK_ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR:
+            return "VK_ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR"_sv;
+        case VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR:
+            return "VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR"_sv;
+        case VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR:
+            return "VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR"_sv;
+        case VK_ERROR_VIDEO_STD_VERSION_NOT_SUPPORTED_KHR:
+            return "VK_ERROR_VIDEO_STD_VERSION_NOT_SUPPORTED_KHR"_sv;
+        case VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT:
+            return "VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT"_sv;
+        case VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT:
+            return "VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT"_sv;
+        case VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT:
+            return "VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT"_sv;
+        case VK_THREAD_IDLE_KHR: return "VK_THREAD_IDLE_KHR"_sv;
+        case VK_THREAD_DONE_KHR: return "VK_THREAD_DONE_KHR"_sv;
+        case VK_OPERATION_DEFERRED_KHR: return "VK_OPERATION_DEFERRED_KHR"_sv;
+        case VK_OPERATION_NOT_DEFERRED_KHR: return "VK_OPERATION_NOT_DEFERRED_KHR"_sv;
+        case VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR:
+            return "VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR"_sv;
+        case VK_ERROR_COMPRESSION_EXHAUSTED_EXT: return "VK_ERROR_COMPRESSION_EXHAUSTED_EXT"_sv;
+        case VK_INCOMPATIBLE_SHADER_BINARY_EXT: return "VK_INCOMPATIBLE_SHADER_BINARY_EXT"_sv;
+        case VK_PIPELINE_BINARY_MISSING_KHR: return "VK_PIPELINE_BINARY_MISSING_KHR"_sv;
+        case VK_ERROR_NOT_ENOUGH_SPACE_KHR: return "VK_ERROR_NOT_ENOUGH_SPACE_KHR"_sv;
+        case VK_RESULT_MAX_ENUM: return "VK_RESULT_MAX_ENUM"_sv;
+    }
 }
 
 }  // namespace loon::gpu

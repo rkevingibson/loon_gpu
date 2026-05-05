@@ -72,7 +72,11 @@ FilePaths default_file_paths() {
     };
 }
 
-void log_callback(loon::gpu::LogLevel lvl, loon::gpu::Span<const char> message, void* userdata) {
+void log_callback(loon::gpu::LogLevel         lvl,
+                  loon::gpu::Span<const char> message,
+                  uint32_t                    line_number,
+                  loon::gpu::Span<const char> filename,
+                  void*                       userdata) {
     fprintf(stderr, "%.*s\n", static_cast<int>(message.size()), message.data());
 }
 

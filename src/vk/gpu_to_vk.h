@@ -25,4 +25,6 @@ VkIndexType                         bridge(IndexType t);
 VkCullModeFlags                     bridge(Cull c);
 VkStencilOp                         bridge(StencilOp op);
 
+Span<const char> string_from_result(VkResult result);
+
 };  // namespace loon::gpu
