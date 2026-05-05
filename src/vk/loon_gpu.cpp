@@ -203,10 +203,10 @@ struct ThreadLocalState {
     loon::gpu::Allocator    allocator;
     MemoryBlock             arena_memory;
     loon::gpu::Arena        arena;
-    ThreadLocalState(const loon::gpu::Allocator& alloc) :
+    ThreadLocalState(const loon::gpu::Allocator& alloc, ProcLogCallback cb, void* userdata) :
         allocator{alloc},
         arena_memory{allocator.alloc(kArenaSize)},
-        arena(arena_memory.ptr, arena_memory.len) {}
+        arena(arena_memory.ptr, arena_memory.len, cb, userdata) {}
     ~ThreadLocalState() { allocator.free(arena_memory); }
 };
 
@@ -310,7 +310,7 @@ static void log_vk_impl(Device           d,
                         uint32_t         line_number,
                         Span<const char> filename) {
     char             arena_mem[512];
-    Arena            arena(arena_mem, 512);
+    Arena            arena(arena_mem, 512, d->log_callback, d->log_userdata);
     Span<const char> msg_out = concat(&arena, msg, " ["_sv);
     msg_out                  = concat(&arena, msg_out, string_from_result(chk_result));
     msg_out                  = concat(&arena, msg_out, "]"_sv);
@@ -341,7 +341,8 @@ Arena* get_thread_local_arena(Device d) {
             LOON_LOG(d, LogLevel::Error, "Allocator out of memory");
             return nullptr;
         }
-        state = ::new (tls_block.ptr) ThreadLocalState(d->allocator);
+        state =
+            ::new (tls_block.ptr) ThreadLocalState(d->allocator, d->log_callback, d->log_userdata);
         loon::gpu::tls_set_data(d->tls_key, state);
     }
     return &state->arena;
@@ -997,7 +998,7 @@ Device create_device(const DeviceDesc& desc) {
 
 
     auto  arena_blk = alloc.alloc(256 * 1024ull);
-    Arena init_arena(arena_blk.ptr, arena_blk.len);
+    Arena init_arena(arena_blk.ptr, arena_blk.len, desc.log_callback, desc.log_userdata);
 
     auto [result, instance] = create_instance();
 
