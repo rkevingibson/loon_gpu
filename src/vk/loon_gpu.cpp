@@ -43,7 +43,6 @@ static constexpr const char* kRequiredDeviceExtensions[] = {
 };
 static constexpr size_t kRequiredDeviceExtensionsCount =
     sizeof(kRequiredDeviceExtensions) / sizeof(kRequiredDeviceExtensions[0]);
-
 struct Buffer {
     VkBuffer      vk_buffer;
     VmaAllocation vk_allocation;
@@ -88,11 +87,12 @@ struct VulkanInstanceInfo {
 };
 
 struct PhysicalDeviceInfo {
-    VkResult         result                     = VK_SUCCESS;
-    VkPhysicalDevice device                     = VK_NULL_HANDLE;
-    uint32_t         graphics_queue_family      = 0;
-    uint32_t         transfer_queue_family      = 0;
-    uint32_t         async_compute_queue_family = 0;
+    VkResult                      result                     = VK_SUCCESS;
+    VkPhysicalDevice              device                     = VK_NULL_HANDLE;
+    Vector<VkExtensionProperties> supported_extensions       = {};
+    uint32_t                      graphics_queue_family      = 0;
+    uint32_t                      transfer_queue_family      = 0;
+    uint32_t                      async_compute_queue_family = 0;
 };
 
 struct SurfaceCreationResult {
@@ -111,9 +111,14 @@ struct VmaCreateResult {
     VmaAllocator allocator;
 };
 
+struct DeviceFeatures {
+    bool has_debug_markers = false;
+};
+
 struct LogicalDeviceCreateResult {
-    VkResult result;
-    VkDevice logical_device;
+    VkResult       result;
+    VkDevice       logical_device;
+    DeviceFeatures features;
 };
 
 struct DepthStencilState : DepthStencilDesc {};
@@ -253,6 +258,7 @@ struct DeviceImpl {
     uint32_t         graphics_queue_family      = -1;
     uint32_t         transfer_queue_family      = -1;
     uint32_t         async_compute_queue_family = -1;
+    DeviceFeatures   features;
 
     Surface surface;
 
@@ -401,6 +407,7 @@ static VulkanInstanceInfo create_instance() {
 static PhysicalDeviceInfo select_physical_device(VkInstance    instance,
                                                  VkSurfaceKHR  surface,
                                                  GpuPreference preference,
+                                                 Allocator     allocator,
                                                  Arena         arena) {
     uint32_t device_count = 0;
     VkResult vkresult     = vkEnumeratePhysicalDevices(instance, &device_count, nullptr);
@@ -480,13 +487,12 @@ static PhysicalDeviceInfo select_physical_device(VkInstance    instance,
         uint32_t extension_count = 0;
         vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &extension_count, nullptr);
 
-        auto extension_properties = reinterpret_cast<VkExtensionProperties*>(
-            arena.alloc(sizeof(VkExtensionProperties) * extension_count));
+        Vector<VkExtensionProperties> supported_extensions(allocator, {}, extension_count);
 
         vkEnumerateDeviceExtensionProperties(physical_device,
                                              nullptr,
                                              &extension_count,
-                                             extension_properties);
+                                             supported_extensions.data());
         // Need to check against the list of required extensions and make sure all required
         // extensions are available.
         bool all_extensions_supported = true;
@@ -497,7 +503,7 @@ static PhysicalDeviceInfo select_physical_device(VkInstance    instance,
             bool        extension_found    = false;
             for (size_t available_ext_idx = 0; available_ext_idx < extension_count;
                  ++available_ext_idx) {
-                if (strcmp(extension_properties[available_ext_idx].extensionName,
+                if (strcmp(supported_extensions[available_ext_idx].extensionName,
                            required_extension) == 0) {
                     extension_found = true;
                     break;
@@ -509,37 +515,20 @@ static PhysicalDeviceInfo select_physical_device(VkInstance    instance,
                 break;
             }
         }
-        arena.free(extension_properties, sizeof(VkExtensionProperties) * extension_count);
 
         if (!all_extensions_supported) {
             // Invalid device, doesn't support the extensions we need.
             continue;
         }
 
-        // If we don't have a "best" device yet, let's use this one.
-        if (best_device_info.device == VK_NULL_HANDLE) {
-            best_device_info = {
-                .device                     = physical_device,
-                .graphics_queue_family      = default_queue_family,
-                .transfer_queue_family      = dedicated_transfer_family,
-                .async_compute_queue_family = dedicated_compute_family,
-            };
-        }
-
         const bool is_integrated = properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
-        if (is_integrated && prefer_integrated) {
-            best_device_info = {
+        const bool is_dedicated  = properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
+        // If we don't have a "best" device yet, let's use this one.
+        if (best_device_info.device == VK_NULL_HANDLE || (is_integrated && prefer_integrated) ||
+            (is_dedicated && prefer_dedicated)) {
+            best_device_info = PhysicalDeviceInfo{
                 .device                     = physical_device,
-                .graphics_queue_family      = default_queue_family,
-                .transfer_queue_family      = dedicated_transfer_family,
-                .async_compute_queue_family = dedicated_compute_family,
-            };
-        }
-
-        const bool is_dedicated = properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
-        if (is_dedicated && prefer_dedicated) {
-            best_device_info = {
-                .device                     = physical_device,
+                .supported_extensions       = std::move(supported_extensions),
                 .graphics_queue_family      = default_queue_family,
                 .transfer_queue_family      = dedicated_transfer_family,
                 .async_compute_queue_family = dedicated_compute_family,
@@ -880,6 +869,44 @@ static VmaCreateResult create_vma_allocator(VkInstance       instance,
     };
 }
 
+struct FeaturesAndExtensions {
+    DeviceFeatures    features;
+    Span<const char*> enabled_extensions;
+};
+
+static FeaturesAndExtensions get_supported_features(
+    Span<const VkExtensionProperties> supported_extensions,
+    Arena*                            arena) {
+    Span<const char*> enabled_extensions;
+    for (auto ext : kRequiredDeviceExtensions) {
+        enabled_extensions = concat(arena, enabled_extensions, ext);
+    }
+
+    // Actually using pointer-to-member for something. Weird.
+    struct FeatureMap {
+        const char* extension;
+        bool DeviceFeatures::* feature;
+    };
+
+    constexpr FeatureMap kFeatureMap[] = {
+        {VK_EXT_DEBUG_MARKER_EXTENSION_NAME, &DeviceFeatures::has_debug_markers},
+    };
+
+    DeviceFeatures features{};
+    for (const auto& entry : kFeatureMap) {
+        for (const auto& ext : supported_extensions) {
+            if (strcmp(ext.extensionName, entry.extension) == 0) {
+                features.*(entry.feature) = true;
+            }
+        }
+    }
+
+    return {
+        .features           = features,
+        .enabled_extensions = enabled_extensions,
+    };
+}
+
 static LogicalDeviceCreateResult create_logical_device(
     const DeviceDesc&         desc,
     Arena                     arena,
@@ -967,6 +994,8 @@ static LogicalDeviceCreateResult create_logical_device(
             },
     };
 
+    auto feature_info = get_supported_features(physical_device_info.supported_extensions, &arena);
+
     VkDeviceCreateInfo create_info{
         .sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .pNext                   = &device_features,
@@ -975,8 +1004,8 @@ static LogicalDeviceCreateResult create_logical_device(
         .pQueueCreateInfos       = queue_create_infos.data(),
         .enabledLayerCount       = 0,
         .ppEnabledLayerNames     = nullptr,
-        .enabledExtensionCount   = loon::gpu::kRequiredDeviceExtensionsCount,
-        .ppEnabledExtensionNames = loon::gpu::kRequiredDeviceExtensions,
+        .enabledExtensionCount   = static_cast<uint32_t>(feature_info.enabled_extensions.size()),
+        .ppEnabledExtensionNames = feature_info.enabled_extensions.data(),
         .pEnabledFeatures        = nullptr,
     };
 
@@ -986,6 +1015,7 @@ static LogicalDeviceCreateResult create_logical_device(
     return {
         .result         = result,
         .logical_device = device,
+        .features       = feature_info.features,
     };
 }
 
@@ -1011,16 +1041,19 @@ Device create_device(const DeviceDesc& desc) {
 
     PhysicalDeviceInfo physical_device_info{};
     if (result == VK_SUCCESS) {
-        auto p = select_physical_device(instance, vk_surface, desc.gpu_preference, init_arena);
-        result = p.result;
-        physical_device_info = p;
+        auto p =
+            select_physical_device(instance, vk_surface, desc.gpu_preference, alloc, init_arena);
+        result               = p.result;
+        physical_device_info = std::move(p);
     }
 
-    VkDevice logical_device = VK_NULL_HANDLE;
+    VkDevice       logical_device = VK_NULL_HANDLE;
+    DeviceFeatures features{};
     if (result == VK_SUCCESS) {
         auto l         = create_logical_device(desc, init_arena, physical_device_info);
         result         = l.result;
         logical_device = l.logical_device;
+        features       = l.features;
     }
 
     alloc.free(arena_blk);
@@ -1113,6 +1146,7 @@ Device create_device(const DeviceDesc& desc) {
         .graphics_queue_family      = physical_device_info.graphics_queue_family,
         .transfer_queue_family      = physical_device_info.transfer_queue_family,
         .async_compute_queue_family = physical_device_info.async_compute_queue_family,
+        .features                   = features,
         .surface =
             {
                 .surface = vk_surface,
@@ -2121,13 +2155,12 @@ Handle<Pipeline> create_compute_pipeline(Device                             d,
         .flags = 0,
         .stage =
             VkPipelineShaderStageCreateInfo{
-                .sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                .pNext  = nullptr,
-                .flags  = 0,
-                .stage  = VK_SHADER_STAGE_COMPUTE_BIT,
-                .module = module,
-                .pName  = source.entry_point
-                             .data(),  // TODO: Need to ensure null-terminated, copy to local arena.
+                .sType               = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                .pNext               = nullptr,
+                .flags               = 0,
+                .stage               = VK_SHADER_STAGE_COMPUTE_BIT,
+                .module              = module,
+                .pName               = make_null_terminated(&arena, source.entry_point),
                 .pSpecializationInfo = &specialization_info,
             },
         .layout             = d->default_compute_layout,
@@ -2194,7 +2227,7 @@ Handle<Pipeline> create_graphics_pipeline(Device                             d,
             .flags               = 0,
             .stage               = VK_SHADER_STAGE_VERTEX_BIT,
             .module              = vert_module,
-            .pName               = vertex.entry_point.data(),
+            .pName               = make_null_terminated(&arena, vertex.entry_point),
             .pSpecializationInfo = &specialization_info,
         },
         // Fragment stage info
@@ -2204,7 +2237,7 @@ Handle<Pipeline> create_graphics_pipeline(Device                             d,
             .flags               = 0,
             .stage               = VK_SHADER_STAGE_FRAGMENT_BIT,
             .module              = frag_module,
-            .pName               = fragment.entry_point.data(),
+            .pName               = make_null_terminated(&arena, fragment.entry_point),
             .pSpecializationInfo = &specialization_info,
         },
     };
@@ -3397,5 +3430,23 @@ void cmd_signal_surface_texture(CommandBuffer cmd) {
     impl->api.vkCmdPipelineBarrier2(cmd->buffer, &info);
 }
 
+void cmd_push_debug_group(CommandBuffer cmd, Span<const char> label) {
+    auto d = cmd->device;
+    if (d->features.has_debug_markers) {
+        Arena                            a = *get_thread_local_arena(d);
+        const VkDebugMarkerMarkerInfoEXT info{
+            .sType       = VK_STRUCTURE_TYPE_DEBUG_MARKER_MARKER_INFO_EXT,
+            .pNext       = nullptr,
+            .pMarkerName = make_null_terminated(&a, label),
+            .color       = {0, 0, 0, 0},
+        };
+        d->api.vkCmdDebugMarkerBeginEXT(cmd->buffer, &info);
+    }
+}
+
+void cmd_pop_debug_group(CommandBuffer cmd) {
+    auto d = cmd->device;
+    if (d->features.has_debug_markers) { d->api.vkCmdDebugMarkerEndEXT(cmd->buffer); }
+}
 
 }  // namespace loon::gpu
