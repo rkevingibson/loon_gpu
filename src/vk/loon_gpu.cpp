@@ -1995,6 +1995,7 @@ static VkSpecializationInfo construct_specialization_info(
                                  .offset     = offset,
                                  .size       = size,
                              });
+        offset += size;
     }
 
     return VkSpecializationInfo{
