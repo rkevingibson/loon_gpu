@@ -42,6 +42,12 @@ class SpanSynth(ArraySynthBase):
     def get_summary(self):
         return f"Span<{self.element_type}> (size={self.size})"
 
+class VectorSynth(ArraySynthBase):
+    def update(self):
+        self.size = self.valobj.GetChildMemberWithName("m_count").GetValueAsUnsigned()
+        data = self.valobj.GetChildMemberWithName("m_data")
+        self.element_type = data.GetType().GetPointeeType().GetName()
+        self.bind_to(data, int(self.size))
 
 class StringViewSynth(ArraySynthBase):
     def update(self):
@@ -105,6 +111,7 @@ def __lldb_init_module(debugger, internal_dict):
         category.AddTypeSynthetic(lldb.SBTypeNameSpecifier(typename, True), synthetic)
 
     add_synthetic("^loon::gpu::Span<.+>$", SpanSynth)
+    add_synthetic("^loon::gpu::Vector<.+>$", VectorSynth)
     add_synthetic("^loon::StringView$", StringViewSynth)
 
     add_summary("^geometry::float2$", "x=${var.x} y=${var.y}")

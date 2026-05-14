@@ -1,7 +1,7 @@
 # Split some of these into a separate library so we can write some unit tests
 # for them
 add_library(example_utilities OBJECT common/geometry.cpp common/filesystem.cpp
-  common/timer.cpp)
+                                     common/timer.cpp common/obj_parser.cpp)
 
 target_include_directories(example_utilities
                            PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/common)
