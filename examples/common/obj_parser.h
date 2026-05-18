@@ -6,6 +6,7 @@
 
 #include "box.h"
 #include "geometry.h"
+#include "string_view.h"
 
 namespace loon {
 
@@ -14,22 +15,26 @@ enum class ObjErrorCode {
     LineOverflow,  // Trying to parse a line longer than RKG_OBJ_MAX_LINE_LENGTH, try
                    // increasing that (uses a bit more stack memory)
     ReadPastEOF,
+    FileNotFound,
 };
+class LineReader {
+   public:
+    ~LineReader();
 
-struct ObjBufferedStream {
-    const uint8_t* start;   // start of buffer
-    const uint8_t* end;     // One past end of buffer
-    const uint8_t* cursor;  // Cursor in buffer. Invariant: start <= cursor <= end
+    static LineReader from_file(const char* filename);
+    static LineReader from_mem(void* mem, size_t size);
 
-    ObjErrorCode error;
+    ObjErrorCode next();
+    StringView   line() const;
 
-    ObjErrorCode (*refill)(ObjBufferedStream* s);
-    // Precondition: cursor == end (buffer fully consumed)
-    // Postcondition: start == cursor < end
-    // Always returns "error"
+   private:
+    LineReader()         = default;
+    char* m_buffer_begin = nullptr;
+    char* m_buffer_end   = nullptr;
+    char* m_line_begin   = nullptr;
+    char* m_line_end     = nullptr;
+    void* m_file         = nullptr;
 };
-
-void buffered_stream_from_mem(ObjBufferedStream* s, uint8_t* mem, size_t size);
 
 struct ObjMesh {
     std::vector<geometry::float4> positions;
@@ -42,25 +47,6 @@ struct ObjMesh {
     std::vector<int32_t> face_normal_indices;
 };
 
-Box<ObjMesh> obj_parse(ObjBufferedStream* stream);
-
-// Internals:
-
-#define LOON_OBJ_MAX_LINE_LENGTH 256
-typedef struct rkg_buffered_line_reader {
-    // Only used as-needed, if the underlying stream contains a partial line and needs to be
-    // refilled, the line can be copied into here.
-    char        line_buffer[LOON_OBJ_MAX_LINE_LENGTH];
-    const char* line;
-    size_t      line_len;
-
-
-    // Invariant: stream->cursor always points to the start of the next line (after any \n, \r
-    // characters)
-    ObjBufferedStream* stream;
-} rkg_buffered_line_reader;
-
-// Advance the line reader, updating line_start and line_end and consuming the line from the stream.
-ObjErrorCode rkg_buffered_line_reader_next(rkg_buffered_line_reader* reader);
+Box<ObjMesh> obj_parse(LineReader& stream);
 
 }  // namespace loon

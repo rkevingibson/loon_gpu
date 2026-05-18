@@ -3,81 +3,89 @@
 #include <stdalign.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 
 #include <cstring>
 
 #include "string_view.h"
 
 namespace loon {
+#define LOON_OBJ_MAX_LINE_LENGTH BUFSIZ
 
-static ObjErrorCode refill_zeros(ObjBufferedStream* s) {
-    static const uint8_t zeros[256] = {0};
-    s->start                        = zeros;
-    s->end                          = zeros + sizeof(zeros);
-    s->cursor                       = zeros;
-    return s->error;
+LineReader::~LineReader() {
+    if (m_file) {
+        fclose(static_cast<FILE*>(m_file));
+        free(m_buffer_begin);
+    }
 }
 
-static ObjErrorCode fail(ObjBufferedStream* s, ObjErrorCode reason) {
-    s->error  = reason;
-    s->refill = refill_zeros;
-    return s->refill(s);
+LineReader LineReader::from_file(const char* filename) {
+    FILE* f = fopen(filename, "rb");
+
+    LineReader reader;
+    reader.m_file            = f;
+    reader.m_buffer_begin    = (char*)malloc(BUFSIZ);
+    reader.m_buffer_begin[0] = '\n';  // A bit of a hack - pretend we start with an empty line in
+                                      // the front of the buffer. Makes next() logic simpler.
+    reader.m_line_begin = reader.m_line_end = reader.m_buffer_begin;
+
+    // Try to fill in the rest of the buffer with a load.
+    size_t bytes_read   = fread(reader.m_buffer_begin + 1, 1, BUFSIZ - 1, f);
+    reader.m_buffer_end = reader.m_buffer_begin + 1 + bytes_read;
+
+    return reader;
 }
 
-static ObjErrorCode refill_mem_stream(ObjBufferedStream* s) {
-    return fail(s, ObjErrorCode::ReadPastEOF);
+LineReader LineReader::from_mem(void* mem, size_t size) {
+    LineReader reader;
+    reader.m_buffer_begin = static_cast<char*>(mem);
+    reader.m_buffer_end   = static_cast<char*>(mem) + size;
+    reader.m_line_begin   = reader.m_buffer_begin;
+
+    reader.m_line_end = reader.m_line_begin;
+    while (reader.m_line_end != reader.m_buffer_end && *reader.m_line_end != '\n')
+        ++reader.m_line_end;
+
+    return reader;
 }
 
-void ObjBufferedStream_from_mem(ObjBufferedStream* s, uint8_t* mem, size_t size) {
-    s->start  = mem;
-    s->cursor = mem;
-    s->end    = mem + size;
-    s->error  = ObjErrorCode::Success;
-    s->refill = refill_mem_stream;
-}
+// Advance the line reader, updating line_start and line_end and consuming the line from the stream.
+ObjErrorCode LineReader::next() {
+    // Try to advance the line cursor, re-filling the buffer as needed.
 
-ObjErrorCode rkg_buffered_line_reader_next(rkg_buffered_line_reader* reader) {
-    char*          linebuf = reader->line_buffer;
-    size_t         linelen = 0;
-    const uint8_t *start, *chr, *end;
-    do {
-        start = reader->stream->cursor;
-        end   = reader->stream->end;
+    // Invariant: At start, m_line_end points to the end (\n) of the previous line?
+    m_line_begin = ++m_line_end;
+    while (m_line_end != m_buffer_end && *m_line_end != '\n') { m_line_end++; }
 
-        uintptr_t count = (end - start);
-        chr             = static_cast<const uint8_t*>(memchr(start, '\n', count));
-        if (chr == NULL) { chr = end; }
+    if (m_line_end == m_buffer_end) {
+        if (m_file) {
+            if (feof((FILE*)m_file)) { return ObjErrorCode::ReadPastEOF; }
+            // Move the line to the start of the buffer, before refilling
+            const size_t num_bytes = m_buffer_end - m_line_begin;
+            memmove(m_buffer_begin, m_line_begin, num_bytes);
+            const size_t bytes_read =
+                fread(m_buffer_begin + num_bytes, 1, BUFSIZ - num_bytes, (FILE*)m_file);
+            m_buffer_end = m_buffer_begin + num_bytes + bytes_read;
 
-        uintptr_t len = (uintptr_t)(chr - start);
-        linelen += len;
+            m_line_begin = m_buffer_begin;
+            m_line_end   = m_line_begin;
+            while (m_line_end != m_buffer_end && *m_line_end != '\n') { m_line_end++; }
 
-        if (chr == end)  // Need to do a copy
-        {
-            if (linelen > LOON_OBJ_MAX_LINE_LENGTH) { return ObjErrorCode::LineOverflow; }
-            memcpy(linebuf, start, len);
-            linebuf += len;
-            reader->stream->cursor = reader->stream->end;
-            const ObjErrorCode err = reader->stream->refill(reader->stream);
-            if (err != ObjErrorCode::Success) { return err; }
+            if (m_line_end == m_buffer_end) { return ObjErrorCode::LineOverflow; }
+        } else {
         }
-    } while (*chr != '\n');
+        // Need to reload the buffer
+    }
 
-    // Here, need to see if we ever copied. If we didn't, then linebuf should ==
-    // reader->line_buffer, and we can just set it to cursor instead.
-    reader->line           = (linebuf == reader->line_buffer) ? (const char*)reader->stream->cursor
-                                                              : reader->line_buffer;
-    reader->stream->cursor = chr + 1;
 
-    if (linelen > 0 && reader->line[linelen - 1] == '\r')  // Windows-style newline.
-        --linelen;
-
-    reader->line_len = linelen;
     return ObjErrorCode::Success;
 }
 
+StringView LineReader::line() const {
+    return StringView(m_line_begin, m_line_end);
+}
+
 bool is_blank(char x) {
-    return x == ' ' || x == '\t';
+    return x == ' ' || x == '\t' || x == '\r';
 }
 
 static StringView pop_next_token(StringView* line) {
@@ -102,12 +110,11 @@ static void consume_leading_whitespace(StringView* span) {
 
 // Parse an int that's at the beginning of the token, updating tok to point to one after the parsed
 // integer.
-static int parse_int(StringView* tok, const char* buffer_end) {
+static int parse_int(StringView* tok) {
     // No good native library solution, just roll our own naive one for now.
     // We know that since we're returning a 32-bit signed integer, we have a maximum of 10 digits
     // plus an optional hyphen. More commonly, we will have less than 8 digits, which would fit into
     // a uint64_t.
-    (void)buffer_end;
     const char* it = tok->begin();
 
     int negmask = 1;
@@ -190,7 +197,7 @@ static void parse_space_vert(StringView line, ObjMesh* mesh) {
     (void)mesh;
 }
 
-static void parse_face(StringView line, const char* buffer_end, ObjMesh* mesh) {
+static void parse_face(StringView line, ObjMesh* mesh) {
     // Faces are the most complicated thing to parse.
     // The format may just be a list of numbers, but it may have slashes separating texture coords
     // and vertex normals. As well, the length of the list isn't known ahead of time. How to
@@ -201,16 +208,16 @@ static void parse_face(StringView line, const char* buffer_end, ObjMesh* mesh) {
 
     while (!line.is_empty()) {
         // Anything remaining is the normal index.
-        int32_t pos_index    = parse_int(&line, buffer_end);
+        int32_t pos_index    = parse_int(&line);
         int32_t tex_index    = 0;
         int32_t normal_index = 0;
         if (line.front() == '/') {
             line.remove_prefix(1);
-            tex_index = parse_int(&line, buffer_end);
+            tex_index = parse_int(&line);
         }
         if (line.front() == '/') {
             line.remove_prefix(1);
-            normal_index = parse_int(&line, buffer_end);
+            normal_index = parse_int(&line);
         }
 
         // Index fixup: Convert to 0-index, and negative values are relative to end of array.
@@ -254,7 +261,7 @@ enum class TokenType : uint64_t {
     MATERIAL         = TOKEN_AS_INT64("mtllib"),
 };
 
-Box<ObjMesh> rkg_obj_parse(ObjBufferedStream* stream) {
+Box<ObjMesh> obj_parse(LineReader& stream) {
     Box<ObjMesh> mesh = make_box<ObjMesh>(ObjMesh{
         .positions           = {},
         .texcoords           = {},
@@ -265,16 +272,9 @@ Box<ObjMesh> rkg_obj_parse(ObjBufferedStream* stream) {
         .face_normal_indices = {},
     });
 
-    rkg_buffered_line_reader reader = {
-        .line_buffer = {},
-        .line        = nullptr,
-        .line_len    = 0,
-        .stream      = stream,
-    };
-
     // OBJ is a line-centric file format. The parsing of each line depends on the first token
-    while (rkg_buffered_line_reader_next(&reader) == ObjErrorCode::Success) {
-        StringView line = StringView(reader.line, reader.line_len);
+    while (stream.next() == ObjErrorCode::Success) {
+        StringView line = stream.line();
 
         const StringView tok          = pop_next_token(&line);
         const size_t     token_length = tok.size();
@@ -307,7 +307,7 @@ Box<ObjMesh> rkg_obj_parse(ObjBufferedStream* stream) {
             case TokenType::PARAM_SPACE_VERT: parse_space_vert(line, mesh.get()); break;
             case TokenType::POINT: break;
             case TokenType::LINE: break;
-            case TokenType::FACE: parse_face(line, (const char*)stream->end, mesh.get()); break;
+            case TokenType::FACE: parse_face(line, mesh.get()); break;
             case TokenType::CURVE: break;
             case TokenType::CURVE2D: break;
             case TokenType::SURFACE: break;

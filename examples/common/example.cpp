@@ -18,6 +18,7 @@ extern "C" __declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void
 
 #include <vector>
 
+#include "bunny/bunny.h"
 #include "common/box.h"
 #include "hello_cube/hello_cube.h"
 #include "hello_triangle/hello_triangle.h"
@@ -89,6 +90,7 @@ loon::Box<Example> create_example(ExampleName name, const WindowState& state) {
         case ExampleName::TexturedCube: return loon::make_box<TexturedCube>(state);
         case ExampleName::ParticleEmitter: return loon::make_box<ParticleEmitter>(state);
         case ExampleName::ManyCubes: return loon::make_box<ManyCubes>(state);
+        case ExampleName::Bunny: return loon::make_box<Bunny>(state);
         default: return nullptr;
     }
 }

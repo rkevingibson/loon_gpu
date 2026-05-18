@@ -10,6 +10,7 @@ set(EXAMPLE_SOURCES
     common/example.cpp
     common/shaders.cpp
     common/gpu_args.cpp
+    bunny/bunny.cpp
     hello_triangle/hello_triangle.cpp
     hello_cube/hello_cube.cpp
     textured_cube/textured_cube.cpp
