@@ -5,7 +5,9 @@
 #include <stdio.h>
 
 #include <cstring>
+#include <unordered_map>
 
+#include "geometry.h"
 #include "string_view.h"
 
 namespace loon {
@@ -323,6 +325,63 @@ Box<ObjMesh> obj_parse(LineReader& stream) {
 
 
     return static_cast<Box<ObjMesh>&&>(mesh);
+}
+}  // namespace loon
+struct Index {
+    uint32_t p, t, n;
+
+    bool operator==(const Index& rhs) const { return p == rhs.p && t == rhs.t && n == rhs.n; }
+};
+
+template <>
+struct std::hash<Index> {
+    size_t operator()(const Index& i) const noexcept {
+        auto h = std::hash<uint32_t>();
+        return h(i.p) ^ (h(i.n) << 1) ^ (h(i.t) << 2);
+    }
+};
+
+namespace loon {
+Box<ReindexedMesh> cleanup_mesh(Box<ObjMesh> mesh) {
+    // TODO: Triangulation
+
+    const size_t num_indices = mesh->face_pos_indices.size();
+
+
+
+    // Feels like there should be a way to do this without a hash table using some cleverness,
+    // but maybe not.
+    std::unordered_map<Index, uint32_t> remap_table;
+
+    std::vector<geometry::float3> positions_out;
+    std::vector<geometry::float2> texture_out;
+    std::vector<geometry::float3> normal_out;
+    std::vector<uint32_t>         index_buffer_out;
+
+    for (uint32_t idx_in = 0; idx_in < num_indices; ++idx_in) {
+        const auto p_idx = mesh->face_pos_indices[idx_in];
+        const auto t_idx = mesh->face_tex_indices[idx_in];
+        const auto n_idx = mesh->face_tex_indices[idx_in];
+
+        auto [it, inserted] = remap_table.try_emplace({p_idx, t_idx, n_idx}, positions_out.size());
+        if (inserted) {
+            const auto& p = mesh->positions[p_idx];
+            const auto& t = mesh->texcoords[t_idx];
+            const auto& n = mesh->normals[n_idx];
+            positions_out.emplace_back(p.x, p.y, p.z);
+            texture_out.emplace_back(t.x, t.y);
+            normal_out.emplace_back(n);
+        } else {
+            index_buffer_out.push_back(it->second);
+        }
+    }
+
+    return make_box<ReindexedMesh>(ReindexedMesh{
+        .positions = std::move(positions_out),
+        .texcoords = std::move(texture_out),
+        .normals   = std::move(normal_out),
+        .indices   = std::move(index_buffer_out),
+    });
 }
 
 }  // namespace loon

@@ -41,12 +41,23 @@ struct ObjMesh {
     std::vector<geometry::float3> texcoords;
     std::vector<geometry::float3> normals;
 
-    std::vector<int8_t>  face_vertex_count;
-    std::vector<int32_t> face_pos_indices;
-    std::vector<int32_t> face_tex_indices;
-    std::vector<int32_t> face_normal_indices;
+    std::vector<int8_t>   face_vertex_count;
+    std::vector<uint32_t> face_pos_indices;
+    std::vector<uint32_t> face_tex_indices;
+    std::vector<uint32_t> face_normal_indices;
 };
 
 Box<ObjMesh> obj_parse(LineReader& stream);
+
+struct ReindexedMesh {
+    std::vector<geometry::float3> positions;
+    std::vector<geometry::float2> texcoords;
+    std::vector<geometry::float3> normals;
+    std::vector<uint32_t>         indices;
+};
+
+// Do triangulation and reindexing, combining the distinct indices in the OBJ file into a single
+// index buffer.
+Box<ReindexedMesh> cleanup_mesh(Box<ObjMesh> mesh);
 
 }  // namespace loon

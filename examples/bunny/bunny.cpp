@@ -77,7 +77,7 @@ Bunny::Bunny(const WindowState& window_state) {
 
     auto         stream   = LineReader::from_file("/Users/kevin/Downloads/bunny.obj");
     Box<ObjMesh> obj_file = loon::obj_parse(stream);
-
+    auto         mesh     = loon::cleanup_mesh(std::move(obj_file));
 
     m_queue = gpu::get_queue(m_device);
 }
