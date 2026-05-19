@@ -888,7 +888,7 @@ static FeaturesAndExtensions get_supported_features(
         bool DeviceFeatures::* feature;
     };
 
-    constexpr FeatureMap kFeatureMap[] = {
+    static constexpr FeatureMap kFeatureMap[] = {
         {VK_EXT_DEBUG_MARKER_EXTENSION_NAME, &DeviceFeatures::has_debug_markers},
     };
 
@@ -897,6 +897,7 @@ static FeaturesAndExtensions get_supported_features(
         for (const auto& ext : supported_extensions) {
             if (strcmp(ext.extensionName, entry.extension) == 0) {
                 features.*(entry.feature) = true;
+                enabled_extensions        = concat(arena, enabled_extensions, entry.extension);
             }
         }
     }
