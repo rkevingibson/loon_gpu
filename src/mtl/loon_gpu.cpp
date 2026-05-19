@@ -1470,4 +1470,28 @@ void cmd_finalize(CommandBuffer cmd) {
     release_command_pool(cmd->queue, cmd->pool);
 }
 
+void cmd_push_debug_group(CommandBuffer cmd, Span<const char> label) {
+    if (is_in_render_pass(cmd)) {
+        cmd->render_encoder->pushDebugGroup(get_span_as_string(label).get());
+    } else {
+        // Annoyingly, I don't really have a way to reliably put debug groups on the compute passes
+        // since I can end them randomly. So we end them here and hope that doesn't have too much
+        // overhead.
+        if (is_in_compute_pass(cmd)) { end_compute_pass(cmd); }
+        cmd->command_buffer->pushDebugGroup(get_span_as_string(label).get());
+    }
+}
+
+void cmd_pop_debug_group(CommandBuffer cmd) {
+    if (is_in_render_pass(cmd)) {
+        cmd->render_encoder->popDebugGroup();
+    } else {
+        // Annoyingly, I don't really have a way to reliably put debug groups on the compute passes
+        // since I can end them randomly. So we end them here and hope that doesn't have too much
+        // overhead.
+        if (is_in_compute_pass(cmd)) { end_compute_pass(cmd); }
+        cmd->command_buffer->popDebugGroup();
+    }
+}
+
 }  // namespace loon::gpu

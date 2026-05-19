@@ -1386,6 +1386,19 @@ void cmd_wait_for_surface_texture(CommandBuffer cmd);
 void cmd_signal_surface_texture(CommandBuffer cmd);
 
 /**
+ * @brief Begin a new named debug region in the command buffer.
+ * This shows up in gpu capture tools like renderdoc or Xcode.
+ * Should be paired with `cmd_pop_debug_group()`
+ */
+void cmd_push_debug_group(CommandBuffer cmd, Span<const char> label);
+
+/**
+ * @brief End the last pushed debug region.
+ *
+ */
+void cmd_pop_debug_group(CommandBuffer cmd);
+
+/**
  * @brief
  *
  * @param cmd

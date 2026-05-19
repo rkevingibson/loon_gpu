@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <cstring>
 #include <new>
 #include <utility>
 
@@ -135,6 +136,15 @@ template <class T>
 template <class T>
 [[nodiscard]] Span<T> concat(Arena* a, Span<T> head, const T& tail) {
     return concat(a, head, Span<const T>(&tail, 1));
+}
+
+[[nodiscard]] inline const char* make_null_terminated(Arena* a, Span<const char> s) {
+    char* result = (char*)a->alloc(s.size() + 1);
+    if (result) {
+        memcpy(result, s.data(), s.size());
+        result[s.size()] = '\0';
+    }
+    return result;
 }
 
 // MARK: Vector

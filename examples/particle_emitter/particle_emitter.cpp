@@ -287,8 +287,7 @@ void ParticleEmitter::Update(const WindowState& window) {
 
     // Rendering here.
     auto cmd = gpu::queue_start_command_recording(m_queue);
-
-
+    gpu::cmd_push_debug_group(cmd, "Simulate particles"_sv);
     gpu::cmd_set_pipeline(cmd, m_emitter_pipeline);
     gpu::cmd_dispatch(cmd, sim_args, Dimension3D{.x = kMaxNumParticles / 64, .y = 1, .z = 1});
     gpu::cmd_barrier(cmd, StageFlags::Compute, StageFlags::Compute);
@@ -297,11 +296,11 @@ void ParticleEmitter::Update(const WindowState& window) {
     gpu::cmd_dispatch(cmd, sim_args, Dimension3D{.x = kMaxNumParticles / 64, .y = 1, .z = 1});
     gpu::cmd_barrier(cmd, StageFlags::Compute, StageFlags::IndirectArguments);
 
+    gpu::cmd_pop_debug_group(cmd);
     // Render particles
     gpu::cmd_wait_for_surface_texture(cmd);
     // We only have one depth buffer so we need to stall here
     gpu::cmd_barrier(cmd, StageFlags::FragmentTests, StageFlags::FragmentTests);
-
     gpu::cmd_begin_render_pass(cmd,
                                {
                                    .color_attachments =
@@ -324,6 +323,7 @@ void ParticleEmitter::Update(const WindowState& window) {
                                            .height = m_swapchain_height,
                                        },
                                });
+    gpu::cmd_push_debug_group(cmd, "Render particles"_sv);
     gpu::cmd_set_depth_stencil_state(cmd, m_depth_stencil_state);
     gpu::cmd_set_pipeline(cmd, m_render_particle_pipeline);
     gpu::cmd_draw_indexed_instanced_indirect(cmd,
@@ -333,8 +333,8 @@ void ParticleEmitter::Update(const WindowState& window) {
                                                  .indicesGpu      = indices_ptr,
                                                  .argsGpu         = indirect_args,
                                              });
-
     gpu::cmd_set_texture_heap(cmd, m_texture_heap);
+    gpu::cmd_pop_debug_group(cmd);
     loon::imgui::Render(cmd);
     gpu::cmd_end_render_pass(cmd);
     gpu::cmd_signal_surface_texture(cmd);

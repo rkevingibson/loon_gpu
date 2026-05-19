@@ -334,6 +334,8 @@ static gpu::GpuPtr AlignAddress(gpu::GpuPtr size, gpu::GpuPtr alignment) {
 
 void Render(gpu::CommandBuffer cmd) {
     ImGui::Render();
+    using loon::gpu::operator""_sv;
+    gpu::cmd_push_debug_group(cmd, "Imgui Render"_sv);
 
     auto draw_data = ImGui::GetDrawData();
 
@@ -480,6 +482,7 @@ void Render(gpu::CommandBuffer cmd) {
         global_vtx_ptr += draw_list->VtxBuffer.Size * sizeof(ImDrawVert);
     }
     platform_io.Renderer_RenderState = nullptr;
+    gpu::cmd_pop_debug_group(cmd);
 }
 
 //-----------------------------------------------------------------------------
