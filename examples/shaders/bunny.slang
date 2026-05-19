@@ -34,10 +34,10 @@ struct Args {
 VertexStageOutput vertex_main(uint32_t vertexIdx : SV_VertexID) 
 {
     VertexStageOutput output;
-    const Mesh = mesh = args.vert->mesh;
+    const Mesh mesh = args.vert->mesh;
     float4x4 mvp = mul(args.vert->camera.projection, args.vert->camera.cameraFromWorld);
 
-    output.position = mul(mvp, float4(mesh.position[vertexIdx], 1.0));
+    output.position = mul(mvp, float4(mesh.positions[vertexIdx], 1.0));
     output.uv = mesh.uvs[vertexIdx];
     return output;
 }
