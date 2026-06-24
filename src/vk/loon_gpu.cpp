@@ -1541,8 +1541,6 @@ SurfaceTextureInfo get_current_texture(Device d) {
 }
 
 SurfaceStatus present(Device d, Queue q) {
-    auto presenting_texture_handle = d->surface.swapchain_images[d->surface.current_image_idx];
-
     auto s = d->semaphore_pool[d->surface.present_semaphores[d->surface.current_image_idx]];
     VkPresentInfoKHR present_info{
         .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
