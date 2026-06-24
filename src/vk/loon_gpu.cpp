@@ -2460,7 +2460,7 @@ Handle<Semaphore> create_semaphore(Device d, uint64_t initValue) {
         .sType         = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
         .pNext         = nullptr,
         .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE,
-        .initialValue  = 0,
+        .initialValue  = initValue,
     };
 
     VkSemaphoreCreateInfo timeline_create_info{
