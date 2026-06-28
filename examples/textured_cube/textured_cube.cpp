@@ -183,8 +183,8 @@ bool TexturedCube::Update(const UpdateInfo& info) {
     *args = ShaderArgs{
         .camera =
             CameraInfo{
-                .projection        = projection({.view_width  = (float)m_swapchain_width,
-                                                 .view_height = (float)m_swapchain_height,
+                .projection        = projection({.view_width  = (float)info.texture_size.x,
+                                                 .view_height = (float)info.texture_size.y,
                                                  .y_fov       = radians_from_degrees(30.f),
                                                  .depth_far   = 0.5f}),
                 .camera_from_world = transform3d::identity().translated({0, 0, -5}).to_matrix(),
@@ -211,25 +211,28 @@ bool TexturedCube::Update(const UpdateInfo& info) {
         cmd,
         StageFlags::FragmentTests,
         StageFlags::FragmentTests);  // We only have one depth buffer so need to stall here.
-    gpu::cmd_begin_render_pass(
-        cmd,
-        {
-            .color_attachments =
-                RenderAttachment{
-                    .texture     = info.color_texture,
-                    .load_op     = loon::gpu::LoadOp::Clear,
-                    .store_op    = loon::gpu::StoreOp::Store,
-                    .clear_color = Color(0, 0, 0, 0),
-                },
-            .depth_attachment =
-                RenderAttachment{
-                    .texture     = info.depth_texture,
-                    .load_op     = loon::gpu::LoadOp::Clear,
-                    .store_op    = loon::gpu::StoreOp::Discard,
-                    .clear_color = Color(0, 0, 0, 0),
-                },
-            .render_area = {.width = m_swapchain_width, .height = m_swapchain_height},
-        });
+    gpu::cmd_begin_render_pass(cmd,
+                               {
+                                   .color_attachments =
+                                       RenderAttachment{
+                                           .texture     = info.color_texture,
+                                           .load_op     = loon::gpu::LoadOp::Clear,
+                                           .store_op    = loon::gpu::StoreOp::Store,
+                                           .clear_color = Color(0, 0, 0, 0),
+                                       },
+                                   .depth_attachment =
+                                       RenderAttachment{
+                                           .texture     = info.depth_texture,
+                                           .load_op     = loon::gpu::LoadOp::Clear,
+                                           .store_op    = loon::gpu::StoreOp::Discard,
+                                           .clear_color = Color(0, 0, 0, 0),
+                                       },
+                                   .render_area =
+                                       {
+                                           .width  = info.texture_size.x,
+                                           .height = info.texture_size.y,
+                                       },
+                               });
 
     gpu::cmd_set_front_face(cmd, FrontFace::CW);
     gpu::cmd_set_cull_mode(cmd, Cull::Back);

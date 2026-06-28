@@ -53,8 +53,8 @@ bool HelloTriangle::Update(const UpdateInfo& info) {
                                        },
                                    .render_area =
                                        Rect2D{
-                                           .width  = m_swapchain_width,
-                                           .height = m_swapchain_height,
+                                           .width  = info.texture_size.x,
+                                           .height = info.texture_size.y,
                                        },
                                });
 

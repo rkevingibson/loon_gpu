@@ -144,6 +144,11 @@ void Example::Tick(const WindowState& window) {
         .depth_format  = m_depth_format,
         .color_texture = surface_texture.texture,
         .depth_texture = m_depth_texture,
+        .texture_size =
+            {
+                .x = m_swapchain_width,
+                .y = m_swapchain_height,
+            },
     });
 
     const auto status = gpu::present(m_device, m_queue);

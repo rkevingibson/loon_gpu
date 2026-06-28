@@ -35,6 +35,7 @@ class Example {
         loon::gpu::Format                     depth_format;
         loon::gpu::Handle<loon::gpu::Texture> color_texture;
         loon::gpu::Handle<loon::gpu::Texture> depth_texture;
+        loon::gpu::Dimension2D                texture_size;
     };
 
     virtual bool Update(const UpdateInfo& info) = 0;
@@ -42,12 +43,11 @@ class Example {
     loon::gpu::Device m_device;
     loon::gpu::Queue  m_queue;
     loon::gpu::Format m_swapchain_format;
-    uint32_t          m_swapchain_width;
-    uint32_t          m_swapchain_height;
 
    private:
-    void recreate_swapchain(uint32_t width, uint32_t height);
-
+    void              recreate_swapchain(uint32_t width, uint32_t height);
+    uint32_t          m_swapchain_width;
+    uint32_t          m_swapchain_height;
     loon::gpu::Format m_depth_format = loon::gpu::Format::Depth32Float;
 
     loon::gpu::Handle<loon::gpu::Texture> m_depth_texture;

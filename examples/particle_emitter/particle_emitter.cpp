@@ -214,8 +214,8 @@ bool ParticleEmitter::Update(const UpdateInfo& info) {
             .camera =
                 {
                     .projection =
-                        geometry::projection({.view_width  = (float)m_swapchain_width,
-                                              .view_height = (float)m_swapchain_height,
+                        geometry::projection({.view_width  = (float)info.texture_size.x,
+                                              .view_height = (float)info.texture_size.y,
                                               .y_fov       = geometry::radians_from_degrees(30.f),
                                               .depth_far   = 0.5f}),
                     .camera_from_world =
@@ -264,8 +264,8 @@ bool ParticleEmitter::Update(const UpdateInfo& info) {
                                        },
                                    .render_area =
                                        {
-                                           .width  = m_swapchain_width,
-                                           .height = m_swapchain_height,
+                                           .width  = info.texture_size.x,
+                                           .height = info.texture_size.y,
                                        },
                                });
     gpu::cmd_push_debug_group(cmd, "Render particles"_sv);
