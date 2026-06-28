@@ -81,23 +81,7 @@ static Format select_surface_format(const loon::gpu::SurfaceCapabilities& surfac
     return surface_capabilities.formats[0];
 }
 
-TexturedCube::TexturedCube(const WindowState& window_state) {
-    m_device = loon::gpu::create_device({
-        .gpu_preference         = GpuPreference::Discrete,
-        .native_window_handle   = window_state.native_window_handle,
-        .native_instance_handle = window_state.native_instance_handle,
-        .log_callback           = log_callback,
-        .log_userdata           = nullptr,
-        .log_level              = LogLevel::Debug,
-        .alloc_callback         = nullptr,
-        .alloc_userdata         = nullptr,
-    });
-
-    auto surface_capabilities = gpu::get_surface_capabilities(m_device);
-    m_swapchain_format        = select_surface_format(surface_capabilities);
-
-    recreate_swapchain(window_state.width, window_state.height);
-
+TexturedCube::TexturedCube(const WindowState& window_state) : Example(window_state) {
     // Load shaders and create render pipeline
     ShaderModule shader         = window_state.shader_loader->load_module("textured_cube");
     const auto   vertex_spirv   = get_spirv(shader.get(), "vertex_main");
@@ -119,8 +103,6 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
         });
 
     assert(m_render_pipeline.h != 0);
-
-    m_queue = gpu::get_queue(m_device);
 
     m_vertex_ptr = gpu::malloc(m_device, Cube::kSize, Memory::Gpu);
 
@@ -192,54 +174,17 @@ TexturedCube::TexturedCube(const WindowState& window_state) {
         });
 }
 
-TexturedCube::~TexturedCube() {
-    destroy_device(m_device);
-}
+TexturedCube::~TexturedCube() = default;
 
-void TexturedCube::recreate_swapchain(uint32_t width, uint32_t height) {
-    gpu::device_wait_for_idle(m_device);
-    gpu::unconfigure_surface(m_device);
-    gpu::configure_surface(m_device,
-                           {
-                               .format       = m_swapchain_format,
-                               .usages       = loon::gpu::UsageFlags::ColorAttachment,
-                               .width        = width,
-                               .height       = height,
-                               .present_mode = PresentMode::Fifo,
-                           });
-    m_swapchain_width  = width;
-    m_swapchain_height = height;
-
-    // Recreate depth buffer as well
-    if (m_depth_texture.h) { gpu::free(m_device, m_depth_texture); }
-    m_depth_texture =
-        gpu::create_texture(m_device,
-                            {
-                                .type       = TextureType::Tex2D,
-                                .dimensions = {.x = width, .y = height, .z = 1},
-                                .format     = loon::gpu::Format::Depth32Float,
-                                .usage      = loon::gpu::UsageFlags::DepthStencilAttachment,
-                            });
-}
-
-void TexturedCube::Update(const WindowState& window) {
-    auto surface_texture = gpu::get_current_texture(m_device);
-    if (surface_texture.status == SurfaceStatus::OutOfDate ||
-        surface_texture.status == SurfaceStatus::Suboptimal) {
-        recreate_swapchain(window.width, window.height);
-        return;
-    } else if (surface_texture.status == SurfaceStatus::Error) {
-        return;
-    }
-
+bool TexturedCube::Update(const UpdateInfo& info) {
     // Update constant data
     auto args = reinterpret_cast<ShaderArgs*>(gpu::get_host_pointer(m_device, m_constant_buffer)) +
                 (m_frame_idx % 3);
     *args = ShaderArgs{
         .camera =
             CameraInfo{
-                .projection        = projection({.view_width  = (float)window.width,
-                                                 .view_height = (float)window.height,
+                .projection        = projection({.view_width  = (float)m_swapchain_width,
+                                                 .view_height = (float)m_swapchain_height,
                                                  .y_fov       = radians_from_degrees(30.f),
                                                  .depth_far   = 0.5f}),
                 .camera_from_world = transform3d::identity().translated({0, 0, -5}).to_matrix(),
@@ -271,14 +216,14 @@ void TexturedCube::Update(const WindowState& window) {
         {
             .color_attachments =
                 RenderAttachment{
-                    .texture     = surface_texture.texture,
+                    .texture     = info.color_texture,
                     .load_op     = loon::gpu::LoadOp::Clear,
                     .store_op    = loon::gpu::StoreOp::Store,
                     .clear_color = Color(0, 0, 0, 0),
                 },
             .depth_attachment =
                 RenderAttachment{
-                    .texture     = m_depth_texture,
+                    .texture     = info.depth_texture,
                     .load_op     = loon::gpu::LoadOp::Clear,
                     .store_op    = loon::gpu::StoreOp::Discard,
                     .clear_color = Color(0, 0, 0, 0),
@@ -308,12 +253,6 @@ void TexturedCube::Update(const WindowState& window) {
     gpu::cmd_finalize(cmd);
     gpu::queue_submit(m_queue, cmd);
 
-    const auto status = gpu::present(m_device, m_queue);
-    if (status == SurfaceStatus::OutOfDate || status == SurfaceStatus::Suboptimal) {
-        recreate_swapchain(window.width, window.height);
-    }
-
-    gpu::queue_process_events(m_queue);
-
     m_frame_idx++;
+    return true;
 }

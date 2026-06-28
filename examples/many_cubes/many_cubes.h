@@ -13,20 +13,11 @@ class ManyCubes : public Example {
     ManyCubes(const WindowState& window_state);
     ~ManyCubes() override;
 
-    void Update(const WindowState& window) override;
+    bool Update(const UpdateInfo& window) override;
 
    private:
-    void recreate_swapchain(uint32_t width, uint32_t height);
-
-    Device   m_device;
-    Queue    m_queue;
-    Format   m_swapchain_format;
-    uint32_t m_swapchain_width  = 0;
-    uint32_t m_swapchain_height = 0;
-
     Handle<Pipeline>          m_render_pipeline;
     Handle<DepthStencilState> m_depth_stencil_state;
-    Handle<Texture>           m_depth_texture{0};
     Handle<Texture>           m_color_texture;
     Handle<TextureHeap>       m_texture_heap;
 

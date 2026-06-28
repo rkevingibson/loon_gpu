@@ -16,6 +16,7 @@
 
 #include "common/geometry.h"
 #include "common/shaders.h"
+#include "example.h"
 using namespace geometry;
 using namespace loon;
 namespace {
@@ -80,32 +81,7 @@ static Format select_surface_format(const loon::gpu::SurfaceCapabilities& surfac
     return surface_capabilities.formats[0];
 }
 
-HelloCube::HelloCube(const WindowState& window_state) {
-    m_device = gpu::create_device({
-        .gpu_preference         = GpuPreference::Discrete,
-        .native_window_handle   = window_state.native_window_handle,
-        .native_instance_handle = window_state.native_instance_handle,
-        .log_callback           = log_callback,
-        .log_userdata           = nullptr,
-        .log_level              = LogLevel::Debug,
-        .alloc_callback         = nullptr,
-        .alloc_userdata         = nullptr,
-    });
-
-    auto surface_capabilities = gpu::get_surface_capabilities(m_device);
-    m_swapchain_format        = select_surface_format(surface_capabilities);
-
-    gpu::configure_surface(m_device,
-                           {
-                               .format       = m_swapchain_format,
-                               .usages       = loon::gpu::UsageFlags::ColorAttachment,
-                               .width        = window_state.width,
-                               .height       = window_state.height,
-                               .present_mode = PresentMode::Fifo,
-                           });
-    m_swapchain_width  = window_state.width;
-    m_swapchain_height = window_state.height;
-
+HelloCube::HelloCube(const WindowState& window_state) : Example(window_state) {
     // Load shaders and create render pipeline
     ShaderModule shader         = window_state.shader_loader->load_module("hello_cube");
     const auto   vertex_spirv   = get_spirv(shader.get(), "vertex_main");
@@ -127,8 +103,6 @@ HelloCube::HelloCube(const WindowState& window_state) {
         });
 
     assert(m_render_pipeline.h != 0);
-
-    m_queue = gpu::get_queue(m_device);
 
     m_vertex_ptr = gpu::malloc(m_device, Cube::kSize, Memory::Gpu);
 
@@ -153,16 +127,7 @@ HelloCube::HelloCube(const WindowState& window_state) {
     gpu::wait_semaphore(m_device, copy_semaphore, 1);
     gpu::free(m_device, copy_semaphore);
 
-    // Create a depth texture
-    m_depth_texture = gpu::create_texture(
-        m_device,
-        {
-            .type       = TextureType::Tex2D,
-            .dimensions = {.x = window_state.width, .y = window_state.height, .z = 1},
-            .format     = loon::gpu::Format::Depth32Float,
-            .usage      = loon::gpu::UsageFlags::DepthStencilAttachment,
-        });
-
+    // Create a depth state
     m_depth_stencil_state = gpu::create_depth_stencil_state(
         m_device,
         DepthStencilDesc{
@@ -171,43 +136,12 @@ HelloCube::HelloCube(const WindowState& window_state) {
         });
 }
 
-HelloCube::~HelloCube() {
-    destroy_device(m_device);
-}
-
-void HelloCube::recreate_swapchain(uint32_t width, uint32_t height) {
-    gpu::device_wait_for_idle(m_device);
-    gpu::unconfigure_surface(m_device);
-    gpu::configure_surface(m_device,
-                           {
-                               .format       = m_swapchain_format,
-                               .usages       = loon::gpu::UsageFlags::ColorAttachment,
-                               .width        = width,
-                               .height       = height,
-                               .present_mode = PresentMode::Fifo,
-                           });
-    m_swapchain_width  = width;
-    m_swapchain_height = height;
-
-    // Recreate depth buffer as well
-
-    gpu::free(m_device, m_depth_texture);
-    m_depth_texture =
-        gpu::create_texture(m_device,
-                            {
-                                .type       = TextureType::Tex2D,
-                                .dimensions = {.x = width, .y = height, .z = 1},
-                                .format     = loon::gpu::Format::Depth32Float,
-                                .usage      = loon::gpu::UsageFlags::DepthStencilAttachment,
-                            });
-}
-
-void HelloCube::Update(const WindowState& window) {
+bool HelloCube::Update(const UpdateInfo& info) {
     // Update constant data
     auto args = reinterpret_cast<ShaderArgs*>(gpu::get_host_pointer(m_device, m_constant_buffer));
     args[m_frame_idx % 3].camera = CameraInfo{
-        .projection        = projection({.view_width  = (float)window.width,
-                                         .view_height = (float)window.height,
+        .projection        = projection({.view_width  = (float)m_swapchain_width,
+                                         .view_height = (float)m_swapchain_height,
                                          .y_fov       = radians_from_degrees(30.f),
                                          .depth_far   = 0.5f}),
         .camera_from_world = transform3d::identity().translated({0, 0, -5}).to_matrix(),
@@ -221,15 +155,6 @@ void HelloCube::Update(const WindowState& window) {
                                .to_matrix(),
     };
 
-    auto surface_texture = gpu::get_current_texture(m_device);
-    if (surface_texture.status == SurfaceStatus::OutOfDate ||
-        surface_texture.status == SurfaceStatus::Suboptimal) {
-        recreate_swapchain(window.width, window.height);
-        return;
-    } else if (surface_texture.status == SurfaceStatus::Error) {
-        return;
-    }
-
     auto cmd = gpu::queue_start_command_recording(m_queue);
     gpu::cmd_wait_for_surface_texture(cmd);
     gpu::cmd_barrier(cmd, StageFlags::FragmentTests, StageFlags::FragmentTests);
@@ -238,14 +163,14 @@ void HelloCube::Update(const WindowState& window) {
         {
             .color_attachments =
                 RenderAttachment{
-                    .texture     = surface_texture.texture,
+                    .texture     = info.color_texture,
                     .load_op     = loon::gpu::LoadOp::Clear,
                     .store_op    = loon::gpu::StoreOp::Store,
                     .clear_color = Color(0, 0, 0, 0),
                 },
             .depth_attachment =
                 RenderAttachment{
-                    .texture     = m_depth_texture,
+                    .texture     = info.depth_texture,
                     .load_op     = loon::gpu::LoadOp::Clear,
                     .store_op    = loon::gpu::StoreOp::Discard,
                     .clear_color = Color(0, 0, 0, 0),
@@ -268,11 +193,6 @@ void HelloCube::Update(const WindowState& window) {
     gpu::cmd_finalize(cmd);
     gpu::queue_submit(m_queue, cmd);
 
-    const auto status = gpu::present(m_device, m_queue);
-    if (status == SurfaceStatus::OutOfDate || status == SurfaceStatus::Suboptimal) {
-        recreate_swapchain(window.width, window.height);
-    }
-
-    gpu::queue_process_events(m_queue);
     ++m_frame_idx;
+    return true;
 }
