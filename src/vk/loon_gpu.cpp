@@ -1485,13 +1485,13 @@ bool configure_surface(Device d, const SurfaceConfiguration& config) {
 void unconfigure_surface(Device d) {
     if (d->surface.swapchain) {
         d->api.vkDestroySwapchainKHR(d->device, d->surface.swapchain, nullptr);
-        d->surface.swapchain         = VK_NULL_HANDLE;
-        d->surface.image_count       = 0;
+        d->surface.swapchain = VK_NULL_HANDLE;
         d->surface.current_image_idx = 0;
         for (int i = 0; i < d->surface.image_count; ++i) {
             d->semaphore_pool.erase(d->surface.present_semaphores[i]);
             d->surface.transitioning_command[i] = VK_NULL_HANDLE;
         }
+        d->surface.image_count = 0;
         for (uint32_t i = 0; i < Surface::kMaxFramesInFlight; ++i) {
             d->semaphore_pool.erase(d->surface.acquire_semaphores[i]);
         }
