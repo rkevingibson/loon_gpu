@@ -20,9 +20,7 @@ static Dimension3D parse_dim(std::string_view str) {
 
 // TODO: This is super hacky, need better testing around it.
 // Would like to not need it at all, but what can ya do.
-ShaderMetadata parse_metadata(Arena            arena,
-                              Span<const char> metal_source,
-                              Span<const char> entry_point) {
+ShaderMetadata parse_metadata(Span<const char> metal_source, Span<const char> entry_point) {
     // First, look for a copy of "entry_point", then go backwards to see if it's preceeded by
     // "void" - this is the kernel definition.
     const std::string_view source(metal_source.begin(), metal_source.end());
