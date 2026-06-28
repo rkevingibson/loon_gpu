@@ -909,7 +909,6 @@ static FeaturesAndExtensions get_supported_features(
 }
 
 static LogicalDeviceCreateResult create_logical_device(
-    const DeviceDesc&         desc,
     Arena                     arena,
     const PhysicalDeviceInfo& physical_device_info) {
     float                         queue_priority = 1.0f;
@@ -1051,7 +1050,7 @@ Device create_device(const DeviceDesc& desc) {
     VkDevice       logical_device = VK_NULL_HANDLE;
     DeviceFeatures features{};
     if (result == VK_SUCCESS) {
-        auto l         = create_logical_device(desc, init_arena, physical_device_info);
+        auto l         = create_logical_device(init_arena, physical_device_info);
         result         = l.result;
         logical_device = l.logical_device;
         features       = l.features;
@@ -1541,8 +1540,6 @@ SurfaceTextureInfo get_current_texture(Device d) {
 }
 
 SurfaceStatus present(Device d, Queue q) {
-    auto presenting_texture_handle = d->surface.swapchain_images[d->surface.current_image_idx];
-
     auto s = d->semaphore_pool[d->surface.present_semaphores[d->surface.current_image_idx]];
     VkPresentInfoKHR present_info{
         .sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
@@ -2455,12 +2452,12 @@ Queue get_queue(Device d, QueueType type) {
 
 // MARK: Sempahores
 
-Handle<Semaphore> create_semaphore(Device d, uint64_t initValue) {
+Handle<Semaphore> create_semaphore(Device d, uint64_t init_value) {
     VkSemaphoreTypeCreateInfo semaphore_type{
         .sType         = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
         .pNext         = nullptr,
         .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE,
-        .initialValue  = 0,
+        .initialValue  = init_value,
     };
 
     VkSemaphoreCreateInfo timeline_create_info{
@@ -2821,7 +2818,10 @@ void queue_submit(Queue                     q,
     d->api.vkQueueSubmit2(q->queue, 1, &submit_info, VK_NULL_HANDLE);
 }
 
-void queue_cancel(Queue q, Span<const Handle<CommandBuffer>> commandBuffers) {}
+void queue_cancel(Queue q, Span<const Handle<CommandBuffer>> command_buffers) {
+    (void)q;
+    (void)command_buffers;
+}
 
 void queue_on_submitted_work_completed(Queue q, Function<void>&& fn) {
     q->pending_events.emplace_back(

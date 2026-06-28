@@ -397,6 +397,7 @@ void device_wait_for_idle(Device d) {
 
 // MARK: Surface functions
 SurfaceCapabilities get_surface_capabilities(Device d) {
+    (void)d;
     return SurfaceCapabilities{
         .usages  = UsageFlags::ColorAttachment | UsageFlags::TransferDst | UsageFlags::Storage,
         .formats = Surface::kSwapchainFormats,
@@ -444,6 +445,7 @@ SurfaceTextureInfo get_current_texture(Device d) {
 }
 
 SurfaceStatus present(Device d, Queue queue) {
+    (void)queue;
     d->surface.current_drawable->present();
     d->surface.current_drawable = nullptr;
     d->texture_pool.erase(d->surface.current_texture);
@@ -457,6 +459,7 @@ GpuPtr malloc(Device d, size_t bytes, Memory memory) {
 }
 
 GpuPtr malloc(Device d, size_t bytes, size_t align, Memory memory) {
+    (void)align;  // TODO: Can we do alignment on MTL? Do we need to?
     id<MTL::HeapDescriptor> heap_info = make_id<MTL::HeapDescriptor>();
     heap_info->setType(MTL::HeapTypePlacement);
     heap_info->setStorageMode(memory == Memory::Gpu ? MTL::StorageModePrivate
@@ -762,9 +765,7 @@ Handle<Pipeline> create_compute_pipeline(Device                             d,
         return {};
     }
 
-    const auto metadata = parse_metadata(*get_thread_local_arena(d),
-                                         compute.source.cast<const char>(),
-                                         compute.entry_point);
+    const auto metadata = parse_metadata(compute.source.cast<const char>(), compute.entry_point);
 
     return d->pipeline_pool.emplace({
         .render_pipeline  = nullptr,
@@ -1009,6 +1010,7 @@ static CommandBufferImpl* get_command_buffer(Queue q, CommandPool* pool) {
 }
 
 Queue get_queue(Device d, QueueType type) {
+    (void)type;  // TODO: Support multiple queues.
     if (!d->queue.command_queue) {
         d->queue = {
             .command_queue  = NS::TransferPtr(d->device->newMTL4CommandQueue()),
@@ -1075,7 +1077,10 @@ void queue_submit(Queue                     q,
     if (signal_drawable) { q->command_queue->signalDrawable(d->surface.current_drawable.get()); }
 }
 
-void queue_cancel(Queue q, Span<const Handle<CommandBuffer>> command_buffers) {}
+void queue_cancel(Queue q, Span<const Handle<CommandBuffer>> command_buffers) {
+    (void)q;
+    (void)command_buffers;
+}
 
 void queue_on_submitted_work_completed(Queue q, Function<void>&& fn) {
     q->pending_events.emplace_back(
@@ -1196,6 +1201,8 @@ void cmd_copy_from_texture(CommandBuffer                cmd,
 
 void cmd_set_texture_heap(CommandBuffer cmd, Handle<TextureHeap> heap) {
     // This is currently a NOOP since all textures are in the global residency set.
+    (void)cmd;
+    (void)heap;
 }
 
 void cmd_barrier(CommandBuffer cmd, StageFlags before, StageFlags after) {
@@ -1447,6 +1454,7 @@ void cmd_draw_indexed_instanced_indirect_multi(CommandBuffer                cmd,
         cmd->device,
         false,
         "gpu::cmd_draw_indexed_instanced_indirect_multi: Multidraw not supported on metal.");
+    (void)args;
 }
 
 void cmd_wait_for_surface_texture(CommandBuffer cmd) {
