@@ -172,7 +172,7 @@ ParticleEmitter::~ParticleEmitter() {
     m_ring_buffer = RingBuffer();
 }
 
-bool ParticleEmitter::Update(const UpdateInfo& info) {
+bool ParticleEmitter::update(const UpdateInfo& info) {
     // CPU-side update, construct GPU arguments.
 
     loon::imgui::NewFrame();

@@ -13,7 +13,7 @@ class ManyCubes : public Example {
     ManyCubes(const WindowState& window_state);
     ~ManyCubes() override;
 
-    bool Update(const UpdateInfo& window) override;
+    bool update(const UpdateInfo& window) override;
 
    private:
     Handle<Pipeline>          m_render_pipeline;

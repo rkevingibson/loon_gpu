@@ -176,7 +176,7 @@ TexturedCube::TexturedCube(const WindowState& window_state) : Example(window_sta
 
 TexturedCube::~TexturedCube() = default;
 
-bool TexturedCube::Update(const UpdateInfo& info) {
+bool TexturedCube::update(const UpdateInfo& info) {
     // Update constant data
     auto args = reinterpret_cast<ShaderArgs*>(gpu::get_host_pointer(m_device, m_constant_buffer)) +
                 (m_frame_idx % 3);

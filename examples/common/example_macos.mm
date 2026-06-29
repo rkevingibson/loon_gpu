@@ -99,7 +99,7 @@
   }
 
   ImGui_ImplOSX_NewFrame(self.view);
-  current_example->Tick(self->window_state);
+  current_example->tick(self->window_state);
 }
 
 - (void)mtkView:(MTKView *)view drawableSizeWillChange:(CGSize)size {

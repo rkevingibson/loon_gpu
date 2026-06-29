@@ -129,7 +129,7 @@ Example::~Example() {
     gpu::destroy_device(m_device);
 }
 
-void Example::Tick(const WindowState& window) {
+void Example::tick(const WindowState& window) {
     auto surface_texture = gpu::get_current_texture(m_device);
     if (surface_texture.status == SurfaceStatus::OutOfDate ||
         surface_texture.status == SurfaceStatus::Suboptimal) {
@@ -139,7 +139,7 @@ void Example::Tick(const WindowState& window) {
         return;
     }
 
-    this->Update({
+    this->update({
         .color_format  = m_swapchain_format,
         .depth_format  = m_depth_format,
         .color_texture = surface_texture.texture,

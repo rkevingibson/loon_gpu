@@ -136,7 +136,7 @@ HelloCube::HelloCube(const WindowState& window_state) : Example(window_state) {
         });
 }
 
-bool HelloCube::Update(const UpdateInfo& info) {
+bool HelloCube::update(const UpdateInfo& info) {
     // Update constant data
     auto args = reinterpret_cast<ShaderArgs*>(gpu::get_host_pointer(m_device, m_constant_buffer));
     args[m_frame_idx % 3].camera = CameraInfo{

@@ -38,7 +38,7 @@ HelloTriangle::HelloTriangle(const WindowState& window_state) : Example(window_s
     assert(m_render_pipeline.h != 0);
 }
 
-bool HelloTriangle::Update(const UpdateInfo& info) {
+bool HelloTriangle::update(const UpdateInfo& info) {
     auto cmd = gpu::queue_start_command_recording(m_queue);
 
     gpu::cmd_wait_for_surface_texture(cmd);

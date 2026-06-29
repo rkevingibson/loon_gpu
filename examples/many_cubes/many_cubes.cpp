@@ -80,20 +80,19 @@ ManyCubes::ManyCubes(const WindowState& window_state) : Example(window_state) {
     ShaderModule shader         = window_state.shader_loader->load_module("many_cubes");
     const auto   vertex_spirv   = get_spirv(shader.get(), "vertex_main");
     const auto   fragment_spirv = get_spirv(shader.get(), "fragment_main");
-
-    m_render_pipeline = gpu::create_graphics_pipeline(
+    m_render_pipeline           = gpu::create_graphics_pipeline(
         m_device,
         {
-            .source      = Span(vertex_spirv.data(), vertex_spirv.size()).as_bytes(),
-            .entry_point = "vertex_main"_sv,
+                      .source      = Span(vertex_spirv.data(), vertex_spirv.size()).as_bytes(),
+                      .entry_point = "vertex_main"_sv,
         },
         {
-            .source      = Span(fragment_spirv.data(), fragment_spirv.size()).as_bytes(),
-            .entry_point = "fragment_main"_sv,
+                      .source      = Span(fragment_spirv.data(), fragment_spirv.size()).as_bytes(),
+                      .entry_point = "fragment_main"_sv,
         },
         RasterDesc{
-            .depth_format  = loon::gpu::Format::Depth32Float,
-            .color_targets = {{.format = m_swapchain_format}},
+                      .depth_format  = loon::gpu::Format::Depth32Float,
+                      .color_targets = {{.format = m_swapchain_format}},
         });
 
     assert(m_render_pipeline.h != 0);
@@ -183,7 +182,7 @@ ManyCubes::~ManyCubes() {
 }
 
 
-bool ManyCubes::Update(const UpdateInfo& info) {
+bool ManyCubes::update(const UpdateInfo& info) {
     // Imgui:
 
     loon::imgui::NewFrame();

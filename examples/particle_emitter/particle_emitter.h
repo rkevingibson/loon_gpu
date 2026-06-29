@@ -34,7 +34,7 @@ class ParticleEmitter : public Example {
     ~ParticleEmitter() override;
 
    private:
-    bool Update(const UpdateInfo& info) override;
+    bool update(const UpdateInfo& info) override;
 
     Handle<DepthStencilState> m_depth_stencil_state;
     Handle<TextureHeap>       m_texture_heap;

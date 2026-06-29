@@ -11,7 +11,7 @@ class HelloCube : public Example {
     ~HelloCube() override = default;
 
    private:
-    bool Update(const UpdateInfo& info) override;
+    bool update(const UpdateInfo& info) override;
 
     Handle<Pipeline> m_render_pipeline;
     uint64_t         m_frame_idx = 0;

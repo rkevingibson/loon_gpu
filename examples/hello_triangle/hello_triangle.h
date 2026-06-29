@@ -11,7 +11,7 @@ class HelloTriangle : public Example {
     ~HelloTriangle() override = default;
 
    protected:
-    bool Update(const UpdateInfo& window) override;
+    bool update(const UpdateInfo& window) override;
 
    private:
     Handle<Pipeline> m_render_pipeline;

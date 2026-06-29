@@ -9,7 +9,7 @@ class TexturedCube : public Example {
    public:
     TexturedCube(const WindowState& window_state);
     ~TexturedCube() override;
-    bool Update(const UpdateInfo& info) override;
+    bool update(const UpdateInfo& info) override;
 
    private:
     static constexpr uint64_t kMaxFramesInFlight = 3;

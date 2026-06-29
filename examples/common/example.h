@@ -27,7 +27,7 @@ class Example {
    public:
     Example(const WindowState& window_state);
     virtual ~Example();
-    void Tick(const WindowState& window);
+    void tick(const WindowState& window);
 
    protected:
     struct UpdateInfo {
@@ -38,18 +38,18 @@ class Example {
         loon::gpu::Dimension2D                texture_size;
     };
 
-    virtual bool Update(const UpdateInfo& info) = 0;
+    virtual bool update(const UpdateInfo& info) = 0;
 
     loon::gpu::Device m_device;
     loon::gpu::Queue  m_queue;
     loon::gpu::Format m_swapchain_format;
 
    private:
-    void              recreate_swapchain(uint32_t width, uint32_t height);
-    uint32_t          m_swapchain_width;
-    uint32_t          m_swapchain_height;
-    loon::gpu::Format m_depth_format = loon::gpu::Format::Depth32Float;
+    void recreate_swapchain(uint32_t width, uint32_t height);
 
+    loon::gpu::Format                     m_depth_format = loon::gpu::Format::Depth32Float;
+    uint32_t                              m_swapchain_width;
+    uint32_t                              m_swapchain_height;
     loon::gpu::Handle<loon::gpu::Texture> m_depth_texture;
 };
 
