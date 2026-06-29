@@ -33,19 +33,10 @@ class ParticleEmitter : public Example {
     ParticleEmitter(const WindowState& window_state);
     ~ParticleEmitter() override;
 
-    void Update(const WindowState& window) override;
-
    private:
-    void recreate_swapchain(uint32_t width, uint32_t height);
-
-    Device   m_device;
-    Queue    m_queue;
-    Format   m_swapchain_format;
-    uint32_t m_swapchain_width  = 0;
-    uint32_t m_swapchain_height = 0;
+    bool update(const UpdateInfo& info) override;
 
     Handle<DepthStencilState> m_depth_stencil_state;
-    Handle<Texture>           m_depth_texture{0};
     Handle<TextureHeap>       m_texture_heap;
 
     Handle<Pipeline> m_reset_sim_pipeline;

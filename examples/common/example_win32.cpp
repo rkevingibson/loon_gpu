@@ -213,7 +213,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
             current_example  = create_example(selected_example, window_state);
         }
 
-        current_example->Update(window_state);
+        current_example->tick(window_state);
     }
 
     ImGui_ImplWin32_Shutdown();

@@ -54,23 +54,7 @@ static Format select_surface_format(const loon::gpu::SurfaceCapabilities& surfac
     return surface_capabilities.formats[0];
 }
 
-ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
-    m_device = loon::gpu::create_device({
-        .gpu_preference         = GpuPreference::Discrete,
-        .native_window_handle   = window_state.native_window_handle,
-        .native_instance_handle = window_state.native_instance_handle,
-        .log_callback           = log_callback,
-        .log_userdata           = nullptr,
-        .log_level              = LogLevel::Debug,
-        .alloc_callback         = nullptr,
-        .alloc_userdata         = nullptr,
-    });
-
-    auto surface_capabilities = gpu::get_surface_capabilities(m_device);
-    m_swapchain_format        = select_surface_format(surface_capabilities);
-
-    recreate_swapchain(window_state.width, window_state.height);
-
+ParticleEmitter::ParticleEmitter(const WindowState& window_state) : Example(window_state) {
     // Load shaders and create render pipeline
     ShaderModule shader               = window_state.shader_loader->load_module("particle_emitter");
     const auto   get_compute_pipeline = [&](loon::gpu::Span<const char> name) -> Handle<Pipeline> {
@@ -116,8 +100,6 @@ ParticleEmitter::ParticleEmitter(const WindowState& window_state) {
         });
     assert(m_update_sim_pipeline.h != 0);
     assert(m_render_particle_pipeline.h != 0);
-
-    m_queue = gpu::get_queue(m_device);
 
     m_depth_stencil_state =
         gpu::create_depth_stencil_state(m_device,
@@ -188,46 +170,9 @@ ParticleEmitter::~ParticleEmitter() {
     gpu::device_wait_for_idle(m_device);
     loon::imgui::Shutdown();
     m_ring_buffer = RingBuffer();
-    destroy_device(m_device);
 }
 
-
-void ParticleEmitter::recreate_swapchain(uint32_t width, uint32_t height) {
-    gpu::device_wait_for_idle(m_device);
-    gpu::unconfigure_surface(m_device);
-    gpu::configure_surface(m_device,
-                           {
-                               .format       = m_swapchain_format,
-                               .usages       = loon::gpu::UsageFlags::ColorAttachment,
-                               .width        = width,
-                               .height       = height,
-                               .present_mode = PresentMode::Fifo,
-                           });
-    m_swapchain_width  = width;
-    m_swapchain_height = height;
-
-    // Recreate depth buffer as well
-    if (m_depth_texture) { gpu::free(m_device, m_depth_texture); }
-    m_depth_texture =
-        gpu::create_texture(m_device,
-                            {
-                                .type       = TextureType::Tex2D,
-                                .dimensions = {.x = width, .y = height, .z = 1},
-                                .format     = loon::gpu::Format::Depth32Float,
-                                .usage      = loon::gpu::UsageFlags::DepthStencilAttachment,
-                            });
-}
-
-void ParticleEmitter::Update(const WindowState& window) {
-    auto surface_texture = gpu::get_current_texture(m_device);
-    if (surface_texture.status == SurfaceStatus::OutOfDate ||
-        surface_texture.status == SurfaceStatus::Suboptimal) {
-        recreate_swapchain(window.width, window.height);
-        return;
-    } else if (surface_texture.status == SurfaceStatus::Error) {
-        return;
-    }
-
+bool ParticleEmitter::update(const UpdateInfo& info) {
     // CPU-side update, construct GPU arguments.
 
     loon::imgui::NewFrame();
@@ -269,8 +214,8 @@ void ParticleEmitter::Update(const WindowState& window) {
             .camera =
                 {
                     .projection =
-                        geometry::projection({.view_width  = (float)window.width,
-                                              .view_height = (float)window.height,
+                        geometry::projection({.view_width  = (float)info.texture_size.x,
+                                              .view_height = (float)info.texture_size.y,
                                               .y_fov       = geometry::radians_from_degrees(30.f),
                                               .depth_far   = 0.5f}),
                     .camera_from_world =
@@ -305,22 +250,22 @@ void ParticleEmitter::Update(const WindowState& window) {
                                {
                                    .color_attachments =
                                        RenderAttachment{
-                                           .texture     = surface_texture.texture,
+                                           .texture     = info.color_texture,
                                            .load_op     = LoadOp::Clear,
                                            .store_op    = StoreOp::Store,
                                            .clear_color = Color(0, 0, 0, 0),
                                        },
                                    .depth_attachment =
                                        RenderAttachment{
-                                           .texture     = m_depth_texture,
+                                           .texture     = info.depth_texture,
                                            .load_op     = LoadOp::Clear,
                                            .store_op    = StoreOp::Discard,
                                            .clear_color = Color(0, 0, 0, 0),
                                        },
                                    .render_area =
                                        {
-                                           .width  = m_swapchain_width,
-                                           .height = m_swapchain_height,
+                                           .width  = info.texture_size.x,
+                                           .height = info.texture_size.y,
                                        },
                                });
     gpu::cmd_push_debug_group(cmd, "Render particles"_sv);
@@ -341,10 +286,7 @@ void ParticleEmitter::Update(const WindowState& window) {
     gpu::cmd_finalize(cmd);
     gpu::queue_submit(m_queue, cmd);
 
-    const auto status = gpu::present(m_device, m_queue);
-    if (status == SurfaceStatus::OutOfDate || status == SurfaceStatus::Suboptimal) {
-        recreate_swapchain(window.width, window.height);
-    }
 
     gpu::queue_process_events(m_queue);
+    return true;
 }

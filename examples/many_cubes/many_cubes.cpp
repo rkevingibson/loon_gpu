@@ -75,46 +75,27 @@ static Format select_surface_format(const loon::gpu::SurfaceCapabilities& surfac
     return surface_capabilities.formats[0];
 }
 
-ManyCubes::ManyCubes(const WindowState& window_state) {
-    m_device = loon::gpu::create_device({
-        .gpu_preference         = GpuPreference::Discrete,
-        .native_window_handle   = window_state.native_window_handle,
-        .native_instance_handle = window_state.native_instance_handle,
-        .log_callback           = log_callback,
-        .log_userdata           = nullptr,
-        .log_level              = LogLevel::Debug,
-        .alloc_callback         = nullptr,
-        .alloc_userdata         = nullptr,
-    });
-
-    auto surface_capabilities = gpu::get_surface_capabilities(m_device);
-    m_swapchain_format        = select_surface_format(surface_capabilities);
-
-    recreate_swapchain(window_state.width, window_state.height);
-
+ManyCubes::ManyCubes(const WindowState& window_state) : Example(window_state) {
     // Load shaders and create render pipeline
     ShaderModule shader         = window_state.shader_loader->load_module("many_cubes");
     const auto   vertex_spirv   = get_spirv(shader.get(), "vertex_main");
     const auto   fragment_spirv = get_spirv(shader.get(), "fragment_main");
-
-    m_render_pipeline = gpu::create_graphics_pipeline(
+    m_render_pipeline           = gpu::create_graphics_pipeline(
         m_device,
         {
-            .source      = Span(vertex_spirv.data(), vertex_spirv.size()).as_bytes(),
-            .entry_point = "vertex_main"_sv,
+                      .source      = Span(vertex_spirv.data(), vertex_spirv.size()).as_bytes(),
+                      .entry_point = "vertex_main"_sv,
         },
         {
-            .source      = Span(fragment_spirv.data(), fragment_spirv.size()).as_bytes(),
-            .entry_point = "fragment_main"_sv,
+                      .source      = Span(fragment_spirv.data(), fragment_spirv.size()).as_bytes(),
+                      .entry_point = "fragment_main"_sv,
         },
         RasterDesc{
-            .depth_format  = loon::gpu::Format::Depth32Float,
-            .color_targets = {{.format = m_swapchain_format}},
+                      .depth_format  = loon::gpu::Format::Depth32Float,
+                      .color_targets = {{.format = m_swapchain_format}},
         });
 
     assert(m_render_pipeline.h != 0);
-
-    m_queue = gpu::get_queue(m_device);
 
     m_vertex_ptr = gpu::malloc(m_device, Cube::kSize, Memory::Gpu);
 
@@ -198,37 +179,10 @@ ManyCubes::ManyCubes(const WindowState& window_state) {
 ManyCubes::~ManyCubes() {
     gpu::device_wait_for_idle(m_device);
     loon::imgui::Shutdown();
-    m_ring_buffer = RingBuffer();
-    destroy_device(m_device);
 }
 
-void ManyCubes::recreate_swapchain(uint32_t width, uint32_t height) {
-    gpu::device_wait_for_idle(m_device);
-    gpu::unconfigure_surface(m_device);
-    gpu::configure_surface(m_device,
-                           {
-                               .format       = m_swapchain_format,
-                               .usages       = loon::gpu::UsageFlags::ColorAttachment,
-                               .width        = width,
-                               .height       = height,
-                               .present_mode = PresentMode::Fifo,
-                           });
-    m_swapchain_width  = width;
-    m_swapchain_height = height;
 
-    // Recreate depth buffer as well
-    if (m_depth_texture.h) { gpu::free(m_device, m_depth_texture); }
-    m_depth_texture =
-        gpu::create_texture(m_device,
-                            {
-                                .type       = TextureType::Tex2D,
-                                .dimensions = {.x = width, .y = height, .z = 1},
-                                .format     = loon::gpu::Format::Depth32Float,
-                                .usage      = loon::gpu::UsageFlags::DepthStencilAttachment,
-                            });
-}
-
-void ManyCubes::Update(const WindowState& window) {
+bool ManyCubes::update(const UpdateInfo& info) {
     // Imgui:
 
     loon::imgui::NewFrame();
@@ -251,14 +205,12 @@ void ManyCubes::Update(const WindowState& window) {
     ImGui::End();
     m_frame_idx++;
 
-
-
     // Set up global draw arguments, these are constant for all cubes drawn.
     GpuPtr camera = m_ring_buffer.append(
         m_frame_idx,
         CameraData{
-            .projection        = geometry::projection({.view_width  = (float)window.width,
-                                                       .view_height = (float)window.height,
+            .projection        = geometry::projection({.view_width  = (float)info.texture_size.x,
+                                                       .view_height = (float)info.texture_size.y,
                                                        .y_fov       = geometry::radians_from_degrees(30.f),
                                                        .depth_far   = 0.5f}),
             .camera_from_world = geometry::transform3d::identity()
@@ -274,14 +226,6 @@ void ManyCubes::Update(const WindowState& window) {
                                        });
 
     // Render
-    auto surface_texture = gpu::get_current_texture(m_device);
-    if (surface_texture.status == SurfaceStatus::OutOfDate ||
-        surface_texture.status == SurfaceStatus::Suboptimal) {
-        recreate_swapchain(window.width, window.height);
-        return;
-    } else if (surface_texture.status == SurfaceStatus::Error) {
-        return;
-    }
 
     auto frame_start = loon::Instant::now();
     auto cmd         = gpu::queue_start_command_recording(m_queue);
@@ -294,22 +238,22 @@ void ManyCubes::Update(const WindowState& window) {
                                {
                                    .color_attachments =
                                        RenderAttachment{
-                                           .texture     = surface_texture.texture,
+                                           .texture     = info.color_texture,
                                            .load_op     = LoadOp::Clear,
                                            .store_op    = StoreOp::Store,
                                            .clear_color = Color(0, 0, 0, 0),
                                        },
                                    .depth_attachment =
                                        RenderAttachment{
-                                           .texture     = m_depth_texture,
+                                           .texture     = info.depth_texture,
                                            .load_op     = LoadOp::Clear,
                                            .store_op    = StoreOp::Discard,
                                            .clear_color = Color(0, 0, 0, 0),
                                        },
                                    .render_area =
                                        {
-                                           .width  = m_swapchain_width,
-                                           .height = m_swapchain_height,
+                                           .width  = info.texture_size.x,
+                                           .height = info.texture_size.y,
                                        },
                                });
     gpu::cmd_set_front_face(cmd, FrontFace::CW);
@@ -397,7 +341,6 @@ void ManyCubes::Update(const WindowState& window) {
         }
     }
 
-
     loon::imgui::Render(cmd);
     gpu::cmd_end_render_pass(cmd);
     gpu::cmd_signal_surface_texture(cmd);
@@ -410,10 +353,5 @@ void ManyCubes::Update(const WindowState& window) {
 
     m_frame_time_average +=
         (m_frame_time_us[m_frame_idx % 300] - m_frame_time_us[(m_frame_idx + 1) % 300]) / 300;
-
-    const auto status = gpu::present(m_device, m_queue);
-    if (status == SurfaceStatus::OutOfDate || status == SurfaceStatus::Suboptimal) {
-        recreate_swapchain(window.width, window.height);
-    }
-    gpu::queue_process_events(m_queue);
+    return true;
 }

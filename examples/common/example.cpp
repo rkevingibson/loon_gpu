@@ -1,5 +1,7 @@
 #include "example.h"
 
+#include <gpu/loon_gpu.h>
+
 #include "filesystem.h"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -89,4 +91,93 @@ loon::Box<Example> create_example(ExampleName name, const WindowState& state) {
         case ExampleName::ManyCubes: return loon::make_box<ManyCubes>(state);
         default: return nullptr;
     }
+}
+
+using namespace loon;
+
+static Format select_surface_format(const loon::gpu::SurfaceCapabilities& surface_capabilities) {
+    for (Format f : surface_capabilities.formats) {
+        if (f == loon::gpu::Format::RGBA8UnormSrgb || f == loon::gpu::Format::BGRA8UnormSrgb) {
+            // Choose 8 bit srgb if we have it
+            return f;
+        }
+    }
+    return surface_capabilities.formats[0];
+}
+
+Example::Example(const WindowState& window) {
+    m_device = loon::gpu::create_device({
+        .gpu_preference         = loon::gpu::GpuPreference::Discrete,
+        .native_window_handle   = window.native_window_handle,
+        .native_instance_handle = window.native_instance_handle,
+        .log_callback           = log_callback,
+        .log_userdata           = nullptr,
+        .log_level              = LogLevel::Debug,
+        .alloc_callback         = nullptr,
+        .alloc_userdata         = nullptr,
+    });
+
+    auto surface_capabilities = gpu::get_surface_capabilities(m_device);
+    m_swapchain_format        = select_surface_format(surface_capabilities);
+
+    recreate_swapchain(window.width, window.height);
+
+    m_queue = gpu::get_queue(m_device);
+}
+
+Example::~Example() {
+    gpu::destroy_device(m_device);
+}
+
+void Example::tick(const WindowState& window) {
+    auto surface_texture = gpu::get_current_texture(m_device);
+    if (surface_texture.status == SurfaceStatus::OutOfDate ||
+        surface_texture.status == SurfaceStatus::Suboptimal) {
+        recreate_swapchain(window.width, window.height);
+        return;
+    } else if (surface_texture.status == SurfaceStatus::Error) {
+        return;
+    }
+
+    this->update({
+        .color_format  = m_swapchain_format,
+        .depth_format  = m_depth_format,
+        .color_texture = surface_texture.texture,
+        .depth_texture = m_depth_texture,
+        .texture_size =
+            {
+                .x = m_swapchain_width,
+                .y = m_swapchain_height,
+            },
+    });
+
+    const auto status = gpu::present(m_device, m_queue);
+    if (status == SurfaceStatus::OutOfDate || status == SurfaceStatus::Suboptimal) {
+        recreate_swapchain(window.width, window.height);
+    }
+}
+
+void Example::recreate_swapchain(uint32_t width, uint32_t height) {
+    gpu::unconfigure_surface(m_device);
+    gpu::configure_surface(m_device,
+                           {
+                               .format       = m_swapchain_format,
+                               .usages       = loon::gpu::UsageFlags::ColorAttachment,
+                               .width        = width,
+                               .height       = height,
+                               .present_mode = PresentMode::Fifo,
+                           });
+    m_swapchain_width  = width;
+    m_swapchain_height = height;
+
+    // Recreate depth buffer as well
+    if (m_depth_texture) { gpu::free(m_device, m_depth_texture); }
+    m_depth_texture =
+        gpu::create_texture(m_device,
+                            {
+                                .type       = TextureType::Tex2D,
+                                .dimensions = {.x = width, .y = height, .z = 1},
+                                .format     = m_depth_format,
+                                .usage      = loon::gpu::UsageFlags::DepthStencilAttachment,
+                            });
 }
