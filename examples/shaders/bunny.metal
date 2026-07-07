@@ -22,6 +22,7 @@ struct VertexStageOutput
 {
     float4 position [[position]];
     float2 uv;
+    float3 normal;
 };
 
 struct FragmentInput {
@@ -36,11 +37,12 @@ VertexStageOutput vertex_main(constant VertexInput* vert [[buffer(0)]], uint32_t
 
     output.position = mvp * float4(mesh.positions[vertexIdx], 1.0);
     output.uv = mesh.uvs[vertexIdx];
+    output.normal = mesh.normals[vertexIdx];
     return output;
 }
 
 [[fragment]]
 float4 fragment_main(VertexStageOutput vert [[stage_in]])
 {
-    return float4(1.0, 1.0, 0.0, 1.0);
+    return float4(0.5*vert.normal + 0.5, 1.0);
 }

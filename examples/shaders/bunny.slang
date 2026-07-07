@@ -45,5 +45,5 @@ VertexStageOutput vertex_main(uint32_t vertexIdx : SV_VertexID)
 [shader("fragment")]
 float4 fragment_main(VertexStageOutput vertex) : SV_Target
 {
-    return float4(1.0, 1.0, 0.0, 1.0);
+    return float4(vertex.uv, 0.0, 1.0);
 }

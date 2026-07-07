@@ -3,20 +3,27 @@
 #include <gpu/loon_gpu.h>
 
 #include "common/example.h"
+#include "gpu_args.h"
 using namespace loon::gpu;
+
+struct GpuMesh {
+    GpuPtr positions;
+    GpuPtr uvs;
+    GpuPtr normals;
+};
 
 class Bunny : public Example {
    public:
     Bunny(const WindowState& window_state);
     ~Bunny() override;
-    void Update(const WindowState& window) override;
+    bool update(const UpdateInfo& window) override;
 
    private:
-    void             recreate_swapchain(uint32_t width, uint32_t height);
-    Device           m_device;
-    Queue            m_queue;
-    Format           m_swapchain_format;
-    Handle<Pipeline> m_render_pipeline;
-    uint32_t         m_swapchain_width  = 0;
-    uint32_t         m_swapchain_height = 0;
+    Handle<Pipeline>          m_render_pipeline;
+    Handle<DepthStencilState> m_depth_stencil_state;
+    loon::RingBuffer          m_ring_buffer;
+    GpuMesh                   m_mesh;
+    GpuPtr                    m_mesh_indices;
+    uint32_t                  m_num_indices;
+    size_t                    m_frame_idx = 0;
 };

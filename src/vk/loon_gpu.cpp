@@ -1484,7 +1484,7 @@ bool configure_surface(Device d, const SurfaceConfiguration& config) {
 void unconfigure_surface(Device d) {
     if (d->surface.swapchain) {
         d->api.vkDestroySwapchainKHR(d->device, d->surface.swapchain, nullptr);
-        d->surface.swapchain = VK_NULL_HANDLE;
+        d->surface.swapchain         = VK_NULL_HANDLE;
         d->surface.current_image_idx = 0;
         for (int i = 0; i < d->surface.image_count; ++i) {
             d->semaphore_pool.erase(d->surface.present_semaphores[i]);
@@ -1499,11 +1499,10 @@ void unconfigure_surface(Device d) {
 }
 
 SurfaceTextureInfo get_current_texture(Device d) {
-    d->surface.frame_idx++;
     auto semaphore =
         d->surface.acquire_semaphores[d->surface.frame_idx % Surface::kMaxFramesInFlight];
-    const uint64_t wait_value = d->surface.frame_idx > Surface::kMaxFramesInFlight
-                                    ? d->surface.frame_idx - Surface::kMaxFramesInFlight
+    const uint64_t wait_value = d->surface.frame_idx >= Surface::kMaxFramesInFlight
+                                    ? d->surface.frame_idx + 1 - Surface::kMaxFramesInFlight
                                     : 0;
     wait_semaphore(d, d->surface.frame_semaphore, wait_value);
 
@@ -1553,7 +1552,7 @@ SurfaceStatus present(Device d, Queue q) {
     };
 
     VkResult res = d->api.vkQueuePresentKHR(q->queue, &present_info);
-
+    d->surface.frame_idx++;
     switch (res) {
         case VK_SUCCESS: return SurfaceStatus::Success;
         case VK_SUBOPTIMAL_KHR: return SurfaceStatus::Suboptimal;
@@ -2549,7 +2548,7 @@ CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
                  LogLevel::Error,
                  "Unable to get command pool - too many command buffers in flight at once");
     }
-
+    fprintf(stderr, "Acquire pool %p for idx %llu\n", pool->command_pool, frame_idx);
     return pool;
 }
 
@@ -2564,6 +2563,7 @@ static void release_command_pool(Queue q, CommandPool* pool) {
     while (!atomic_compare_exchange(&superpool.available_pools, &previous, desired)) {
         desired = previous | (1ll << idx);
     }
+    fprintf(stderr, "Releasing pool %p\n", pool->command_pool);
 }
 
 static CommandBufferImpl* get_command_buffer(Queue q, CommandPool* pool) {
@@ -2596,6 +2596,7 @@ static CommandBufferImpl* get_command_buffer(Queue q, CommandPool* pool) {
     result->wait_for_surface_texture = false;
     result->signal_surface_texture   = false;
     pool->buffer_free_idx++;
+    fprintf(stderr, "Acquiring cmd %p\n", result->buffer);
     return result;
 }
 
@@ -2770,7 +2771,7 @@ void queue_submit(Queue                     q,
                                      .sType       = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
                                      .pNext       = nullptr,
                                      .semaphore   = frame_semaphore,
-                                     .value       = d->surface.frame_idx,
+                                     .value       = d->surface.frame_idx + 1,
                                      .stageMask   = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
                                      .deviceIndex = 0,
                                  });

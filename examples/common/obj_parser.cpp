@@ -371,9 +371,8 @@ Box<ReindexedMesh> cleanup_mesh(Box<ObjMesh> mesh) {
             positions_out.emplace_back(p.x, p.y, p.z);
             texture_out.emplace_back(t.x, t.y);
             normal_out.emplace_back(n);
-        } else {
-            index_buffer_out.push_back(it->second);
         }
+        index_buffer_out.push_back(it->second);
     }
 
     return make_box<ReindexedMesh>(ReindexedMesh{
