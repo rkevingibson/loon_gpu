@@ -18,6 +18,7 @@ struct VertexStageOutput
 {
     float4 position : SV_Position;
     float2 uv;
+    float3 normal;
 };
 
 struct FragmentInput {
@@ -39,11 +40,12 @@ VertexStageOutput vertex_main(uint32_t vertexIdx : SV_VertexID)
 
     output.position = mul(mvp, float4(mesh.positions[vertexIdx], 1.0));
     output.uv = mesh.uvs[vertexIdx];
+    output.normal = mul(args.vert->camera.cameraFromWorld, float4(mesh.normals[vertexIdx], 1.0)).xyz;
     return output;
 }
 
 [shader("fragment")]
 float4 fragment_main(VertexStageOutput vertex) : SV_Target
 {
-    return float4(vertex.uv, 0.0, 1.0);
+    return float4(0.5*vertex.normal + 0.5, 1.0);
 }

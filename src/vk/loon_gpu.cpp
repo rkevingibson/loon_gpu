@@ -2548,7 +2548,6 @@ CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
                  LogLevel::Error,
                  "Unable to get command pool - too many command buffers in flight at once");
     }
-    fprintf(stderr, "Acquire pool %p for idx %llu\n", pool->command_pool, frame_idx);
     return pool;
 }
 
@@ -2563,7 +2562,6 @@ static void release_command_pool(Queue q, CommandPool* pool) {
     while (!atomic_compare_exchange(&superpool.available_pools, &previous, desired)) {
         desired = previous | (1ll << idx);
     }
-    fprintf(stderr, "Releasing pool %p\n", pool->command_pool);
 }
 
 static CommandBufferImpl* get_command_buffer(Queue q, CommandPool* pool) {
@@ -2596,7 +2594,6 @@ static CommandBufferImpl* get_command_buffer(Queue q, CommandPool* pool) {
     result->wait_for_surface_texture = false;
     result->signal_surface_texture   = false;
     pool->buffer_free_idx++;
-    fprintf(stderr, "Acquiring cmd %p\n", result->buffer);
     return result;
 }
 

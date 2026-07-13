@@ -56,10 +56,21 @@ Bunny::Bunny(const WindowState& window_state) : Example(window_state) {
 
     // Load model
 
-    auto         stream   = LineReader::from_file("/Users/kevin/Downloads/bunny.obj");
+    auto stream =
+        LineReader::from_file((window_state.file_paths.asset_directory + "bunny.obj").c_str());
     Box<ObjMesh> obj_file = loon::obj_parse(stream);
     auto         mesh     = loon::cleanup_mesh(std::move(obj_file));
 
+    // Center the model by subtracting the center of the bbox.
+
+    float3 bbox_min = float3::infinity();
+    float3 bbox_max = float3::negative_infinity();
+    for (auto& p : mesh->positions) {
+        bbox_min = float3::min(bbox_min, p);
+        bbox_max = float3::max(bbox_max, p);
+    }
+    const float3 center = 0.5f * (bbox_min + bbox_max);
+    for (auto& p : mesh->positions) { p = p - center; }
 
     m_ring_buffer = RingBuffer(m_device, 32 * 1024 * 1024, 3);
 
@@ -96,7 +107,6 @@ Bunny::Bunny(const WindowState& window_state) : Example(window_state) {
     gpu::cmd_finalize(cmd);
     gpu::queue_submit(m_queue, cmd);
 
-
     m_depth_stencil_state = gpu::create_depth_stencil_state(
         m_device,
         DepthStencilDesc{
@@ -117,15 +127,17 @@ bool Bunny::update(const UpdateInfo& info) {
         m_frame_idx,
         VertexArgs{
             .camera =
-                CameraInfo{.projection =
-                               geometry::projection({.view_width  = (float)info.texture_size.x,
-                                                     .view_height = (float)info.texture_size.y,
-                                                     .y_fov = geometry::radians_from_degrees(30.f),
-                                                     .depth_far = 0.5f}),
-                           .camera_from_world = geometry::transform3d::identity()
-                                                    .translated({0, 0, -5})
-                                                    .rotated({0, 0, 1}, radians_from_degrees(180))
-                                                    .to_matrix()},
+                CameraInfo{
+                    .projection =
+                        geometry::projection({.view_width  = (float)info.texture_size.x,
+                                              .view_height = (float)info.texture_size.y,
+                                              .y_fov       = geometry::radians_from_degrees(30.f),
+                                              .depth_far   = 0.5f}),
+                    .camera_from_world = geometry::transform3d::identity()
+                                             .translated({0, 0, -3})
+                                             .rotated_local({0, 0, 1}, radians_from_degrees(180))
+                                             .to_matrix(),
+                },
             .mesh = m_mesh,
         });
 

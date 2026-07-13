@@ -20,6 +20,23 @@ struct float2 {
 
 struct float3 {
     float x, y, z;
+
+    static float3 infinity() noexcept { return {INFINITY, INFINITY, INFINITY}; }
+    static float3 negative_infinity() noexcept { return {-INFINITY, -INFINITY, -INFINITY}; }
+    static float3 min(const float3& a, const float3& b) {
+        return {
+            a.x < b.x ? a.x : b.x,
+            a.y < b.y ? a.y : b.y,
+            a.z < b.z ? a.z : b.z,
+        };
+    }
+    static float3 max(const float3& a, const float3& b) {
+        return {
+            a.x > b.x ? a.x : b.x,
+            a.y > b.y ? a.y : b.y,
+            a.z > b.z ? a.z : b.z,
+        };
+    }
 };
 
 struct alignas(16) float4 {
@@ -109,6 +126,11 @@ inline constexpr float3 operator*(float a, const float3& b) {
 inline constexpr float3 operator+(const float3& a, const float3& b) {
     return {a.x + b.x, a.y + b.y, a.z + b.z};
 }
+
+inline constexpr float3 operator-(const float3& a, const float3& b) {
+    return {a.x - b.x, a.y - b.y, a.z - b.z};
+}
+
 
 inline constexpr float squaredLength(const float3& a) {
     return a.x * a.x + a.y * a.y + a.z * a.z;

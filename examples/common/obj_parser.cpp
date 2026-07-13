@@ -361,7 +361,7 @@ Box<ReindexedMesh> cleanup_mesh(Box<ObjMesh> mesh) {
     for (uint32_t idx_in = 0; idx_in < num_indices; ++idx_in) {
         const auto p_idx = mesh->face_pos_indices[idx_in];
         const auto t_idx = mesh->face_tex_indices[idx_in];
-        const auto n_idx = mesh->face_tex_indices[idx_in];
+        const auto n_idx = mesh->face_normal_indices[idx_in];
 
         auto [it, inserted] = remap_table.try_emplace({p_idx, t_idx, n_idx}, positions_out.size());
         if (inserted) {

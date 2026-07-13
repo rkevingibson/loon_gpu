@@ -64,10 +64,9 @@ FilePaths default_file_paths() {
     char        arena_buf[2048];
     loon::Arena arena(arena_buf, 2048);
     auto        default_shader_dir =
-        loon::filesystem::normalize_path(&arena,
-                                         (exec_dir + "/../../../examples/shaders/").c_str());
+        loon::filesystem::normalize_path(&arena, (exec_dir + "/shaders/").c_str());
     auto default_asset_dir =
-        loon::filesystem::normalize_path(&arena, (exec_dir + "/../../../assets/").c_str());
+        loon::filesystem::normalize_path(&arena, (exec_dir + "/assets/").c_str());
 
     return {
         .shader_directory = std::string(default_shader_dir.data(), default_shader_dir.size()),
