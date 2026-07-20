@@ -122,7 +122,7 @@ TexturedCube::TexturedCube(const WindowState& window_state) : Example(window_sta
                             TextureDesc{
                                 .dimensions = {(uint32_t)x, (uint32_t)y, 1},
                                 .format     = loon::gpu::Format::RGBA8UnormSrgb,
-                                .usage = UsageFlags(UsageFlags::Sampled | UsageFlags::TransferDst),
+                                .usage      = UsageFlags::Sampled | UsageFlags::TransferDst,
                             });
 
     m_texture_heap = gpu::create_texture_heap(m_device,

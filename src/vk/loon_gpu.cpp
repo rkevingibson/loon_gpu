@@ -971,6 +971,7 @@ static LogicalDeviceCreateResult create_logical_device(
     vulkan_12_features.bufferDeviceAddress  = true;
     vulkan_12_features.descriptorIndexing   = true;
     vulkan_12_features.shaderInt8           = true;
+    vulkan_12_features.shaderFloat16        = true;
     vulkan_12_features.storagePushConstant8 = true;
     vulkan_12_features.scalarBlockLayout    = true;
     vulkan_12_features.runtimeDescriptorArray                       = true;
@@ -991,6 +992,7 @@ static LogicalDeviceCreateResult create_logical_device(
         .features =
             {
                 .samplerAnisotropy = true,
+                .shaderInt16       = true,
             },
     };
 
@@ -1697,6 +1699,9 @@ void* get_host_pointer(Device d, GpuPtr ptr) {
 // MARK: Textures
 
 TextureSizeAlign get_texture_size_align(Device d, const TextureDesc& desc) {
+    const bool is_cubemap =
+        (desc.type == TextureType::TexCube || desc.type == TextureType::TexCubeArray);
+
     VkImageCreateInfo info{
         .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .pNext                 = nullptr,
@@ -1707,7 +1712,7 @@ TextureSizeAlign get_texture_size_align(Device d, const TextureDesc& desc) {
                                   .height = desc.dimensions.y,
                                   .depth  = desc.dimensions.z},
         .mipLevels             = desc.mip_count,
-        .arrayLayers           = desc.layer_count,
+        .arrayLayers           = is_cubemap ? 6 * desc.array_count : desc.array_count,
         .samples               = VK_SAMPLE_COUNT_1_BIT,  // TODO: Support multisampling
         .tiling                = VK_IMAGE_TILING_OPTIMAL,
         .usage                 = bridge_usage_flags(desc.usage),
@@ -1729,21 +1734,23 @@ TextureSizeAlign get_texture_size_align(Device d, const TextureDesc& desc) {
 }
 
 Handle<Texture> create_texture(Device d, const TextureDesc& desc, GpuPtr location) {
-    VkImageCreateInfo info{
-        .sType                 = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .pNext                 = nullptr,
-        .flags                 = 0,
-        .imageType             = bridge(desc.type),
-        .format                = bridge(desc.format),
-        .extent                = {.width  = desc.dimensions.x,
-                                  .height = desc.dimensions.y,
-                                  .depth  = desc.dimensions.z},
-        .mipLevels             = desc.mip_count,
-        .arrayLayers           = desc.layer_count,
-        .samples               = VK_SAMPLE_COUNT_1_BIT,  // TODO: Support multisampling
-        .tiling                = VK_IMAGE_TILING_OPTIMAL,
-        .usage                 = bridge_usage_flags(desc.usage),
-        .sharingMode           = VK_SHARING_MODE_EXCLUSIVE,
+    const bool is_cubemap =
+        (desc.type == TextureType::TexCube || desc.type == TextureType::TexCubeArray);
+    const VkImageCreateInfo info{
+        .sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .pNext       = nullptr,
+        .flags       = is_cubemap ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : VkImageCreateFlags(0),
+        .imageType   = bridge(desc.type),
+        .format      = bridge(desc.format),
+        .extent      = {.width  = desc.dimensions.x,
+                        .height = desc.dimensions.y,
+                        .depth  = desc.dimensions.z},
+        .mipLevels   = desc.mip_count,
+        .arrayLayers = is_cubemap ? 6 * desc.array_count : desc.array_count,
+        .samples     = VK_SAMPLE_COUNT_1_BIT,  // TODO: Support multisampling
+        .tiling      = VK_IMAGE_TILING_OPTIMAL,
+        .usage       = bridge_usage_flags(desc.usage),
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .queueFamilyIndexCount = 0,
         .initialLayout         = VK_IMAGE_LAYOUT_UNDEFINED,
     };
@@ -1844,7 +1851,6 @@ Handle<TextureHeap> create_texture_heap(Device d, const TextureHeapDesc& desc) {
         .sampler_bitset       = TwoLevelBitset(d->allocator, desc.sampler_count),
         .sampled_image_bitset = TwoLevelBitset(d->allocator, desc.texture_count),
         .rw_image_bitset      = TwoLevelBitset(d->allocator, desc.rw_texture_count),
-
         .samplers = Vector<VkSampler>(d->allocator, VkSampler{VK_NULL_HANDLE}, desc.sampler_count),
         .image_views    = Vector<VkImageView>(d->allocator, VkImageView{0}, desc.texture_count),
         .rw_image_views = Vector<VkImageView>(d->allocator, VkImageView{0}, desc.rw_texture_count),
@@ -1853,11 +1859,20 @@ Handle<TextureHeap> create_texture_heap(Device d, const TextureHeapDesc& desc) {
     return {handle};
 }
 
-TextureView add_texture_view_to_heap(Device                 d,
-                                     Handle<TextureHeap>    heap,
-                                     const TextureViewDesc& desc) {
-    auto& texture_heap = d->texture_heap_pool[heap];
-    auto  texture      = d->texture_pool[desc.texture];
+static VkImageView create_vk_texture_view(Device d, const TextureViewDesc& desc) {
+    auto& texture = d->texture_pool[desc.texture];
+
+    const bool view_is_cubemap =
+        desc.type == TextureType::TexCube || desc.type == TextureType::TexCubeArray;
+    const bool parent_is_cubemap = texture.vk_type == VK_IMAGE_VIEW_TYPE_CUBE ||
+                                   texture.vk_type == VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
+    if (view_is_cubemap && !parent_is_cubemap) {
+        LOON_LOG(d,
+                 LogLevel::Error,
+                 "Cannot make a cubemap view on a texture that was not created with type TexCube "
+                 "or TexCubeArray");
+        return VK_NULL_HANDLE;
+    }
 
     const VkImageViewCreateInfo info{
         .sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -1886,8 +1901,18 @@ TextureView add_texture_view_to_heap(Device                 d,
     if (!LOON_CHK(d,
                   d->api.vkCreateImageView(d->device, &info, nullptr, &image_view),
                   "gpu::add_texture_view_to_heap: Error creating image view")) {
-        return -1;
+        return VK_NULL_HANDLE;
     }
+    return image_view;
+}
+
+TextureView add_texture_view_to_heap(Device                 d,
+                                     Handle<TextureHeap>    heap,
+                                     const TextureViewDesc& desc) {
+    auto& texture_heap = d->texture_heap_pool[heap];
+
+    auto image_view = create_vk_texture_view(d, desc);
+    if (image_view == VK_NULL_HANDLE) { return -1; }
 
     uint32_t free_slot                  = texture_heap.sampled_image_bitset.set_leading_zero();
     texture_heap.image_views[free_slot] = image_view;
@@ -1920,37 +1945,9 @@ TextureView add_rw_texture_view_to_heap(Device                 d,
                                         Handle<TextureHeap>    heap,
                                         const TextureViewDesc& desc) {
     auto& texture_heap = d->texture_heap_pool[heap];
-    auto  texture      = d->texture_pool[desc.texture];
 
-    const VkImageViewCreateInfo info{
-        .sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-        .pNext    = nullptr,
-        .flags    = 0,
-        .image    = texture.vk_image,
-        .viewType = texture.vk_type,
-        .format   = bridge(desc.format),
-        .components =
-            {
-                VK_COMPONENT_SWIZZLE_IDENTITY,
-                VK_COMPONENT_SWIZZLE_IDENTITY,
-                VK_COMPONENT_SWIZZLE_IDENTITY,
-                VK_COMPONENT_SWIZZLE_IDENTITY,
-            },
-        .subresourceRange =
-            {
-                .aspectMask     = aspects_for_format(desc.format),
-                .baseMipLevel   = desc.base_mip,
-                .levelCount     = desc.mip_count,
-                .baseArrayLayer = desc.base_layer,
-                .layerCount     = desc.layer_count,
-            },
-    };
-    VkImageView image_view;
-    if (!LOON_CHK(d,
-                  d->api.vkCreateImageView(d->device, &info, nullptr, &image_view),
-                  "gpu::add_rw_texture_view_to_heap: Error creating image view")) {
-        return -1;
-    }
+    auto image_view = create_vk_texture_view(d, desc);
+    if (image_view == VK_NULL_HANDLE) { return -1; }
 
     uint32_t free_slot                     = texture_heap.rw_image_bitset.set_leading_zero();
     texture_heap.rw_image_views[free_slot] = image_view;
@@ -1968,7 +1965,7 @@ TextureView add_rw_texture_view_to_heap(Device                 d,
         .dstBinding       = kBindingSlotRWImages,
         .dstArrayElement  = free_slot,
         .descriptorCount  = 1,
-        .descriptorType   = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+        .descriptorType   = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
         .pImageInfo       = &image_info,
         .pBufferInfo      = nullptr,
         .pTexelBufferView = nullptr,

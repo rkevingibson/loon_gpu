@@ -740,11 +740,12 @@ struct RenderPassDesc {
 struct TextureDesc {
     TextureType type = TextureType::Tex2D;
     Dimension3D dimensions;
-    uint32_t    mip_count    = 1;
-    uint32_t    layer_count  = 1;
-    uint32_t    sample_count = 1;
-    Format      format       = Format::None;
-    UsageFlags  usage        = UsageFlags::None;
+    uint32_t    mip_count   = 1;
+    uint32_t    array_count = 1;  ///< Number of elements in the array (can only be != 1 if type is
+                                  ///< Tex2DArray or TexCubeArray)
+    uint32_t   sample_count = 1;
+    Format     format       = Format::None;
+    UsageFlags usage        = UsageFlags::None;
 };
 
 struct TextureHeapDesc {
@@ -755,6 +756,7 @@ struct TextureHeapDesc {
 
 struct TextureViewDesc {
     Handle<Texture> texture;
+    TextureType     type        = TextureType::Tex2D;
     Format          format      = Format::None;
     uint8_t         base_mip    = 0;
     uint8_t         mip_count   = 1;
@@ -965,6 +967,32 @@ void free(Device d, GpuPtr ptr);
 void* get_host_pointer(Device d, GpuPtr ptr);
 
 /**
+ * @defgroup Textures Textures
+ * ### Basics
+ * Textures are created with `create_texture()`, and have a specified type, format, and supported
+ * usages.
+ * In order to be used in a shader, a texture view must be created on a texture heap. Texture heaps
+ * are created with `create_texture_heap()`, and are bound to the current command buffer via
+ * `cmd_set_texture_heap()`. Note that switching texture heaps is a relatively heavy operation, and
+ * creating fewer large texture heap should be preferred over multiple smaller ones.
+ *
+ * ### Cubemaps, slices, arrays and views
+ * To create a cubemap texture, the original texture must be created with Type::TexCube or
+ * Type::TexCubeArray. 2D Texture views can be made from faces of cubemaps, but it is not supported
+ * to make cubemap views of 2d texture arrays.
+ *
+ * | Slice Index | Orientation |
+ * |:-----------:|:-----------:|
+ * |  6*i + 0    |     +X      |
+ * |  6*i + 1    |     -X      |
+ * |  6*i + 2    |     +Y      |
+ * |  6*i + 3    |     -Y      |
+ * |  6*i + 4    |     +Z      |
+ * |  6*i + 5    |     -Z      |
+ */
+
+/**
+ * @ingroup Textures
  * @brief Get the texture size align object
  *
  * @param d
@@ -974,6 +1002,7 @@ void* get_host_pointer(Device d, GpuPtr ptr);
 TextureSizeAlign get_texture_size_align(Device d, const TextureDesc& desc);
 
 /**
+ * @ingroup Textures
  * @brief Create a texture object.
  * Create a new new texture with the provided descriptor. If location != 0, then the texture is
  * allocated at that location in Gpu memory. Note that textures can only be created in memory
@@ -986,24 +1015,37 @@ TextureSizeAlign get_texture_size_align(Device d, const TextureDesc& desc);
  */
 Handle<Texture> create_texture(Device d, const TextureDesc& desc, GpuPtr location = 0);
 
+/**
+ * @brief Create a texture heap object
+ * @ingroup Textures
+ * Texture heaps are used to manage samplers and texture views, which are required to access texture
+ * data in samplers. They require setting an upper limit on how many textures are in a heap, but
+ * these limits can be quite large - in the 10s of thousands easily.
+ * @param d
+ * @param desc
+ * @return Handle<TextureHeap>
+ */
 Handle<TextureHeap> create_texture_heap(Device d, const TextureHeapDesc& desc);
 
 /**
- * @brief
+ * @brief Destroy a texture object.
+ * @ingroup Textures
  *
  * @param d
  */
 void free(Device d, Handle<Texture>);
 
 /**
- * @brief
+ * @brief Destroy a texture heap object.
+ * @ingroup Textures
  *
  * @param d
  */
 void free(Device d, Handle<TextureHeap>);
 
 /**
- * @brief
+ * @brief Add a read-only texture view to the specified texture heap.
+ * @ingroup Textures
  *
  * @param d
  * @param desc
@@ -1011,13 +1053,26 @@ void free(Device d, Handle<TextureHeap>);
  */
 TextureView add_texture_view_to_heap(Device d, Handle<TextureHeap>, const TextureViewDesc& desc);
 
+/**
+ * @brief Add a read-write texture view to the specified texture heap. RW views can be written to
+ * from shaders using image store operations.
+ * @ingroup Textures
+ *
+ * @param d
+ * @param desc
+ * @return TextureView
+ */
 TextureView add_rw_texture_view_to_heap(Device d, Handle<TextureHeap>, const TextureViewDesc& desc);
 
+/**
+ * @brief
+ * @ingroup Textures
+ *
+ * @param d
+ * @param sampler
+ * @return Sampler
+ */
 Sampler add_sampler_to_heap(Device d, Handle<TextureHeap>, const SamplerDesc& sampler);
-
-void remove_rw_texture_view_from_heap(Device d, Handle<TextureHeap>, TextureView);
-
-void remove_sampler_from_heap(Device d, Handle<TextureHeap>, Sampler);
 
 /**
  * @brief
@@ -1025,6 +1080,22 @@ void remove_sampler_from_heap(Device d, Handle<TextureHeap>, Sampler);
  * @param d
  */
 void remove_texture_view_from_heap(Device d, Handle<TextureHeap>, TextureView);
+
+/**
+ * @brief
+ * @ingroup Textures
+ *
+ * @param d
+ */
+void remove_rw_texture_view_from_heap(Device d, Handle<TextureHeap>, TextureView);
+
+/**
+ * @brief
+ * @ingroup Textures
+ *
+ * @param d
+ */
+void remove_sampler_from_heap(Device d, Handle<TextureHeap>, Sampler);
 
 
 // State objects
@@ -1228,9 +1299,9 @@ void cmd_copy_to_texture(CommandBuffer                cmd,
  * @brief Copy from a texture to gpu memory.
  *
  * @param cmd
- * @param destGpu
- * @param srcGpu
  * @param texture
+ * @param destGpu
+ * @param info
  */
 void cmd_copy_from_texture(CommandBuffer                cmd,
                            Handle<Texture>              texture,

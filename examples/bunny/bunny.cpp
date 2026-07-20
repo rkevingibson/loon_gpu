@@ -17,6 +17,7 @@
 #include "example.h"
 #include "geometry.h"
 #include "obj_parser.h"
+#include "stb_image.h"
 
 using namespace loon;
 using namespace geometry;
@@ -113,6 +114,101 @@ Bunny::Bunny(const WindowState& window_state) : Example(window_state) {
             .depth_mode = loon::gpu::DepthFlags::Write | loon::gpu::DepthFlags::Read,
             .depth_test = loon::gpu::Op::Greater,
         });
+
+    // Prepare an environment map for IBL rendering:
+
+    int    x = 0, y = 0, n = 0;
+    float* image_data =
+        stbi_loadf((window_state.file_paths.asset_directory + "sunny_rose_garden_2k.hdr").c_str(),
+                   &x,
+                   &y,
+                   &n,
+                   4);
+
+    Handle<Texture> equirectangular_hdr_map =
+        gpu::create_texture(m_device,
+                            TextureDesc{
+                                .dimensions = {(uint32_t)x, (uint32_t)y, 1},
+                                .format     = Format::RGBA32Float,
+                                .usage      = UsageFlags::Sampled | UsageFlags::TransferDst,
+                            });
+
+    auto texture_heap = create_texture_heap(m_device,
+                                            {
+                                                .texture_count    = 1024,
+                                                .rw_texture_count = 1024,
+                                                .sampler_count    = 1,
+                                            });
+
+    auto color_view = gpu::add_texture_view_to_heap(m_device,
+                                                    texture_heap,
+                                                    {
+                                                        .texture = equirectangular_hdr_map,
+                                                        .format  = Format::RGBA32Float,
+                                                    });
+
+
+    auto hdri_cubemap = gpu::create_texture(m_device,
+                                            TextureDesc{
+                                                .type       = TextureType::TexCube,
+                                                .dimensions = {512, 512, 1},
+                                                .format     = Format::RGBA16Float,
+                                                .usage = UsageFlags::Storage | UsageFlags::Sampled,
+                                            });
+
+    auto test_view = gpu::add_texture_view_to_heap(m_device,
+                                                   texture_heap,
+                                                   {
+                                                       .texture     = hdri_cubemap,
+                                                       .type        = TextureType::TexCube,
+                                                       .format      = Format::RGBA16Float,
+                                                       .base_layer  = 0,
+                                                       .layer_count = 6,
+                                                   });
+
+
+    auto equirectangular_to_cube_shader = window_state.shader_loader->load_module("cubemap");
+    auto equirectangular_to_cube_spirv =
+        get_spirv(equirectangular_to_cube_shader.get(), "equirectangular_to_cubemap");
+
+    auto equirectangular_to_cube_pipeline =
+        gpu::create_compute_pipeline(m_device,
+                                     {
+                                         .source      = Span(equirectangular_to_cube_spirv.data(),
+                                                        equirectangular_to_cube_spirv.size()),
+                                         .entry_point = "equirectangular_to_cubemap",
+                                     });
+
+    assert(equirectangular_to_cube_pipeline);
+
+    auto sampler = gpu::add_sampler_to_heap(m_device,
+                                            texture_heap,
+                                            {
+                                                .coord = SamplerCoords::Normalized,
+                                            });
+
+    cmd = gpu::queue_start_command_recording(m_queue);
+    gpu::cmd_set_pipeline(cmd, equirectangular_to_cube_pipeline);
+
+    struct ConvertArgs {
+        uint32_t         dim_x, dim_y;
+        gpu::TextureView input_texture;
+        gpu::Sampler     sampler;
+        gpu::TextureView output_texture;
+    };
+
+    auto args = m_ring_buffer.append(1,
+                                     ConvertArgs{
+                                         512,
+                                         512,
+                                         color_view,
+                                         sampler,
+                                         test_view,
+                                     });
+    gpu::cmd_set_texture_heap(cmd, texture_heap);
+    gpu::cmd_dispatch(cmd, args, {512 / 8, 512 / 8, 1});
+    gpu::cmd_finalize(cmd);
+    gpu::queue_submit(m_queue, cmd);
 }
 
 Bunny::~Bunny() {

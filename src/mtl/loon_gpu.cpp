@@ -538,7 +538,7 @@ TextureSizeAlign get_texture_size_align(Device d, const TextureDesc& desc) {
     info->setDepth(desc.dimensions.z);
     info->setMipmapLevelCount(desc.mip_count);
     info->setSampleCount(desc.sample_count);
-    info->setArrayLength(desc.layer_count);
+    info->setArrayLength(desc.array_count);
     info->setHazardTrackingMode(MTL::HazardTrackingModeUntracked);
     info->setUsage(bridge_texture_usage(desc.usage));
 
@@ -556,7 +556,7 @@ Handle<Texture> create_texture(Device d, const TextureDesc& desc, GpuPtr locatio
     info->setDepth(desc.dimensions.z);
     info->setMipmapLevelCount(desc.mip_count);
     info->setSampleCount(desc.sample_count);
-    info->setArrayLength(desc.layer_count);
+    info->setArrayLength(desc.array_count);
     info->setHazardTrackingMode(MTL::HazardTrackingModeUntracked);
     info->setUsage(bridge_texture_usage(desc.usage));
 
@@ -608,7 +608,24 @@ TextureView add_texture_view_to_heap(Device d, Handle<TextureHeap> h, const Text
     view_info->setLevelRange(NS::Range(desc.base_mip, desc.mip_count));
     view_info->setPixelFormat(bridge(desc.format));
     view_info->setSliceRange(NS::Range(desc.base_layer, desc.layer_count));
-    view_info->setTextureType(tex.texture->textureType());
+    view_info->setTextureType(bridge(desc.type));
+    const auto      index = heap.bitset.set_leading_zero();
+    MTL::ResourceID texture_view =
+        heap.pool->setTextureView(tex.texture.get(), view_info.get(), index);
+
+    return texture_view._impl;
+}
+
+TextureView add_rw_texture_view_to_heap(Device                 d,
+                                        Handle<TextureHeap>    h,
+                                        const TextureViewDesc& desc) {
+    auto&                          heap      = d->texture_heap_pool[h];
+    auto&                          tex       = d->texture_pool[desc.texture];
+    id<MTL::TextureViewDescriptor> view_info = make_id<MTL::TextureViewDescriptor>();
+    view_info->setLevelRange(NS::Range(desc.base_mip, desc.mip_count));
+    view_info->setPixelFormat(bridge(desc.format));
+    view_info->setSliceRange(NS::Range(desc.base_layer, desc.layer_count));
+    view_info->setTextureType(bridge(desc.type));
     const auto      index = heap.bitset.set_leading_zero();
     MTL::ResourceID texture_view =
         heap.pool->setTextureView(tex.texture.get(), view_info.get(), index);
