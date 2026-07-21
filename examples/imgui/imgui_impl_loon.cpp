@@ -60,6 +60,7 @@ static void SetupRenderState(ImDrawData*                   draw_data,
 
     // Bind shader
     gpu::cmd_set_depth_stencil_state(command_list, bd->depth_stencil_state);
+    gpu::cmd_set_texture_heap(command_list, bd->texture_heap);
     gpu::cmd_set_pipeline(command_list, bd->pipelineState);
     gpu::cmd_set_cull_mode(command_list, gpu::Cull::None);
 }

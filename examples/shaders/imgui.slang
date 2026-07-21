@@ -1,3 +1,5 @@
+import loon;
+
 struct Vertex {
     float2 pos;
     float2 uv;

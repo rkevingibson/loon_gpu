@@ -1879,7 +1879,7 @@ static VkImageView create_vk_texture_view(Device d, const TextureViewDesc& desc)
         .pNext    = nullptr,
         .flags    = 0,
         .image    = texture.vk_image,
-        .viewType = texture.vk_type,
+        .viewType = bridge_view_type(desc.type),
         .format   = bridge(desc.format),
         .components =
             {
@@ -2001,7 +2001,7 @@ Sampler add_sampler_to_heap(Device d, Handle<TextureHeap> heap, const SamplerDes
         .pTexelBufferView = nullptr,
     };
     d->api.vkUpdateDescriptorSets(d->device, 1, &write, 0, nullptr);
-    return 0;
+    return free_slot;
 }
 
 void free(Device d, Handle<Texture> t) {

@@ -20,6 +20,7 @@ float2 sphere_pos_to_equirectangular_uv(float3 v)
 [numthreads(8,8,1)]
 void equirectangular_to_cubemap(uniform EquirectangularToCubemapArgs* args, uint3 gid: SV_DispatchThreadID)
 {
+    static DescriptorHandle<SamplerState> sampler = {uint2(0, 0)};
     // Use face_idx & gid to compute a 3d position on the sphere.
     float2 face_pos = float2(gid.xy) / args->resolution - 0.5; // Map to (-0.5,0.5) on the face.
     float3 cube_pos[6] = {
@@ -36,7 +37,7 @@ void equirectangular_to_cubemap(uniform EquirectangularToCubemapArgs* args, uint
     {
         float3 sphere_pos = normalize(cube_pos[face_idx]);
         float2 uv = sphere_pos_to_equirectangular_uv(sphere_pos);
-        float4 color = args->input_texture.SampleLevel(args->sampler, uv, 0.0);
+        float4 color = args->input_texture.SampleLevel(sampler, uv, 0.0);
         args->output_texture.Store(uint3(gid.x, gid.y, face_idx), half4(color));
     }
 }
