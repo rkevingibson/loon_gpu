@@ -20,6 +20,7 @@ class Bunny : public Example {
 
    private:
     Handle<Pipeline>          m_render_pipeline;
+    Handle<Pipeline>          m_skybox_pipeline;
     Handle<DepthStencilState> m_depth_stencil_state;
     loon::RingBuffer          m_ring_buffer;
     GpuMesh                   m_mesh;
@@ -29,7 +30,9 @@ class Bunny : public Example {
 
     Handle<TextureHeap> m_texture_heap;
     Handle<Texture>     m_hdri_cubemap;
+    TextureView         m_skybox_view;
+    Sampler             m_sampler;
 
     // Debugging data:
-    TextureView m_debug_cubemap_face;
+    TextureView m_debug_cubemap_faces[6];
 };

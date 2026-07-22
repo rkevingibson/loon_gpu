@@ -73,7 +73,7 @@ static inline void SafeRelease(T*& res) {
 
 static void DestroyTexture(ImTextureData* tex) {
     if (ImGui_ImplLoon_Texture* backend_tex = (ImGui_ImplLoon_Texture*)tex->BackendUserData) {
-        IM_ASSERT(backend_tex->tex_heap_idx == (uint32_t)tex->TexID - 1);
+        IM_ASSERT(backend_tex->tex_heap_idx == (uint32_t)tex->TexID);
         ImGui_ImplLoon_Data* bd = GetBackendData();
 
         // Free the texture and remove it from the heap.
@@ -121,7 +121,7 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
                                           });
         // Store identifiers
         // Because invalid tex id == 0, we add one here and subtract on retrieval.
-        tex->SetTexID((ImTextureID)backend_tex->tex_heap_idx + 1);
+        tex->SetTexID((ImTextureID)backend_tex->tex_heap_idx);
         tex->BackendUserData = backend_tex;
     }
 
@@ -449,7 +449,7 @@ void Render(gpu::CommandBuffer cmd) {
                                           });
 
                 // Bind texture, Draw
-                auto        tex_id     = (uint64_t)pcmd->GetTexID() - 1;
+                auto        tex_id     = (uint64_t)pcmd->GetTexID();
                 gpu::GpuPtr vertex_buf = global_vtx_ptr + (pcmd->VtxOffset * sizeof(ImDrawVert));
                 gpu::GpuPtr index_buf  = global_idx_ptr + (pcmd->IdxOffset * sizeof(ImDrawIdx));
 
