@@ -32,9 +32,12 @@ class Bunny : public Example {
 
     Handle<TextureHeap> m_texture_heap;
     Handle<Texture>     m_hdri_cubemap;
+    Handle<Texture>     m_irradiance_cubemap;
     TextureView         m_skybox_view;
+    TextureView         m_irradiance_view;
     Sampler             m_sampler;
 
     // Debugging data:
     TextureView m_debug_cubemap_faces[6];
+    TextureView m_debug_irradiance_faces[6];
 };

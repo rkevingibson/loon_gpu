@@ -782,6 +782,7 @@ Handle<Pipeline> create_compute_pipeline(Device                             d,
         return {};
     }
 
+
     const auto metadata = parse_metadata(compute.source.cast<const char>(), compute.entry_point);
 
     return d->pipeline_pool.emplace({

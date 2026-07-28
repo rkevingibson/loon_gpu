@@ -41,7 +41,7 @@ VertexStageOutput vertex_main(uint32_t vertexIdx : SV_VertexID)
 
     output.position = mul(mvp, float4(mesh.positions[vertexIdx], 1.0));
     output.uv = mesh.uvs[vertexIdx];
-    output.normal = mul(args.vert->camera.camera_from_world, float4(mesh.normals[vertexIdx], 1.0)).xyz;
+    output.normal = mul(args.vert->mesh.world_from_mesh, float4(mesh.normals[vertexIdx], 1.0)).xyz;
     return output;
 }
 

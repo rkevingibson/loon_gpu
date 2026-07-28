@@ -33,11 +33,25 @@ struct VertexArgs {
     GpuMesh    mesh;
 };
 
+struct FragmentArgs {
+    TextureView irradiance_map;
+    Sampler     sampler;
+    float3      camera_pos_world;
+    float3      albedo;
+};
+
 struct SkyboxArgs {
-    float4x4 world_from_camera  = {};
-    float4x4 inverse_projection = {};
+    float4x4 world_from_camera = {};
+    float2   viewport_size     = {};
     GpuPtr   skybox;
     GpuPtr   sampler;
+};
+
+struct alignas(16) IrradianceCubemapFromCubemap {
+    uint32_t    width, height;
+    TextureView input_texture;
+    Sampler     sampler;
+    TextureView output_texture;
 };
 
 Bunny::Bunny(const WindowState& window_state) : Example(window_state) {
@@ -118,7 +132,7 @@ Bunny::Bunny(const WindowState& window_state) : Example(window_state) {
     m_mesh             = GpuMesh{
                     .world_from_mesh =
             geometry::transform3d::from_axis_angle_and_origin({0, 0, 1},
-                                                              geometry::radians_from_degrees(180),
+                                                              geometry::radians_from_degrees(0),
                                                               float3{0, 0, 0})
                 .to_matrix(),
                     .positions = mesh_buffer,
@@ -196,6 +210,34 @@ Bunny::Bunny(const WindowState& window_state) : Example(window_state) {
                                                        .layer_count = 6,
                                                   });
 
+    m_irradiance_cubemap =
+        gpu::create_texture(m_device,
+                            TextureDesc{
+                                .type       = TextureType::TexCube,
+                                .dimensions = {32, 32, 1},
+                                .format     = Format::RGBA16Float,
+                                .usage      = UsageFlags::Storage | UsageFlags::Sampled,
+                            });
+
+    m_irradiance_view = gpu::add_texture_view_to_heap(m_device,
+                                                      m_texture_heap,
+                                                      {
+                                                          .texture     = m_irradiance_cubemap,
+                                                          .type        = TextureType::TexCube,
+                                                          .format      = Format::RGBA16Float,
+                                                          .layer_count = 6,
+                                                      });
+
+    auto irradiance_write_view =
+        gpu::add_rw_texture_view_to_heap(m_device,
+                                         m_texture_heap,
+                                         {
+                                             .texture     = m_irradiance_cubemap,
+                                             .type        = TextureType::Tex2DArray,
+                                             .format      = Format::RGBA16Float,
+                                             .layer_count = 6,
+                                         });
+
     for (int i = 0; i < 6; ++i) {
         m_debug_cubemap_faces[i] = gpu::add_texture_view_to_heap(m_device,
                                                                  m_texture_heap,
@@ -205,6 +247,15 @@ Bunny::Bunny(const WindowState& window_state) : Example(window_state) {
                                                                      .format  = Format::RGBA16Float,
                                                                      .base_layer = (uint16_t)i,
                                                                  });
+        m_debug_irradiance_faces[i] =
+            gpu::add_texture_view_to_heap(m_device,
+                                          m_texture_heap,
+                                          {
+                                              .texture    = m_irradiance_cubemap,
+                                              .type       = TextureType::Tex2D,
+                                              .format     = Format::RGBA16Float,
+                                              .base_layer = (uint16_t)i,
+                                          });
     }
 
     auto equirectangular_to_cube_shader = window_state.shader_loader->load_module("cubemap");
@@ -220,6 +271,17 @@ Bunny::Bunny(const WindowState& window_state) : Example(window_state) {
                                      });
 
     assert(equirectangular_to_cube_pipeline);
+
+    auto cube_to_irradiance_cube_spirv =
+        get_spirv(equirectangular_to_cube_shader.get(), "irradiance_cubemap_from_cubemap");
+    auto cube_to_irradiance_cube_pipeline =
+        gpu::create_compute_pipeline(m_device,
+                                     {
+                                         .source      = Span(cube_to_irradiance_cube_spirv.data(),
+                                                        cube_to_irradiance_cube_spirv.size()),
+                                         .entry_point = "irradiance_cubemap_from_cubemap",
+                                     });
+    assert(cube_to_irradiance_cube_pipeline);
 
     const auto skybox_vertex_spirv =
         get_spirv(equirectangular_to_cube_shader.get(), "skybox_vertex");
@@ -249,7 +311,6 @@ Bunny::Bunny(const WindowState& window_state) : Example(window_state) {
                                          });
 
     cmd = gpu::queue_start_command_recording(m_queue);
-    gpu::cmd_set_pipeline(cmd, equirectangular_to_cube_pipeline);
 
     struct alignas(64) ConvertArgs {
         uint32_t         dim_x, dim_y, pad1, pad2;
@@ -270,6 +331,15 @@ Bunny::Bunny(const WindowState& window_state) : Example(window_state) {
                                          .output_texture = test_view,
                                      });
 
+    auto irradiance_args = m_ring_buffer.append(1,
+                                                IrradianceCubemapFromCubemap{
+                                                    .width          = 32,
+                                                    .height         = 32,
+                                                    .input_texture  = m_skybox_view,
+                                                    .sampler        = m_sampler,
+                                                    .output_texture = irradiance_write_view,
+                                                });
+
     gpu::cmd_copy_to_texture(cmd,
                              hdri_gpu_ptr,
                              equirectangular_hdr_map,
@@ -278,7 +348,11 @@ Bunny::Bunny(const WindowState& window_state) : Example(window_state) {
                              });
     gpu::cmd_barrier(cmd, StageFlags::Transfer, StageFlags::Compute);
     gpu::cmd_set_texture_heap(cmd, m_texture_heap);
+    gpu::cmd_set_pipeline(cmd, equirectangular_to_cube_pipeline);
     gpu::cmd_dispatch(cmd, args, {1024 / 8, 1024 / 8, 1});
+    gpu::cmd_barrier(cmd, StageFlags::Compute, StageFlags::Compute);
+    gpu::cmd_set_pipeline(cmd, cube_to_irradiance_cube_pipeline);
+    gpu::cmd_dispatch(cmd, irradiance_args, {32 / 8, 32 / 8, 1});
     gpu::cmd_finalize(cmd);
     gpu::queue_submit(m_queue, cmd);
 }
@@ -314,6 +388,9 @@ bool Bunny::update(const UpdateInfo& info) {
     static float rotations[3] = {0, 0, 0};
     ImGui::SliderFloat3("Camera Rotations XYZ", rotations, 0.0f, 180.0);
 
+    show_cubemap(m_debug_cubemap_faces, 64);
+    show_cubemap(m_debug_irradiance_faces, 64);
+
     const auto camera_from_world =
         geometry::transform3d::identity()
             .translated({0, 0, -3})
@@ -326,27 +403,33 @@ bool Bunny::update(const UpdateInfo& info) {
                                                   .view_height = (float)info.texture_size.y,
                                                   .y_fov     = geometry::radians_from_degrees(30.f),
                                                   .depth_far = 1.f});
-    const auto inverse_projection =
-        projection.inverse();  // NOTE: This doesn't work - projection matrix isn't invertible.
 
 
-    auto args = m_ring_buffer.append(m_frame_idx,
+    auto args      = m_ring_buffer.append(m_frame_idx,
                                      VertexArgs{
-                                         .camera =
+                                              .camera =
                                              CameraInfo{
-                                                 .projection        = projection,
-                                                 .camera_from_world = camera_from_world.to_matrix(),
+                                                      .projection        = projection,
+                                                      .camera_from_world = camera_from_world.to_matrix(),
                                              },
-                                         .mesh = m_mesh,
+                                              .mesh = m_mesh,
                                      });
+    auto frag_args = m_ring_buffer.append(m_frame_idx,
+                                          FragmentArgs{
+                                              .irradiance_map   = m_irradiance_view,
+                                              .sampler          = m_sampler,
+                                              .camera_pos_world = world_from_camera.origin,
+                                              .albedo           = float3{0.5, 0.5, 0.5},
+                                          });
 
-    auto skybox_args = m_ring_buffer.append(m_frame_idx,
-                                            SkyboxArgs{
-                                                .world_from_camera  = world_from_camera.to_matrix(),
-                                                .inverse_projection = inverse_projection,
-                                                .skybox             = m_skybox_view,
-                                                .sampler            = m_sampler,
-                                            });
+    auto skybox_args = m_ring_buffer.append(
+        m_frame_idx,
+        SkyboxArgs{
+            .world_from_camera = world_from_camera.to_matrix(),
+            .viewport_size     = {(float)info.texture_size.x, (float)info.texture_size.y},
+            .skybox            = m_irradiance_view,
+            .sampler           = m_sampler,
+        });
 
     auto cmd = gpu::queue_start_command_recording(m_queue);
 
@@ -383,7 +466,7 @@ bool Bunny::update(const UpdateInfo& info) {
     gpu::cmd_draw_indexed_instanced(cmd,
                                     {
                                         .vertexDataGpu   = args,
-                                        .fragmentDataGpu = 0,
+                                        .fragmentDataGpu = frag_args,
                                         .indicesGpu      = m_mesh_indices,
                                         .indexCount      = m_num_indices,
                                         .type            = IndexType::UInt32,

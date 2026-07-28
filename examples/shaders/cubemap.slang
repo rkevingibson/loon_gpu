@@ -66,8 +66,7 @@ void equirectangular_to_cubemap(uniform EquirectangularToCubemapArgs* args, uint
 
 struct SkyboxArgs {
     float4x4 world_from_camera;
-    float4x4 inverse_projection;
-    float aspect_ratio; 
+    float2 viewport_size; 
 
     DescriptorHandle<TextureCube> skybox;
     DescriptorHandle<SamplerState> sampler; 
@@ -87,11 +86,12 @@ SkyboxVertexOutput skybox_vertex(uint32_t vertex_idx : SV_VertexID)
     SkyboxVertexOutput output = {};
     // Coords are (-1,-1), (3, -1), (-1,3)
     const float2 ndc_pos = 2.0*float2((vertex_idx << 1) & 2, vertex_idx & 2) - 1.0f;
-    // Unproject ndc position to world space - should multiply by fov ratio to keep things square
-    const float3 camera_pos = float3(ndc_pos, 1.0f);
+    // Unproject ndc position to world space - should multiply by aspect ratio to keep things square
+    float aspect_ratio = skybox_args.viewport_size.x/skybox_args.viewport_size.y;
+    const float3 camera_pos = float3(aspect_ratio*ndc_pos.x, -ndc_pos.y, -1.0f);
 
     output.position = float4(ndc_pos, 0.0f, 1.0f);
-    output.world_space_dir = mul(mul(skybox_args.world_from_camera, skybox_args.inverse_projection),float4(camera_pos, 0.0f)).xyz; 
+    output.world_space_dir = mul(skybox_args.world_from_camera,float4(camera_pos, 0.0f)).xyz; 
     return output;
 }
 
