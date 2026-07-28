@@ -15,9 +15,20 @@ void assert_float3_eq(int* utest_result, const float3& a, const float3& b) {
     ASSERT_NEAR(a.z, b.z, 1e-5);
 }
 
+void assert_float4_eq(int* utest_result, const float4& a, const float4& b) {
+    ASSERT_NEAR(a.x, b.x, 1e-5);
+    ASSERT_NEAR(a.y, b.y, 1e-5);
+    ASSERT_NEAR(a.z, b.z, 1e-5);
+    ASSERT_NEAR(a.w, b.w, 1e-5);
+}
+
 void assert_transform_eq(int* utest_result, const transform3d& a, const transform3d& b) {
     for (int i = 0; i < 3; ++i) { assert_float3_eq(utest_result, a.basis[i], b.basis[i]); }
     assert_float3_eq(utest_result, a.origin, b.origin);
+}
+
+void assert_matrix_eq(int* utest_result, const float4x4& a, const float4x4& b) {
+    for (int i = 0; i < 4; ++i) { assert_float4_eq(utest_result, a.columns[i], b.columns[i]); }
 }
 
 UTEST(geometry_tests, rotations) {
@@ -39,6 +50,32 @@ UTEST(geometry_tests, rotations) {
         auto        t2 = transform3d::identity().rotated(p.axis, p.angle);
         // When transform is identity, rotated and rotated local should be identical
         assert_transform_eq(utest_result, t1, t2);
+    }
+}
+
+UTEST(geometry_tests, matrix_inverse) {
+    struct AxisAngle {
+        float3 axis;
+        float  angle;
+    };
+
+    const AxisAngle test_params[] = {
+        {.axis = {1, 0, 0}, .angle = 0},
+        {.axis = {1, 0, 0}, .angle = kPi},
+        {.axis = {0, 1, 0}, .angle = kPi / 2},
+        {.axis = {0, 0, 1}, .angle = kPi / 2},
+        {.axis = normalized({1, 1, 0}), .angle = kPi / 2},
+    };
+
+    for (size_t i = 0; i < sizeof(test_params) / sizeof(test_params[0]); ++i) {
+        const auto& p        = test_params[i];
+        auto        tx       = transform3d::identity().rotated_local(p.axis, p.angle);
+        auto        inv      = tx.inverse();
+        auto        identity = tx * inv;
+        assert_transform_eq(utest_result, identity, transform3d::identity());
+        auto mtx     = tx.to_matrix();
+        auto mtx_inv = mtx.inverse();
+        assert_matrix_eq(utest_result, inv.to_matrix(), mtx_inv);
     }
 }
 

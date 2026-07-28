@@ -34,7 +34,8 @@ struct VertexArgs {
 };
 
 struct SkyboxArgs {
-    float4x4 camera_from_world = {};
+    float4x4 world_from_camera  = {};
+    float4x4 inverse_projection = {};
     GpuPtr   skybox;
     GpuPtr   sampler;
 };
@@ -115,6 +116,11 @@ Bunny::Bunny(const WindowState& window_state) : Example(window_state) {
 
     GpuPtr mesh_buffer = gpu::malloc(m_device, mesh_size, Memory::Gpu);
     m_mesh             = GpuMesh{
+                    .world_from_mesh =
+            geometry::transform3d::from_axis_angle_and_origin({0, 0, 1},
+                                                              geometry::radians_from_degrees(180),
+                                                              float3{0, 0, 0})
+                .to_matrix(),
                     .positions = mesh_buffer,
                     .uvs       = mesh_buffer + pos_size,
                     .normals   = mesh_buffer + pos_size + uv_size,
@@ -167,7 +173,7 @@ Bunny::Bunny(const WindowState& window_state) : Example(window_state) {
     m_hdri_cubemap = gpu::create_texture(m_device,
                                          TextureDesc{
                                              .type       = TextureType::TexCube,
-                                             .dimensions = {512, 512, 1},
+                                             .dimensions = {1024, 1024, 1},
                                              .format     = Format::RGBA16Float,
                                              .usage = UsageFlags::Storage | UsageFlags::Sampled,
                                          });
@@ -257,8 +263,8 @@ Bunny::Bunny(const WindowState& window_state) : Example(window_state) {
     stbi_image_free(image_data);
     auto args = m_ring_buffer.append(1,
                                      ConvertArgs{
-                                         .dim_x          = 512,
-                                         .dim_y          = 512,
+                                         .dim_x          = 1024,
+                                         .dim_y          = 1024,
                                          .input_texture  = color_view,
                                          .sampler        = m_sampler,
                                          .output_texture = test_view,
@@ -272,7 +278,7 @@ Bunny::Bunny(const WindowState& window_state) : Example(window_state) {
                              });
     gpu::cmd_barrier(cmd, StageFlags::Transfer, StageFlags::Compute);
     gpu::cmd_set_texture_heap(cmd, m_texture_heap);
-    gpu::cmd_dispatch(cmd, args, {512 / 8, 512 / 8, 1});
+    gpu::cmd_dispatch(cmd, args, {1024 / 8, 1024 / 8, 1});
     gpu::cmd_finalize(cmd);
     gpu::queue_submit(m_queue, cmd);
 }
@@ -305,32 +311,41 @@ bool Bunny::update(const UpdateInfo& info) {
     loon::imgui::NewFrame();
     m_frame_idx++;
 
-    show_cubemap(m_debug_cubemap_faces, 128);
+    static float rotations[3] = {0, 0, 0};
+    ImGui::SliderFloat3("Camera Rotations XYZ", rotations, 0.0f, 180.0);
 
-    const auto camera_from_world = geometry::transform3d::identity()
-                                       .translated({0, 0, -3})
-                                       .rotated_local({0, 0, 1}, radians_from_degrees(180))
-                                       .to_matrix();
+    const auto camera_from_world =
+        geometry::transform3d::identity()
+            .translated({0, 0, -3})
+            .rotated_local({1, 0, 0}, radians_from_degrees(rotations[0]))
+            .rotated_local({0, 1, 0}, radians_from_degrees(rotations[1]))
+            .rotated_local({0, 0, 1}, radians_from_degrees(rotations[2]));
+    const auto world_from_camera = camera_from_world.inverse();
+
+    const auto projection = geometry::projection({.view_width  = (float)info.texture_size.x,
+                                                  .view_height = (float)info.texture_size.y,
+                                                  .y_fov     = geometry::radians_from_degrees(30.f),
+                                                  .depth_far = 1.f});
+    const auto inverse_projection =
+        projection.inverse();  // NOTE: This doesn't work - projection matrix isn't invertible.
+
 
     auto args = m_ring_buffer.append(m_frame_idx,
                                      VertexArgs{
                                          .camera =
                                              CameraInfo{
-                                                 .projection = geometry::projection(
-                                                     {.view_width  = (float)info.texture_size.x,
-                                                      .view_height = (float)info.texture_size.y,
-                                                      .y_fov = geometry::radians_from_degrees(30.f),
-                                                      .depth_far = 0.5f}),
-                                                 .camera_from_world = camera_from_world,
+                                                 .projection        = projection,
+                                                 .camera_from_world = camera_from_world.to_matrix(),
                                              },
                                          .mesh = m_mesh,
                                      });
 
     auto skybox_args = m_ring_buffer.append(m_frame_idx,
                                             SkyboxArgs{
-                                                .camera_from_world = camera_from_world,
-                                                .skybox            = m_skybox_view,
-                                                .sampler           = m_sampler,
+                                                .world_from_camera  = world_from_camera.to_matrix(),
+                                                .inverse_projection = inverse_projection,
+                                                .skybox             = m_skybox_view,
+                                                .sampler            = m_sampler,
                                             });
 
     auto cmd = gpu::queue_start_command_recording(m_queue);

@@ -3,13 +3,15 @@
 #include <gpu/loon_gpu.h>
 
 #include "common/example.h"
+#include "common/geometry.h"
 #include "gpu_args.h"
 using namespace loon::gpu;
 
 struct GpuMesh {
-    GpuPtr positions;
-    GpuPtr uvs;
-    GpuPtr normals;
+    geometry::float4x4 world_from_mesh = geometry::float4x4::identity();
+    GpuPtr             positions;
+    GpuPtr             uvs;
+    GpuPtr             normals;
 };
 
 class Bunny : public Example {

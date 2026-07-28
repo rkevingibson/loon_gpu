@@ -4,6 +4,7 @@ struct CameraData {
 };
 
 struct Mesh {
+    float4x4 world_from_mesh;
     float3* positions;
     float2* uvs;
     float3* normals;
@@ -36,7 +37,7 @@ VertexStageOutput vertex_main(uint32_t vertexIdx : SV_VertexID)
 {
     VertexStageOutput output;
     const Mesh mesh = args.vert->mesh;
-    float4x4 mvp = mul(args.vert->camera.projection, args.vert->camera.camera_from_world);
+    float4x4 mvp = mul(args.vert->camera.projection, mul(args.vert->camera.camera_from_world, args.vert->mesh.world_from_mesh));
 
     output.position = mul(mvp, float4(mesh.positions[vertexIdx], 1.0));
     output.uv = mesh.uvs[vertexIdx];

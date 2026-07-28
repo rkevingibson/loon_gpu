@@ -7,10 +7,9 @@
 // pre-multiplying by transform matrices. As a result, this library sticks to a convention where
 // vectors are columns, and matrices are column-major. This doesn't match the default behaviour of
 // the slang compiler, but is easily configurable by the session options, and the generated shader
-// code should be correct.
+// code should be correct. This is also the default used by Metal matrices.
 // For coordinates, we operate on an assumption that world space is right-handed, Y-up (+z is
 // towards camera, out of the screen.)
-///
 
 namespace geometry {
 
@@ -49,8 +48,33 @@ struct alignas(16) quatf {
     float x, y, z, w;
 };
 
+
+struct float3x3 {
+    float3 columns[3];
+
+
+    [[nodiscard]] static float3x3 from_columns(const float3 cols[3]) noexcept {
+        return {.columns = {cols[0], cols[1], cols[2]}};
+    };
+    [[nodiscard]] static float3x3 identity();
+    [[nodiscard]] float3x3        transpose() const;
+    [[nodiscard]] float           determinant() const;
+    [[nodiscard]] float3x3 inverse() const;  // If determinant() == 0, returns all-infinity matrix.
+};
+
 struct float4x4 {
     float4 columns[4];
+
+    [[nodiscard]] static float4x4 identity() noexcept {
+        return {.columns = {
+                    {1, 0, 0, 0},
+                    {0, 1, 0, 0},
+                    {0, 0, 1, 0},
+                    {0, 0, 0, 1},
+                }};
+    }
+
+    [[nodiscard]] float4x4 inverse() const noexcept;
 };
 
 struct transform3d {
@@ -69,6 +93,8 @@ struct transform3d {
     [[nodiscard]] transform3d translated_local(const float3& offset) const;
 
     [[nodiscard]] float4x4 to_matrix() const;
+
+    [[nodiscard]] transform3d inverse() const;
 };
 
 inline constexpr float kPi = 3.14159265358979323846f;
@@ -78,7 +104,7 @@ inline constexpr float radians_from_degrees(float degrees) {
 }
 
 // Computes a*b - c*d, avoiding catastrophic cancellations via Karan's algorithm
-inline float differenceOfProducts(float a, float b, float c, float d) {
+inline float difference_of_products(float a, float b, float c, float d) {
     float cd  = c * d;
     float err = std::fmaf(-c, d, cd);
     float dop = std::fmaf(a, b, -cd);
@@ -86,7 +112,7 @@ inline float differenceOfProducts(float a, float b, float c, float d) {
 }
 
 // Computes a*b + c*d, avoiding catastrophic cancellations via Karan's algorithm
-inline float sumOfProducts(float a, float b, float c, float d) {
+inline float sum_of_products(float a, float b, float c, float d) {
     float cd  = c * d;
     float err = std::fmaf(-c, d, cd);
     float sop = std::fmaf(a, b, cd);
@@ -105,9 +131,9 @@ inline constexpr float dot(const float3& a, const float3& b) {
 
 inline float3 cross(const float3& a, const float3& b) {
     return {
-        .x = differenceOfProducts(a.y, b.z, a.z, b.y),
-        .y = differenceOfProducts(a.z, b.x, a.x, b.z),
-        .z = differenceOfProducts(a.x, b.y, a.y, b.x),
+        .x = difference_of_products(a.y, b.z, a.z, b.y),
+        .y = difference_of_products(a.z, b.x, a.x, b.z),
+        .z = difference_of_products(a.x, b.y, a.y, b.x),
     };
 }
 
@@ -131,6 +157,9 @@ inline constexpr float3 operator-(const float3& a, const float3& b) {
     return {a.x - b.x, a.y - b.y, a.z - b.z};
 }
 
+inline constexpr float3 operator-(const float3& a) {
+    return {-a.x, -a.y, -a.z};
+}
 
 inline constexpr float squaredLength(const float3& a) {
     return a.x * a.x + a.y * a.y + a.z * a.z;
@@ -151,9 +180,30 @@ inline float3 normalized(const float3& a) {
     return a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w;
 }
 
+[[nodiscard]] inline constexpr float4 operator*(float a, const float4& b) {
+    return {a * b.x, a * b.y, a * b.z, a * b.w};
+}
+
+[[nodiscard]] inline constexpr float4 operator*(const float4& a, const float4& b) {
+    return {a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w};
+}
+
+[[nodiscard]] inline constexpr float4 operator+(const float4& a, const float4& b) {
+    return {a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w};
+}
+
+[[nodiscard]] inline constexpr float4 operator-(const float4& a, const float4& b) {
+    return {a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w};
+}
+
 // MARK: quatf operations
 
 quatf fromAxisAngle(const float3& axis, float angle);
+
+// MARK: float3x3 operations
+
+float3   operator*(const float3x3& a, const float3& b) noexcept;
+float3x3 operator*(const float3x3& a, const float3x3& b) noexcept;
 
 // MARK: float4x4 operations
 
@@ -172,12 +222,18 @@ constexpr inline bool operator==(const float4x4& a, const float4x4& b) {
            a.columns[2] == b.columns[2] && a.columns[3] == b.columns[3];
 }
 
+[[nodiscard]] constexpr inline float4x4 operator*(float a, const float4x4& b) {
+    return {.columns = {a * b.columns[0], a * b.columns[1], a * b.columns[2], a * b.columns[3]}};
+}
+
 // MARK: transform3d operations
 
 [[nodiscard]] constexpr inline bool operator==(const transform3d& a, const transform3d& b) {
     return a.basis[0] == b.basis[0] && a.basis[1] == b.basis[1] && a.basis[2] == b.basis[2] &&
            a.origin == b.origin;
 }
+
+[[nodiscard]] transform3d operator*(const transform3d& a, transform3d& b);
 
 
 }  // namespace geometry
