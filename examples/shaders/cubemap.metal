@@ -100,6 +100,17 @@ struct IrradianceCubemapFromCubemap
     texture2d_array<half, access::write> output_texture;
 };
 
+// Constructs an orthonormal basis from a single vector.
+// From Duff et. al. Building an Orthonormal Basis, Revisited, 2017 (jcgt.org)
+void orthonormal_basis(const thread float3& n, thread float3& b1, thread float3& b2 )
+{
+    const float sign = copysign(1.0f, n.z);
+    const float a = -1.0f / (sign + n.z);
+    const float b = n.x * n.y * a;
+    b1 = float3(1.0f + sign * n.x * n.x * a, sign*b, -sign * n.x);
+    b2 = float3(b, sign + n.y *n.y * a, -n.y);
+}
+
 [[kernel, required_threads_per_threadgroup(8,8,1)]]
 void irradiance_cubemap_from_cubemap(constant IrradianceCubemapFromCubemap* args [[buffer(0)]], uint3 gid [[thread_position_in_grid]])
 {
@@ -111,18 +122,18 @@ void irradiance_cubemap_from_cubemap(constant IrradianceCubemapFromCubemap* args
         float3 normal = sphere_pos_from_cubemap_pos(face_uv, face_idx);
 
         float3 irradiance = float3(0,0,0);
-        float3 up = float3(0,1,0);
-        float3 right = normalize(cross(up, normal));
-        up = normalize(cross(normal, right));
+        float3 up;
+        float3 right;
+        orthonormal_basis(normal, up, right);
 
-        const float sample_delta = 0.025;
+        const float sample_delta = 0.01;
         uint num_samples = 0;
         for (float phi = 0.0; phi < 2.0 * M_PI; phi += sample_delta) {
             for(float theta = 0.0f; theta < 0.5 * M_PI; theta += sample_delta) {
                 float3 tangent_sample = float3(sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta));
                 float3 sample_vec = tangent_sample.x * right + tangent_sample.y * up + tangent_sample.z * normal;
                 float3 sample = args->input_texture.sample(args->sampler, sample_vec, level(0.0)).rgb;
-                irradiance += min(sample, float3(1.0,1.0,1.0)) * cos(theta) * sin(theta);
+                irradiance += min(sample, float3(5000,5000,5000)) * cos(theta) * sin(theta);
                 num_samples++;
             }
         }

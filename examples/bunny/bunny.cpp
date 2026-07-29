@@ -390,8 +390,8 @@ bool Bunny::update(const UpdateInfo& info) {
     ImGui::SliderFloat3("Camera Rotations XYZ", rotations, 0.0f, 180.0);
 
     // ImGui::Image(ImTextureRef(m_debug_panorama), ImVec2(512, 256));
-    // show_cubemap(m_debug_cubemap_faces, 128);
-    // show_cubemap(m_debug_irradiance_faces, 128);
+    show_cubemap(m_debug_cubemap_faces, 128);
+    show_cubemap(m_debug_irradiance_faces, 128);
 
     const auto camera_from_world =
         geometry::transform3d::identity()

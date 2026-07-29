@@ -27,11 +27,11 @@ CubemapCoords cubemap_coords_from_direction(float3 dir)
     float max_mag = max3(mag.x, mag.y, mag.z);
     uint16_t face = 0;
     if (mag.z == max_mag) {
-        face = dir.z >= 0.f ? 4 : 5;
+        face = dir.z >= 0.f ? uint16_t(4u) : uint16_t(5u);
     } else if (mag.y == max_mag) {
-        face = dir.y >= 0.f ? 2 : 3; 
+        face = dir.y >= 0.f ? uint16_t(2u) : uint16_t(3u); 
     } else {
-        face = dir.x >= 0.f ? 0 : 1;
+        face = dir.x >= 0.f ? uint16_t(0u) : uint16_t(1u);
     }
 
     float3 str;
@@ -92,6 +92,17 @@ struct IrradianceCubemapFromCubemap
     DescriptorHandle<RWTexture2DArray<half4>> output_texture;
 };
 
+// Constructs an orthonormal basis from a single vector.
+// From Duff et. al. Building an Orthonormal Basis, Revisited, 2017 (jcgt.org)
+void orthonormal_basis(in float3 n, out float3 b1, out float3 b2 )
+{
+    const float sign = copysign(1.0f, n.z);
+    const float a = -1.0f / (sign + n.z);
+    const float b = n.x * n.y * a;
+    b1 = float3(1.0f + sign * n.x * n.x * a, sign*b, -sign * n.x);
+    b2 = float3(b, sign + n.y *n.y * a, -n.y);
+}
+
 [shader("compute")]
 [numthreads(8,8,1)]
 void irradiance_cubemap_from_cubemap(uniform IrradianceCubemapFromCubemap* args, uint3 gid : SV_DispatchThreadID)
@@ -104,24 +115,24 @@ void irradiance_cubemap_from_cubemap(uniform IrradianceCubemapFromCubemap* args,
         float3 normal = sphere_pos_from_cubemap_pos(face_uv, face_idx);
 
         float3 irradiance = float3(0,0,0);
-        float3 up = float3(0,1,0);
-        float3 right = normalize(cross(up, normal));
-        up = normalize(cross(normal, right));
+        float3 up;
+        float3 right;
+        orthonormal_basis(normal, up, right);
 
-        const float sample_delta = 0.025;
+        const float sample_delta = 0.01;
         uint num_samples = 0;
         for (float phi = 0.0; phi < 2.0 * M_PI; phi += sample_delta) {
             for(float theta = 0.0f; theta < 0.5 * M_PI; theta += sample_delta) {
                 float3 tangent_sample = float3(sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta));
                 float3 sample_vec = tangent_sample.x * right + tangent_sample.y * up + tangent_sample.z * normal;
                 float3 sample = args->input_texture.SampleLevel(args->sampler, sample_vec, 0.0).rgb;
-                irradiance += min(sample, float3(1.0,1.0,1.0)) * cos(theta) * sin(theta);
+                irradiance += min(sample, float3(5000.0,5000.0,5000.0)) * cos(theta) * sin(theta);
                 num_samples++;
             }
         }
 
         irradiance = M_PI * irradiance / float(num_samples);
-        args->output_texture.Store(uint16_t3(gid.x, gid.y, face_idx), half4(half3(irradiance), 1.0h));
+        args->output_texture.Store(uint16_t3(uint16_t(gid.x), uint16_t(gid.y), face_idx), half4(half3(irradiance), 1.0h));
     }
 }
 
