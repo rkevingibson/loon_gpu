@@ -1,3 +1,10 @@
+/***
+    Many cubes -
+
+    Showcasing instancing and how easy it is to upload per-mesh data via the ring buffer, draws
+   hundreds of thousands of spinning, textured cubes.
+*/
+
 #include "many_cubes.h"
 
 #include <gpu/loon_gpu.h>
@@ -24,9 +31,9 @@ struct Cube {
     };
 
     static constexpr float2 kUVs[] = {
-        {0, 0}, {0, 1}, {1, 0}, {1, 1}, {0, 0}, {0, 1}, {1, 0}, {1, 1},
-        {0, 0}, {1, 0}, {0, 1}, {1, 1}, {0, 0}, {1, 0}, {0, 1}, {1, 1},
-        {0, 0}, {1, 0}, {0, 1}, {1, 1}, {0, 0}, {1, 0}, {0, 1}, {1, 1},
+        {1, 0}, {1, 1}, {0, 0}, {0, 1}, {1, 0}, {1, 1}, {0, 0}, {0, 1},
+        {1, 0}, {0, 0}, {1, 1}, {0, 1}, {1, 0}, {0, 0}, {1, 1}, {0, 1},
+        {1, 0}, {0, 0}, {1, 1}, {0, 1}, {1, 0}, {0, 0}, {1, 1}, {0, 1},
     };
     static constexpr uint16_t kIndices[]  = {0,  3,  1,  0,  2,  3,  4,  6,  7,  4,  7,  5,
                                              8,  9,  11, 8,  11, 10, 12, 13, 15, 12, 15, 14,
@@ -214,8 +221,8 @@ bool ManyCubes::update(const UpdateInfo& info) {
                                                        .y_fov       = geometry::radians_from_degrees(30.f),
                                                        .depth_far   = 0.5f}),
             .camera_from_world = geometry::transform3d::identity()
-                                     .translated({0, 2, -8})
-                                     .rotated_local({1, 0, 0}, radians_from_degrees(-30))
+                                     .translated({0, -5, -15})
+                                     .rotated_local({1, 0, 0}, radians_from_degrees(30))
                                      .to_matrix(),
         });
 
@@ -256,7 +263,7 @@ bool ManyCubes::update(const UpdateInfo& info) {
                                            .height = info.texture_size.y,
                                        },
                                });
-    gpu::cmd_set_front_face(cmd, FrontFace::CW);
+    gpu::cmd_set_front_face(cmd, FrontFace::CCW);
     gpu::cmd_set_cull_mode(cmd, Cull::Back);
     gpu::cmd_set_depth_stencil_state(cmd, m_depth_stencil_state);
     gpu::cmd_set_pipeline(cmd, m_render_pipeline);

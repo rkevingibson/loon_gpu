@@ -3,7 +3,8 @@
 
     This example shows mesh rendering with image-based lighting.
     This includes some one-off compute work to preconvolve the cube map and convert it from an
-   equirectangular HDRI image.
+   equirectangular HDRI image. Note that the rendering is not a particularly good PBR model or
+   anything, just meant to demonstrate using cubemaps in the API.
 */
 
 #include "bunny.h"
@@ -177,12 +178,12 @@ Bunny::Bunny(const WindowState& window_state) : Example(window_state) {
                                 .usage      = UsageFlags::Sampled | UsageFlags::TransferDst,
                             });
 
-    auto color_view = gpu::add_texture_view_to_heap(m_device,
-                                                    m_texture_heap,
-                                                    {
-                                                        .texture = equirectangular_hdr_map,
-                                                        .format  = Format::RGBA32Float,
-                                                    });
+    m_debug_panorama = gpu::add_texture_view_to_heap(m_device,
+                                                     m_texture_heap,
+                                                     {
+                                                         .texture = equirectangular_hdr_map,
+                                                         .format  = Format::RGBA32Float,
+                                                     });
 
     m_hdri_cubemap = gpu::create_texture(m_device,
                                          TextureDesc{
@@ -326,7 +327,7 @@ Bunny::Bunny(const WindowState& window_state) : Example(window_state) {
                                      ConvertArgs{
                                          .dim_x          = 1024,
                                          .dim_y          = 1024,
-                                         .input_texture  = color_view,
+                                         .input_texture  = m_debug_panorama,
                                          .sampler        = m_sampler,
                                          .output_texture = test_view,
                                      });
@@ -388,8 +389,9 @@ bool Bunny::update(const UpdateInfo& info) {
     static float rotations[3] = {0, 0, 0};
     ImGui::SliderFloat3("Camera Rotations XYZ", rotations, 0.0f, 180.0);
 
-    show_cubemap(m_debug_cubemap_faces, 64);
-    show_cubemap(m_debug_irradiance_faces, 64);
+    // ImGui::Image(ImTextureRef(m_debug_panorama), ImVec2(512, 256));
+    // show_cubemap(m_debug_cubemap_faces, 128);
+    // show_cubemap(m_debug_irradiance_faces, 128);
 
     const auto camera_from_world =
         geometry::transform3d::identity()
@@ -427,7 +429,7 @@ bool Bunny::update(const UpdateInfo& info) {
         SkyboxArgs{
             .world_from_camera = world_from_camera.to_matrix(),
             .viewport_size     = {(float)info.texture_size.x, (float)info.texture_size.y},
-            .skybox            = m_irradiance_view,
+            .skybox            = m_skybox_view,
             .sampler           = m_sampler,
         });
 
@@ -459,7 +461,7 @@ bool Bunny::update(const UpdateInfo& info) {
 
     gpu::cmd_set_pipeline(cmd, m_render_pipeline);
     gpu::cmd_set_texture_heap(cmd, m_texture_heap);
-    gpu::cmd_set_front_face(cmd, FrontFace::CW);
+    gpu::cmd_set_front_face(cmd, FrontFace::CCW);
     gpu::cmd_set_cull_mode(cmd, Cull::Back);
     gpu::cmd_set_depth_stencil_state(cmd, m_depth_stencil_state);
 

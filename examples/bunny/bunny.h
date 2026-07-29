@@ -31,6 +31,7 @@ class Bunny : public Example {
     size_t                    m_frame_idx = 0;
 
     Handle<TextureHeap> m_texture_heap;
+    Handle<Texture>     m_hdri_panorama;
     Handle<Texture>     m_hdri_cubemap;
     Handle<Texture>     m_irradiance_cubemap;
     TextureView         m_skybox_view;
@@ -38,6 +39,7 @@ class Bunny : public Example {
     Sampler             m_sampler;
 
     // Debugging data:
+    TextureView m_debug_panorama;
     TextureView m_debug_cubemap_faces[6];
     TextureView m_debug_irradiance_faces[6];
 };
