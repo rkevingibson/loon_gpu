@@ -1437,14 +1437,20 @@ void cmd_draw_indexed_instanced(CommandBuffer cmd, const DrawIndexedInstancedInf
 
     set_graphics_ptrs(cmd, args.vertexDataGpu, args.fragmentDataGpu);
 
-    const uint32_t index_buffer_size =
-        args.indexCount * (args.type == IndexType::UInt16 ? sizeof(uint16_t) : sizeof(uint32_t));
+    // NOTE: In theory, we can use the indexCount to just compute a lower bound on the index buffer
+    // size, as in the commented code below. In practice, this seems to not work correctly on
+    // MacOS 25.5 and gets you random vertex_id == 0 in your shader. As a workaround, we look up the
+    // buffer size here and use that.
+    auto index_info = buffer_and_offset_from_ptr(cmd->device, args.indicesGpu);
+    // const uint32_t index_buffer_size =
+    //     (args.indexCount) * (args.type == IndexType::UInt16 ? sizeof(uint16_t) :
+    //     sizeof(uint32_t));
     cmd->render_encoder->drawIndexedPrimitives(
         cmd->current_topology,
         args.indexCount,
         args.type == IndexType::UInt16 ? MTL::IndexTypeUInt16 : MTL::IndexTypeUInt32,
         args.indicesGpu,
-        index_buffer_size,
+        index_info.buffer->buffer->length() - index_info.offset,
         args.instanceCount);
 }
 
