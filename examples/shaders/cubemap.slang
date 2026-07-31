@@ -72,16 +72,33 @@ void equirectangular_to_cubemap(uniform EquirectangularToCubemapArgs* args, uint
 {
     // Use face_idx & gid to compute a 3d position on the sphere.
     float2 face_uv = float2(gid.xy) / args->resolution;
+    uint16_t face_idx = uint16_t(gid.z);
+    float3 cube_pos = sphere_pos_from_cubemap_pos(face_uv, face_idx);
+    // TODO: Better filtering here - we're not doing mipmaps but could directly filter samples from the map.
+    float3 sphere_pos = normalize(cube_pos);
+    float2 uv = sphere_pos_to_equirectangular_uv(sphere_pos);
+    float4 color = args->input_texture.SampleLevel(args->sampler, uv, 0.0);
+    args->output_texture.Store(uint3(gid.x, gid.y, face_idx), half4(half3(color.xyz), 1.0h));
+}
 
-    for (uint16_t face_idx = 0; face_idx < 6; face_idx++)
-    {
-        float3 cube_pos = sphere_pos_from_cubemap_pos(face_uv, face_idx);
-        // TODO: Better filtering here - we're not doing mipmaps but could directly filter samples from the map.
-        float3 sphere_pos = normalize(cube_pos);
-        float2 uv = sphere_pos_to_equirectangular_uv(sphere_pos);
-        float4 color = args->input_texture.SampleLevel(args->sampler, uv, 0.0);
-        args->output_texture.Store(uint3(gid.x, gid.y, face_idx), half4(half3(color.xyz), 1.0h));
-    }
+struct GenerateMip {
+    DescriptorHandle<RWTexture2DArray<float4>> input;
+    DescriptorHandle<RWTexture2DArray<float4>> output;
+};
+
+[shader("compute")]
+[numthreads(8,8,1)]
+void generate_mip(uniform GenerateMip* args, uint3 gid : SV_DispatchThreadID)
+{
+    // Basic box filter for now. 
+    uint2 output_coord = gid.xy;
+    float4 a = args->input.Load(int3(output_coord*2, gid.z));
+    float4 b = args->input.Load(int3(output_coord*2 + uint2(0,1), gid.z));
+    float4 c = args->input.Load(int3(output_coord*2 + uint2(1,0), gid.z));
+    float4 d = args->input.Load(int3(output_coord*2 + uint2(1,1), gid.z));
+
+    float4 res = 0.25*(a+b+c+d);
+    args->output.Store(int3(output_coord, gid.z),res);
 }
 
 struct IrradianceCubemapFromCubemap
@@ -110,30 +127,30 @@ void irradiance_cubemap_from_cubemap(uniform IrradianceCubemapFromCubemap* args,
     constexpr float M_PI = 3.14159265359f;
     float2 face_uv = float2(gid.xy) / float2(args->resolution);
 
-    for (uint16_t face_idx = 0; face_idx < 6; face_idx++)
-    {
-        float3 normal = sphere_pos_from_cubemap_pos(face_uv, face_idx);
+    uint16_t face_idx = uint16_t(gid.z);
 
-        float3 irradiance = float3(0,0,0);
-        float3 up;
-        float3 right;
-        orthonormal_basis(normal, up, right);
+    float3 normal = sphere_pos_from_cubemap_pos(face_uv, face_idx);
 
-        const float sample_delta = 0.01;
-        uint num_samples = 0;
-        for (float phi = 0.0; phi < 2.0 * M_PI; phi += sample_delta) {
-            for(float theta = 0.0f; theta < 0.5 * M_PI; theta += sample_delta) {
-                float3 tangent_sample = float3(sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta));
-                float3 sample_vec = tangent_sample.x * right + tangent_sample.y * up + tangent_sample.z * normal;
-                float3 sample = args->input_texture.SampleLevel(args->sampler, sample_vec, 0.0).rgb;
-                irradiance += min(sample, float3(5000.0,5000.0,5000.0)) * cos(theta) * sin(theta);
-                num_samples++;
-            }
+    float3 irradiance = float3(0,0,0);
+    float3 up;
+    float3 right;
+    orthonormal_basis(normal, up, right);
+
+    const float sample_delta = 0.01;
+    uint num_samples = 0;
+    for (float phi = 0.0; phi < 2.0 * M_PI; phi += sample_delta) {
+        for(float theta = 0.0f; theta < 0.5 * M_PI; theta += sample_delta) {
+            float3 tangent_sample = float3(sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta));
+            float3 sample_vec = tangent_sample.x * right + tangent_sample.y * up + tangent_sample.z * normal;
+            float3 sample = args->input_texture.SampleLevel(args->sampler, sample_vec, 6.0).rgb;
+            
+            irradiance += sample * cos(theta) * sin(theta);
+            num_samples++;
         }
-
-        irradiance = M_PI * irradiance / float(num_samples);
-        args->output_texture.Store(uint16_t3(uint16_t(gid.x), uint16_t(gid.y), face_idx), half4(half3(irradiance), 1.0h));
     }
+    irradiance = M_PI * irradiance / float(num_samples);
+
+    args->output_texture.Store(uint16_t3(uint16_t(gid.x), uint16_t(gid.y), face_idx), half4(half3(irradiance), 1.0h));
 }
 
 struct SkyboxArgs {

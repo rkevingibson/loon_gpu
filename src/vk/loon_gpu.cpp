@@ -1199,6 +1199,11 @@ Device create_device(const DeviceDesc& desc) {
                                              d->api.vkDestroyImageView(d->device, v, nullptr);
                                          }
                                      }
+                                     for (auto v : h->rw_image_views) {
+                                         if (v != VK_NULL_HANDLE) {
+                                             d->api.vkDestroyImageView(d->device, v, nullptr);
+                                         }
+                                     }
                                      for (auto s : h->samplers) {
                                          if (s != VK_NULL_HANDLE) {
                                              d->api.vkDestroySampler(d->device, s, nullptr);

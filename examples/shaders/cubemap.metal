@@ -92,6 +92,25 @@ void equirectangular_to_cubemap(constant EquirectangularToCubemapArgs* args [[bu
     }
 }
 
+struct GenerateMip {
+    texture2d_array<float, access::read> input;
+    texture2d_array<float, access::write> output;
+};
+
+[[kernel, required_threads_per_threadgroup(8,8,1)]]
+void generate_mip(constant GenerateMip* args [[buffer(0)]], uint3 gid [[thread_position_in_grid]])
+{
+    // Basic box filter for now. 
+    uint2 output_coord = gid.xy;
+    float4 a = args->input.read(output_coord*2, gid.z);
+    float4 b = args->input.read(output_coord*2 + uint2(0,1), gid.z);
+    float4 c = args->input.read(output_coord*2 + uint2(1,0), gid.z);
+    float4 d = args->input.read(output_coord*2 + uint2(1,1), gid.z);
+
+    float4 res = 0.25*(a+b+c+d);
+    args->output.write(res, output_coord, gid.z);
+}
+
 struct IrradianceCubemapFromCubemap
 {
     uint2 resolution;
@@ -117,30 +136,27 @@ void irradiance_cubemap_from_cubemap(constant IrradianceCubemapFromCubemap* args
     constexpr float M_PI = 3.14159265359f;
     float2 face_uv = float2(gid.xy) / float2(args->resolution);
 
-    for (ushort face_idx = 0; face_idx < 6; face_idx++)
-    {
-        float3 normal = sphere_pos_from_cubemap_pos(face_uv, face_idx);
+    ushort face_idx = ushort(gid.z);
+    float3 normal = sphere_pos_from_cubemap_pos(face_uv, face_idx);
+    float3 irradiance = float3(0,0,0);
+    float3 up;
+    float3 right;
+    orthonormal_basis(normal, up, right);
 
-        float3 irradiance = float3(0,0,0);
-        float3 up;
-        float3 right;
-        orthonormal_basis(normal, up, right);
-
-        const float sample_delta = 0.01;
-        uint num_samples = 0;
-        for (float phi = 0.0; phi < 2.0 * M_PI; phi += sample_delta) {
-            for(float theta = 0.0f; theta < 0.5 * M_PI; theta += sample_delta) {
-                float3 tangent_sample = float3(sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta));
-                float3 sample_vec = tangent_sample.x * right + tangent_sample.y * up + tangent_sample.z * normal;
-                float3 sample = args->input_texture.sample(args->sampler, sample_vec, level(0.0)).rgb;
-                irradiance += min(sample, float3(5000,5000,5000)) * cos(theta) * sin(theta);
-                num_samples++;
-            }
+    const float sample_delta = 0.01;
+    uint num_samples = 0;
+    for (float phi = 0.0; phi < 2.0 * M_PI; phi += sample_delta) {
+        for(float theta = 0.0f; theta < 0.5 * M_PI; theta += sample_delta) {
+            float3 tangent_sample = float3(sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta));
+            float3 sample_vec = tangent_sample.x * right + tangent_sample.y * up + tangent_sample.z * normal;
+            float3 sample = args->input_texture.sample(args->sampler, sample_vec, level(6.0)).rgb;
+            irradiance += sample * cos(theta) * sin(theta);
+            num_samples++;
         }
-
-        irradiance = M_PI * irradiance / float(num_samples);
-        args->output_texture.write(half4(half3(irradiance), 1.0h), ushort2(gid.xy), face_idx);
     }
+    irradiance = M_PI * irradiance / float(num_samples);
+
+    args->output_texture.write(half4(half3(irradiance), 1.0h), ushort2(gid.xy), face_idx);
 }
 
 struct SkyboxArgs {

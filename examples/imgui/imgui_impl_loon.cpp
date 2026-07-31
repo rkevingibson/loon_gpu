@@ -313,13 +313,13 @@ void NewFrame() {
     ImGui::NewFrame();
 }
 
-struct alignas(64) VertexInput {
+struct alignas(16) VertexInput {
     ImVec2      scale;
     ImVec2      translate;
     gpu::GpuPtr vertex_buffer;
 };
 
-struct alignas(64) FragmentInput {
+struct alignas(16) FragmentInput {
     gpu::TextureView texture;
     gpu::Sampler     sampler;
 };
