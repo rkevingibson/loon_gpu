@@ -70,7 +70,7 @@ endif()
 
 if(LOON_GPU_WERROR)
   if(MSVC)
-    target_compile_options(loon_gpu PRIVATE /WX)
+  target_compile_options(loon_gpu PRIVATE /WX /W3)
   else()
     target_compile_options(loon_gpu PRIVATE -Werror -Wall -Wunused-parameter)
   endif()

@@ -7,13 +7,16 @@ FetchContent_Declare(
   example_assets
   URL https://github.com/rkevingibson/loon_gpu/releases/download/v0.1.0/example_assets_v0_1_0.zip
   URL_HASH
-    SHA256=0fb40a67d2af90631eed08fb3f2c7dbe3db5aa26b26dc8b05d6476f4e0009f55)
+    SHA256=259cacebc20253444c7f0b59d57009f59126394727f23525fadee9ec4b63dcb8)
 FetchContent_MakeAvailable(example_assets)
 
 # Split some of these into a separate library so we can write some unit tests
 # for them
 add_library(example_utilities OBJECT common/geometry.cpp common/filesystem.cpp
                                      common/timer.cpp common/obj_parser.cpp)
+if (MSVC)
+  target_compile_definitions(example_utilities PUBLIC _CRT_SECURE_NO_WARNINGS)
+endif()
 
 target_include_directories(example_utilities
                            PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/common)
