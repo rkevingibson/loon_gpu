@@ -55,4 +55,53 @@ uint32_t RingBuffer::contiguous_free_space() const {
     }
 }
 
+gpu::GpuPtr RingBuffer::append_raw(uint64_t    frame_idx,
+                                   const void* ptr,
+                                   size_t      size,
+                                   size_t      alignment) {
+    while (frame_idx - m_allocated_ranges[m_allocated_range_tail & kAllocatedRangesMask].frame_idx >
+           m_num_frames_in_flight) {
+        m_allocated_range_tail++;  // Effectively "free" this range.
+    }
+
+    // If we don't have enough space to do the copy, return nullptr.
+    if (contiguous_free_space() < size) { return 0; }
+
+    AllocationRange* range = nullptr;
+    if (m_allocated_ranges[m_allocated_range_head & kAllocatedRangesMask].frame_idx == frame_idx) {
+        // Extending the current frame's range.
+        range = &m_allocated_ranges[m_allocated_range_head & kAllocatedRangesMask];
+    } else {
+        // Allocate a new range, initializing it to the end of the previous range.
+        const auto& prev_range = m_allocated_ranges[m_allocated_range_head & kAllocatedRangesMask];
+        m_allocated_range_head++;
+        assert((m_allocated_range_head & kAllocatedRangesMask) !=
+               (m_allocated_range_tail & kAllocatedRangesMask));
+
+        range  = &m_allocated_ranges[m_allocated_range_head & kAllocatedRangesMask];
+        *range = {
+            .frame_idx = frame_idx,
+            .start     = prev_range.end,
+            .end       = prev_range.end,
+        };
+    }
+
+    const auto align = [](uint32_t offset, uint32_t alignment) {
+        return (offset + alignment - 1) & ~(alignment - 1);
+    };
+
+    uint32_t offset_start = align(range->end, alignment);
+    uint32_t offset_end   = offset_start + size;
+    if ((offset_start & m_mask) > (offset_end & m_mask)) {
+        // Adjust start in the case where we're wrapping around the ring buffer.
+        offset_start = align(offset_start, m_mask + 1);
+        offset_end   = offset_start + size;
+    }
+    range->end      = offset_end;
+    void* host_dest = (char*)m_host_ptr + (offset_start & m_mask);
+    memcpy(host_dest, ptr, size);
+
+    return m_device_ptr + (offset_start & m_mask);
+}
+
 }  // namespace loon

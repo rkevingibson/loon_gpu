@@ -59,6 +59,7 @@ enum class ExampleName {
     TexturedCube,
     ParticleEmitter,
     ManyCubes,
+    Bunny,
 
     Count,
 };

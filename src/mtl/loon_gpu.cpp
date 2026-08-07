@@ -538,7 +538,7 @@ TextureSizeAlign get_texture_size_align(Device d, const TextureDesc& desc) {
     info->setDepth(desc.dimensions.z);
     info->setMipmapLevelCount(desc.mip_count);
     info->setSampleCount(desc.sample_count);
-    info->setArrayLength(desc.layer_count);
+    info->setArrayLength(desc.array_count);
     info->setHazardTrackingMode(MTL::HazardTrackingModeUntracked);
     info->setUsage(bridge_texture_usage(desc.usage));
 
@@ -556,7 +556,7 @@ Handle<Texture> create_texture(Device d, const TextureDesc& desc, GpuPtr locatio
     info->setDepth(desc.dimensions.z);
     info->setMipmapLevelCount(desc.mip_count);
     info->setSampleCount(desc.sample_count);
-    info->setArrayLength(desc.layer_count);
+    info->setArrayLength(desc.array_count);
     info->setHazardTrackingMode(MTL::HazardTrackingModeUntracked);
     info->setUsage(bridge_texture_usage(desc.usage));
 
@@ -608,7 +608,24 @@ TextureView add_texture_view_to_heap(Device d, Handle<TextureHeap> h, const Text
     view_info->setLevelRange(NS::Range(desc.base_mip, desc.mip_count));
     view_info->setPixelFormat(bridge(desc.format));
     view_info->setSliceRange(NS::Range(desc.base_layer, desc.layer_count));
-    view_info->setTextureType(tex.texture->textureType());
+    view_info->setTextureType(bridge(desc.type));
+    const auto      index = heap.bitset.set_leading_zero();
+    MTL::ResourceID texture_view =
+        heap.pool->setTextureView(tex.texture.get(), view_info.get(), index);
+
+    return texture_view._impl;
+}
+
+TextureView add_rw_texture_view_to_heap(Device                 d,
+                                        Handle<TextureHeap>    h,
+                                        const TextureViewDesc& desc) {
+    auto&                          heap      = d->texture_heap_pool[h];
+    auto&                          tex       = d->texture_pool[desc.texture];
+    id<MTL::TextureViewDescriptor> view_info = make_id<MTL::TextureViewDescriptor>();
+    view_info->setLevelRange(NS::Range(desc.base_mip, desc.mip_count));
+    view_info->setPixelFormat(bridge(desc.format));
+    view_info->setSliceRange(NS::Range(desc.base_layer, desc.layer_count));
+    view_info->setTextureType(bridge(desc.type));
     const auto      index = heap.bitset.set_leading_zero();
     MTL::ResourceID texture_view =
         heap.pool->setTextureView(tex.texture.get(), view_info.get(), index);
@@ -764,6 +781,7 @@ Handle<Pipeline> create_compute_pipeline(Device                             d,
     if (!LOON_CHK(d, error, "gpu::create_compute_pipeline: Error create pipeline state")) {
         return {};
     }
+
 
     const auto metadata = parse_metadata(compute.source.cast<const char>(), compute.entry_point);
 
@@ -1419,14 +1437,20 @@ void cmd_draw_indexed_instanced(CommandBuffer cmd, const DrawIndexedInstancedInf
 
     set_graphics_ptrs(cmd, args.vertexDataGpu, args.fragmentDataGpu);
 
-    const uint32_t index_buffer_size =
-        args.indexCount * (args.type == IndexType::UInt16 ? sizeof(uint16_t) : sizeof(uint32_t));
+    // NOTE: In theory, we can use the indexCount to just compute a lower bound on the index buffer
+    // size, as in the commented code below. In practice, this seems to not work correctly on
+    // MacOS 25.5 and gets you random vertex_id == 0 in your shader. As a workaround, we look up the
+    // buffer size here and use that.
+    auto index_info = buffer_and_offset_from_ptr(cmd->device, args.indicesGpu);
+    // const uint32_t index_buffer_size =
+    //     (args.indexCount) * (args.type == IndexType::UInt16 ? sizeof(uint16_t) :
+    //     sizeof(uint32_t));
     cmd->render_encoder->drawIndexedPrimitives(
         cmd->current_topology,
         args.indexCount,
         args.type == IndexType::UInt16 ? MTL::IndexTypeUInt16 : MTL::IndexTypeUInt32,
         args.indicesGpu,
-        index_buffer_size,
+        index_info.buffer->buffer->length() - index_info.offset,
         args.instanceCount);
 }
 

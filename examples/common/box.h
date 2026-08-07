@@ -1,6 +1,14 @@
 #pragma once
 #include <cstddef>
 
+#ifndef NO_UNIQUE_ADDRESS
+#    if _MSVC_LANG
+#        define NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
+#    else
+#        define NO_UNIQUE_ADDRESS [[no_unique_address]]
+#    endif
+#endif
+
 namespace loon {
 
 template <class T>
@@ -56,8 +64,8 @@ class Box {
     constexpr T* operator->() const noexcept { return m_ptr; }
 
    private:
-    T*                            m_ptr = nullptr;
-    [[no_unique_address]] Deleter m_deleter;
+    T*                        m_ptr = nullptr;
+    NO_UNIQUE_ADDRESS Deleter m_deleter;
 };
 
 template <class T, class... Args>

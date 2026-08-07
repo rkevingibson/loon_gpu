@@ -3,9 +3,10 @@
 #include <gpu/loon_gpu.h>
 
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
-
+#include <vector>
 
 
 namespace loon {
@@ -22,6 +23,14 @@ class RingBuffer {
 
     template <class T>
     gpu::GpuPtr append(uint64_t frame_idx, const T&);
+
+    template <class T>
+    gpu::GpuPtr append(uint64_t frame_idx, const std::vector<T>&);
+
+    gpu::GpuPtr append_raw(uint64_t    frame_idx,
+                           const void* ptr,
+                           size_t      size,
+                           size_t      alignment = alignof(max_align_t));
 
    private:
     uint32_t contiguous_free_space() const;
@@ -49,50 +58,12 @@ class RingBuffer {
 
 template <class T>
 gpu::GpuPtr RingBuffer::append(uint64_t frame_idx, const T& t) {
-    while (frame_idx - m_allocated_ranges[m_allocated_range_tail & kAllocatedRangesMask].frame_idx >
-           m_num_frames_in_flight) {
-        m_allocated_range_tail++;  // Effectively "free" this range.
-    }
-
-    // For our examples, we're not really handling errors/oom - just assert we have enough space.
-    assert(contiguous_free_space() >= sizeof(T));
-
-    AllocationRange* range = nullptr;
-    if (m_allocated_ranges[m_allocated_range_head & kAllocatedRangesMask].frame_idx == frame_idx) {
-        // Extending the current frame's range.
-        range = &m_allocated_ranges[m_allocated_range_head & kAllocatedRangesMask];
-    } else {
-        // Allocate a new range, initializing it to the end of the previous range.
-        const auto& prev_range = m_allocated_ranges[m_allocated_range_head & kAllocatedRangesMask];
-        m_allocated_range_head++;
-        assert((m_allocated_range_head & kAllocatedRangesMask) !=
-               (m_allocated_range_tail & kAllocatedRangesMask));
-
-        range  = &m_allocated_ranges[m_allocated_range_head & kAllocatedRangesMask];
-        *range = {
-            .frame_idx = frame_idx,
-            .start     = prev_range.end,
-            .end       = prev_range.end,
-        };
-    }
-
-    const auto align = [](uint32_t offset, uint32_t alignment) {
-        return (offset + alignment - 1) & ~(alignment - 1);
-    };
-
-    // TODO: if we'd wrap around the ring buffer, need to align to multiple of m_size instead.
-    uint32_t offset_start = align(range->end, alignof(T));
-    uint32_t offset_end   = offset_start + sizeof(T);
-    if ((offset_start & m_mask) > (offset_end & m_mask)) {
-        offset_start = align(offset_start, m_mask + 1);
-        offset_end   = offset_start + sizeof(T);
-    }
-    range->end      = offset_end;
-    void* host_dest = (char*)m_host_ptr + (offset_start & m_mask);
-    memcpy(host_dest, &t, sizeof(T));
-
-    return m_device_ptr + (offset_start & m_mask);
+    return append_raw(frame_idx, &t, sizeof(T), alignof(T));
 }
 
+template <class T>
+gpu::GpuPtr RingBuffer::append(uint64_t frame_idx, const std::vector<T>& vec) {
+    return append_raw(frame_idx, vec.data(), vec.size() * sizeof(T), alignof(T));
+}
 
 }  // namespace loon

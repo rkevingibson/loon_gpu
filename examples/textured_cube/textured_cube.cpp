@@ -1,10 +1,7 @@
 /***
-    Hello Triangle - A basic WGPU introduction
+    Textured Cube -
 
-    This example shows setup, teardown, and basic rendering of a triangle.
-    It shows everything in this file explicitly as a reference - other examples will use helpers for
-   initialization.
-
+    A basic spinning cube, textured. No mipmaps
 */
 
 #include "textured_cube.h"
@@ -31,9 +28,9 @@ struct Cube {
     };
 
     static constexpr float2 kUVs[] = {
-        {0, 0}, {0, 1}, {1, 0}, {1, 1}, {0, 0}, {0, 1}, {1, 0}, {1, 1},
-        {0, 0}, {1, 0}, {0, 1}, {1, 1}, {0, 0}, {1, 0}, {0, 1}, {1, 1},
-        {0, 0}, {1, 0}, {0, 1}, {1, 1}, {0, 0}, {1, 0}, {0, 1}, {1, 1},
+        {1, 0}, {1, 1}, {0, 0}, {0, 1}, {1, 0}, {1, 1}, {0, 0}, {0, 1},
+        {1, 0}, {0, 0}, {1, 1}, {0, 1}, {1, 0}, {0, 0}, {1, 1}, {0, 1},
+        {1, 0}, {0, 0}, {1, 1}, {0, 1}, {1, 0}, {0, 0}, {1, 1}, {0, 1},
     };
     static constexpr uint16_t kIndices[]  = {0,  3,  1,  0,  2,  3,  4,  6,  7,  4,  7,  5,
                                              8,  9,  11, 8,  11, 10, 12, 13, 15, 12, 15, 14,
@@ -122,7 +119,7 @@ TexturedCube::TexturedCube(const WindowState& window_state) : Example(window_sta
                             TextureDesc{
                                 .dimensions = {(uint32_t)x, (uint32_t)y, 1},
                                 .format     = loon::gpu::Format::RGBA8UnormSrgb,
-                                .usage = UsageFlags(UsageFlags::Sampled | UsageFlags::TransferDst),
+                                .usage      = UsageFlags::Sampled | UsageFlags::TransferDst,
                             });
 
     m_texture_heap = gpu::create_texture_heap(m_device,
@@ -195,7 +192,7 @@ bool TexturedCube::update(const UpdateInfo& info) {
                 .color    = m_vertex_ptr + sizeof(Cube::kPositions),
                 .world_from_mesh =
                     transform3d::identity()
-                        .rotated_local(normalized({1, 0.5, 0}),
+                        .rotated_local(normalized({1, 0.2, 0}),
                                        radians_from_degrees((float)(m_frame_idx % 360)))
                         .to_matrix(),
             },
@@ -234,7 +231,7 @@ bool TexturedCube::update(const UpdateInfo& info) {
                                        },
                                });
 
-    gpu::cmd_set_front_face(cmd, FrontFace::CW);
+    gpu::cmd_set_front_face(cmd, FrontFace::CCW);
     gpu::cmd_set_cull_mode(cmd, Cull::Back);
     gpu::cmd_set_depth_stencil_state(cmd, m_depth_stencil_state);
     gpu::cmd_set_pipeline(cmd, m_render_pipeline);

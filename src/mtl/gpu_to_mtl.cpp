@@ -126,9 +126,7 @@ MTL::TextureUsage bridge_texture_usage(UsageFlags u) {
         MTL::TextureUsage out;
     } kMapping[] = {
         {UsageFlags::Sampled, MTL::TextureUsageShaderRead},
-        {UsageFlags::Storage,
-         MTL::TextureUsageShaderWrite | MTL::TextureUsageShaderRead |
-             MTL::TextureUsageShaderAtomic},
+        {UsageFlags::Storage, MTL::TextureUsageShaderWrite | MTL::TextureUsageShaderRead},
         {UsageFlags::ColorAttachment, MTL::TextureUsageRenderTarget},
         {UsageFlags::DepthStencilAttachment, MTL::TextureUsageRenderTarget},
     };
