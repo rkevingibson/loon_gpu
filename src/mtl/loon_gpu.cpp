@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "command_superpool.h"
 #include "format_info.h"
 #include "metal_compute_metadata.h"
 #include "platform_utils.h"
@@ -120,35 +121,34 @@ struct Surface {
 
 struct CommandPool;
 struct CommandBufferImpl {
-    id<MTL4::CommandBuffer>         command_buffer = nullptr;
-    id<MTL4::ArgumentTable>         argument_table = nullptr;
+    Device                          device;
     Queue                           queue;
     CommandPool*                    pool;
-    Device                          device;
+    id<MTL4::CommandBuffer>         command_buffer  = nullptr;
+    id<MTL4::ArgumentTable>         argument_table  = nullptr;
     id<MTL4::ComputeCommandEncoder> compute_encoder = nullptr;
     id<MTL4::RenderCommandEncoder>  render_encoder  = nullptr;
 
     MTL::PrimitiveType current_topology;
-    MTL::Size required_threadgroup_size;  // Required threadgroup size of the currently bound
-                                          // compute pipeline.
+    Dimension3D required_threadgroup_size;  // Required threadgroup size of the currently bound
+                                            // compute pipeline.
 
     bool waits_for_drawable = false;
     bool signals_drawable   = false;
 };
 
 struct CommandPool {
-    id<MTL4::CommandAllocator>      allocator      = nullptr;
-    id<MTL4::ArgumentTable>         argument_table = nullptr;
-    SegmentArray<CommandBufferImpl> command_buffers;  // In theory
-    uint64_t                        frame_idx       = 0;
-    uint32_t                        buffer_free_idx = 0;
-};
+    id<MTL4::CommandAllocator> allocator       = nullptr;
+    id<MTL4::ArgumentTable>    argument_table  = nullptr;
+    uint32_t                   buffer_free_idx = 0;
+    Vector<CommandBufferImpl>  command_buffers;
 
-struct CommandSuperpool {
-    static constexpr uint32_t kPoolsPerGroup                                   = 3;
-    static constexpr uint32_t kMaxSimultaneousCommands                         = 64;
-    int64_t                   available_pools                                  = ~0;
-    CommandPool               pools[kMaxSimultaneousCommands * kPoolsPerGroup] = {};
+    void reset() {
+        if (allocator) {
+            allocator->reset();
+            buffer_free_idx = 0;
+        }
+    }
 };
 
 struct QueueImpl {
@@ -157,11 +157,11 @@ struct QueueImpl {
         Function<void> callback;
     };
 
-    id<MTL4::CommandQueue> command_queue = nullptr;
-    CommandSuperpool       command_superpool;
-    id<MTL::SharedEvent>   callback_event = nullptr;
-    Vector<Event>          pending_events;
-    uint64_t               timeline_value = 0;
+    id<MTL4::CommandQueue>        command_queue = nullptr;
+    CommandSuperpool<CommandPool> command_superpool;
+    id<MTL::SharedEvent>          callback_event = nullptr;
+    Vector<Event>                 pending_events;
+    uint64_t                      timeline_value = 0;
 
     Device device = nullptr;
 };
@@ -446,6 +446,7 @@ SurfaceTextureInfo get_current_texture(Device d) {
 
 SurfaceStatus present(Device d, Queue queue) {
     (void)queue;
+    queue->command_superpool.end_of_frame();
     d->surface.current_drawable->present();
     d->surface.current_drawable = nullptr;
     d->texture_pool.erase(d->surface.current_texture);
@@ -946,28 +947,14 @@ void free(Device d, Handle<Semaphore> sema) {
 
 // MARK: Queue
 
-static void reset_command_pool(CommandPool* pool) {
-    pool->allocator->reset();
-    pool->buffer_free_idx = 0;
-}
 
-static CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
-    CommandSuperpool& superpool       = queue->command_superpool;
-    CommandPool*      pool            = nullptr;
-    int64_t           available_pools = atomic_load(&superpool.available_pools);
-    bool              index_good      = false;
-    uint64_t          idx;
-    while (!index_good && available_pools != 0) {
-        idx                    = count_trailing_zeros(available_pools);
-        const uint64_t mask    = ~(1ull << idx);
-        const int64_t  desired = static_cast<int64_t>(available_pools & mask);
-        index_good = atomic_compare_exchange(&superpool.available_pools, &available_pools, desired);
-    }
+static CommandPool* get_command_pool(Queue queue) {
+    CommandSuperpool<CommandPool>& superpool = queue->command_superpool;
 
-    if (index_good) {
-        pool = &superpool.pools[CommandSuperpool::kPoolsPerGroup * idx +
-                                (frame_idx % CommandSuperpool::kPoolsPerGroup)];
+    CommandPool* pool = superpool.acquire_command_pool();
 
+
+    if (pool) {
         if (!pool->allocator) {
             auto argument_table_desc = make_id<MTL4::ArgumentTableDescriptor>();
             argument_table_desc->setMaxBufferBindCount(2);
@@ -979,13 +966,11 @@ static CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
                 .allocator      = NS::TransferPtr(queue->device->device->newCommandAllocator()),
                 .argument_table = NS::TransferPtr(
                     queue->device->device->newArgumentTable(argument_table_desc.get(), nullptr)),
-                .command_buffers = SegmentArray<CommandBufferImpl>(queue->device->allocator),
-                .frame_idx       = 0,
                 .buffer_free_idx = 0,
+                .command_buffers = Vector<CommandBufferImpl>(
+                    queue->device->allocator,
+                    CommandSuperpool<CommandPool>::kMaxCommandBuffersPerPool),
             };
-        } else if (pool->frame_idx != frame_idx) {
-            // Last time this was used was on a different frame, so reset the pool.
-            reset_command_pool(pool);
         }
     } else {
         LOON_LOG(queue->device,
@@ -997,16 +982,8 @@ static CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
 }
 
 static void release_command_pool(Queue q, CommandPool* pool) {
-    auto&         superpool = q->command_superpool;
-    const int64_t idx       = (pool - superpool.pools) / CommandSuperpool::kPoolsPerGroup;
-
-    // Need to set the bit in available pools using a compare-exchange loop
-    int64_t previous = atomic_load(&superpool.available_pools);
-
-    int64_t desired = previous | (1ll << idx);
-    while (!atomic_compare_exchange(&superpool.available_pools, &previous, desired)) {
-        desired = previous | (1ll << idx);
-    }
+    auto& superpool = q->command_superpool;
+    superpool.release_command_pool(pool);
 }
 
 static CommandBufferImpl* get_command_buffer(Queue q, CommandPool* pool) {
@@ -1014,11 +991,11 @@ static CommandBufferImpl* get_command_buffer(Queue q, CommandPool* pool) {
 
     if (pool->command_buffers.size() <= pool->buffer_free_idx) {
         pool->command_buffers.emplace_back(CommandBufferImpl{
-            .command_buffer = NS::TransferPtr(device->device->newCommandBuffer()),
-            .argument_table = pool->argument_table,
+            .device         = device,
             .queue          = q,
             .pool           = pool,
-            .device         = device,
+            .command_buffer = NS::TransferPtr(device->device->newCommandBuffer()),
+            .argument_table = pool->argument_table,
         });
     }
 
@@ -1031,11 +1008,12 @@ Queue get_queue(Device d, QueueType type) {
     (void)type;  // TODO: Support multiple queues.
     if (!d->queue.command_queue) {
         d->queue = {
-            .command_queue  = NS::TransferPtr(d->device->newMTL4CommandQueue()),
-            .callback_event = NS::TransferPtr(d->device->newSharedEvent()),
-            .pending_events = Vector<QueueImpl::Event>(d->allocator),
-            .timeline_value = 0,
-            .device         = d,
+            .command_queue     = NS::TransferPtr(d->device->newMTL4CommandQueue()),
+            .command_superpool = CommandSuperpool<CommandPool>(d->allocator, 256),
+            .callback_event    = NS::TransferPtr(d->device->newSharedEvent()),
+            .pending_events    = Vector<QueueImpl::Event>(d->allocator),
+            .timeline_value    = 0,
+            .device            = d,
         };
     }
 
@@ -1045,7 +1023,7 @@ Queue get_queue(Device d, QueueType type) {
 CommandBuffer queue_start_command_recording(Queue q) {
     auto d = q->device;
 
-    CommandPool* pool = get_command_pool(q, d->surface.frame_idx);
+    CommandPool* pool = get_command_pool(q);
     if (pool == nullptr) { return nullptr; }
 
     CommandBuffer buffer = get_command_buffer(q, pool);
@@ -1092,6 +1070,10 @@ void queue_submit(Queue                     q,
         q->command_queue->signalEvent(event.get(), s.value);
     }
 
+    q->command_queue->signalEvent(q->callback_event.get(), q->timeline_value);
+    q->command_superpool.on_queue_submit(q->timeline_value, q->callback_event->signaledValue());
+    ++q->timeline_value;
+
     if (signal_drawable) { q->command_queue->signalDrawable(d->surface.current_drawable.get()); }
 }
 
@@ -1103,7 +1085,6 @@ void queue_cancel(Queue q, Span<const Handle<CommandBuffer>> command_buffers) {
 void queue_on_submitted_work_completed(Queue q, Function<void>&& fn) {
     q->pending_events.emplace_back(
         QueueImpl::Event{.completed_time = q->timeline_value, .callback = std::move(fn)});
-    q->command_queue->signalEvent(q->callback_event.get(), q->timeline_value++);
 }
 
 void queue_process_events(Queue q) {
@@ -1254,9 +1235,7 @@ void cmd_set_pipeline(CommandBuffer cmd, Handle<Pipeline> pipeline) {
     } else {
         auto compute_encoder = get_compute_encoder(cmd);
         compute_encoder->setComputePipelineState(p.compute_pipeline.get());
-        cmd->required_threadgroup_size = MTL::Size::Make(p.metadata.required_threadgroup_size.x,
-                                                         p.metadata.required_threadgroup_size.y,
-                                                         p.metadata.required_threadgroup_size.z);
+        cmd->required_threadgroup_size = p.metadata.required_threadgroup_size;
     }
 }
 
@@ -1310,7 +1289,9 @@ void cmd_dispatch(CommandBuffer cmd, GpuPtr dataGpu, const Dimension3D& gridDime
     set_compute_ptrs(cmd, dataGpu);
     encoder->dispatchThreadgroups(
         MTL::Size::Make(gridDimensions.x, gridDimensions.y, gridDimensions.z),
-        cmd->required_threadgroup_size);
+        MTL::Size::Make(cmd->required_threadgroup_size.x,
+                        cmd->required_threadgroup_size.y,
+                        cmd->required_threadgroup_size.z));
 }
 
 void cmd_dispatch_indirect(CommandBuffer cmd, GpuPtr dataGpu, GpuPtr gridDimensionsGpu) {
@@ -1321,7 +1302,10 @@ void cmd_dispatch_indirect(CommandBuffer cmd, GpuPtr dataGpu, GpuPtr gridDimensi
 
     auto encoder = get_compute_encoder(cmd);
     set_compute_ptrs(cmd, dataGpu);
-    encoder->dispatchThreadgroups(gridDimensionsGpu, cmd->required_threadgroup_size);
+    encoder->dispatchThreadgroups(gridDimensionsGpu,
+                                  MTL::Size::Make(cmd->required_threadgroup_size.x,
+                                                  cmd->required_threadgroup_size.y,
+                                                  cmd->required_threadgroup_size.z));
 }
 
 void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {

@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "command_superpool.h"
 #include "containers.h"
 #include "gpu_to_vk.h"
 #include "platform_utils.h"
@@ -175,17 +176,11 @@ struct CommandBufferImpl {
 };
 
 struct CommandPool {
-    VkCommandPool                   command_pool = VK_NULL_HANDLE;
-    SegmentArray<CommandBufferImpl> command_buffers;
-    uint64_t buffer_free_idx = 0;  // Index of the next command_buffer to use.
-    uint64_t frame_idx       = 0;  // Frame index of the last time this pool was used.
-};
+    VkCommandPool             command_pool = VK_NULL_HANDLE;
+    Vector<CommandBufferImpl> command_buffers;
+    uint64_t                  buffer_free_idx = 0;  // Index of the next command_buffer to use.
 
-struct CommandSuperpool {
-    static constexpr uint32_t kPoolsPerGroup           = Surface::kMaxFramesInFlight;
-    static constexpr uint32_t kMaxSimultaneousCommands = 64;
-    int64_t                   available_pools          = ~0;
-    CommandPool               pools[kMaxSimultaneousCommands * kPoolsPerGroup] = {};
+    void reset();
 };
 
 struct QueueImpl {
@@ -194,13 +189,13 @@ struct QueueImpl {
         Function<void> callback;
     };
 
-    Device            device            = nullptr;
-    VkQueue           queue             = VK_NULL_HANDLE;
-    CommandSuperpool  command_superpool = {};
-    Handle<Semaphore> timeline          = {};
-    uint32_t          queue_family      = 0;
-    uint64_t          timeline_value    = 0;
-    Vector<Event>     pending_events;
+    Device                        device            = nullptr;
+    VkQueue                       queue             = VK_NULL_HANDLE;
+    CommandSuperpool<CommandPool> command_superpool = {};
+    Handle<Semaphore>             timeline          = {};
+    uint32_t                      queue_family      = 0;
+    uint64_t                      timeline_value    = 0;
+    Vector<Event>                 pending_events;
 };
 
 struct ThreadLocalState {
@@ -1238,11 +1233,11 @@ void destroy_device(Device d) {
 
     for (auto& q : d->queues) {
         if (q.queue != VK_NULL_HANDLE) {
-            for (auto& p : q.command_superpool.pools) {
+            q.command_superpool.visit_pools([&](const CommandPool& p) {
                 if (p.command_pool) {
                     d->api.vkDestroyCommandPool(d->device, p.command_pool, nullptr);
                 }
-            }
+            });
         }
     }
 
@@ -1560,6 +1555,7 @@ SurfaceStatus present(Device d, Queue q) {
 
     VkResult res = d->api.vkQueuePresentKHR(q->queue, &present_info);
     d->surface.frame_idx++;
+    q->command_superpool.end_of_frame();
     switch (res) {
         case VK_SUCCESS: return SurfaceStatus::Success;
         case VK_SUBOPTIMAL_KHR: return SurfaceStatus::Suboptimal;
@@ -2440,7 +2436,7 @@ Queue get_queue(Device d, QueueType type) {
         d->queues[static_cast<uint32_t>(type)] = {
             .device            = d,
             .queue             = queue,
-            .command_superpool = {},
+            .command_superpool = {d->allocator, 512},
             .timeline          = timeline,
             .queue_family      = queue_family,
             .timeline_value    = 0,
@@ -2496,29 +2492,18 @@ void free(Device d, Handle<Semaphore> sema) {
 
 // MARK: Queue
 
-static void reset_command_pool(const VolkDeviceTable& api, VkDevice device, CommandPool* pool) {
-    api.vkResetCommandPool(device, pool->command_pool, 0);
-    pool->buffer_free_idx = 0;
+void CommandPool::reset() {
+    if (command_pool != VK_NULL_HANDLE && command_buffers.size() > 0) {
+        Device device = command_buffers[0].device;
+        device->api.vkResetCommandPool(device->device, command_pool, 0);
+        buffer_free_idx = 0;
+    }
 }
 
-CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
-    CommandSuperpool& superpool       = queue->command_superpool;
-    CommandPool*      pool            = nullptr;
-    int64_t           available_pools = atomic_load(&superpool.available_pools);
-    bool              index_good      = false;
-    uint64_t          idx;
-    while (!index_good && available_pools != 0) {
-        // Try to clear the lowest set bit using a compare_exchange loop.
-        idx                    = count_trailing_zeros(available_pools);
-        const uint64_t mask    = ~(1ull << idx);
-        const int64_t  desired = static_cast<int64_t>(available_pools & mask);
-        index_good = atomic_compare_exchange(&superpool.available_pools, &available_pools, desired);
-    };
-
-    if (index_good) {
-        pool = &superpool.pools[CommandSuperpool::kPoolsPerGroup * idx +
-                                (frame_idx % CommandSuperpool::kPoolsPerGroup)];
-
+CommandPool* get_command_pool(Queue queue) {
+    auto&        superpool = queue->command_superpool;
+    CommandPool* pool      = superpool.acquire_command_pool();
+    if (pool) {
         if (pool->command_pool == VK_NULL_HANDLE) {
             // Initialize the command pool here.
             VkCommandPoolCreateInfo pool_info{
@@ -2536,14 +2521,11 @@ CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
                      "gpu::get_command_pool: Error in vkCreateCommandPool");
             *pool = CommandPool{
                 .command_pool    = command_pool,
-                .command_buffers = SegmentArray<CommandBufferImpl>(queue->device->allocator),
+                .command_buffers = Vector<CommandBufferImpl>(
+                    queue->device->allocator,
+                    CommandSuperpool<CommandPool>::kMaxCommandBuffersPerPool),
                 .buffer_free_idx = 0,
-                .frame_idx       = frame_idx,
             };
-        } else if (pool->frame_idx != frame_idx) {
-            // Last time this was used was on a different frame, so reset the pool.
-            reset_command_pool(queue->device->api, queue->device->device, pool);
-            pool->frame_idx = frame_idx;
         }
     } else {
         LOON_LOG(queue->device,
@@ -2554,16 +2536,8 @@ CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
 }
 
 static void release_command_pool(Queue q, CommandPool* pool) {
-    auto&         superpool = q->command_superpool;
-    const int64_t idx       = (pool - superpool.pools) / CommandSuperpool::kPoolsPerGroup;
-
-    // Need to set the bit in available pools using a compare-exchange loop
-    int64_t previous = atomic_load(&superpool.available_pools);
-
-    int64_t desired = previous | (1ll << idx);
-    while (!atomic_compare_exchange(&superpool.available_pools, &previous, desired)) {
-        desired = previous | (1ll << idx);
-    }
+    auto& superpool = q->command_superpool;
+    superpool.release_command_pool(pool);
 }
 
 static CommandBufferImpl* get_command_buffer(Queue q, CommandPool* pool) {
@@ -2602,7 +2576,7 @@ static CommandBufferImpl* get_command_buffer(Queue q, CommandPool* pool) {
 CommandBuffer queue_start_command_recording(Queue q) {
     auto d = q->device;
 
-    CommandPool* pool = get_command_pool(q, d->surface.frame_idx);
+    CommandPool* pool = get_command_pool(q);
     if (pool == nullptr) { return nullptr; }
 
     CommandBuffer buffer = get_command_buffer(q, pool);
@@ -2816,6 +2790,12 @@ void queue_submit(Queue                     q,
     };
 
     d->api.vkQueueSubmit2(q->queue, 1, &submit_info, VK_NULL_HANDLE);
+
+    uint64_t completed_value = 0;
+    d->api.vkGetSemaphoreCounterValue(d->device,
+                                      d->semaphore_pool[q->timeline].vk_semaphore,
+                                      &completed_value);
+    q->command_superpool.on_queue_submit(q->timeline_value, completed_value);
 }
 
 void queue_cancel(Queue q, Span<const Handle<CommandBuffer>> command_buffers) {
