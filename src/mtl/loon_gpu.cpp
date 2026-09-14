@@ -121,28 +121,28 @@ struct Surface {
 
 struct CommandPool;
 struct CommandBufferImpl {
-    id<MTL4::CommandBuffer>         command_buffer = nullptr;
-    id<MTL4::ArgumentTable>         argument_table = nullptr;
+    Device                          device;
     Queue                           queue;
     CommandPool*                    pool;
-    Device                          device;
+    id<MTL4::CommandBuffer>         command_buffer  = nullptr;
+    id<MTL4::ArgumentTable>         argument_table  = nullptr;
     id<MTL4::ComputeCommandEncoder> compute_encoder = nullptr;
     id<MTL4::RenderCommandEncoder>  render_encoder  = nullptr;
 
     MTL::PrimitiveType current_topology;
-    MTL::Size required_threadgroup_size;  // Required threadgroup size of the currently bound
-                                          // compute pipeline.
+    Dimension3D required_threadgroup_size;  // Required threadgroup size of the currently bound
+                                            // compute pipeline.
 
     bool waits_for_drawable = false;
     bool signals_drawable   = false;
 };
 
 struct CommandPool {
-    id<MTL4::CommandAllocator>         allocator       = nullptr;
-    id<MTL4::ArgumentTable>            argument_table  = nullptr;
-    uint64_t                           frame_idx       = 0;
-    uint32_t                           buffer_free_idx = 0;
-    SegmentArray<CommandBufferImpl, 1> command_buffers;
+    id<MTL4::CommandAllocator> allocator       = nullptr;
+    id<MTL4::ArgumentTable>    argument_table  = nullptr;
+    uint64_t                   frame_idx       = 0;
+    uint32_t                   buffer_free_idx = 0;
+    Vector<CommandBufferImpl>  command_buffers;
 };
 
 struct QueueImpl {
@@ -966,7 +966,9 @@ static CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
                     queue->device->device->newArgumentTable(argument_table_desc.get(), nullptr)),
                 .frame_idx       = 0,
                 .buffer_free_idx = 0,
-                .command_buffers = SegmentArray<CommandBufferImpl, 1>(queue->device->allocator),
+                .command_buffers = Vector<CommandBufferImpl>(
+                    queue->device->allocator,
+                    CommandSuperpool<CommandPool>::kMaxCommandBuffersPerPool),
             };
         } else if (pool->frame_idx != frame_idx) {
             // Last time this was used was on a different frame, so reset the pool.
@@ -991,11 +993,11 @@ static CommandBufferImpl* get_command_buffer(Queue q, CommandPool* pool) {
 
     if (pool->command_buffers.size() <= pool->buffer_free_idx) {
         pool->command_buffers.emplace_back(CommandBufferImpl{
-            .command_buffer = NS::TransferPtr(device->device->newCommandBuffer()),
-            .argument_table = pool->argument_table,
+            .device         = device,
             .queue          = q,
             .pool           = pool,
-            .device         = device,
+            .command_buffer = NS::TransferPtr(device->device->newCommandBuffer()),
+            .argument_table = pool->argument_table,
         });
     }
 
@@ -1235,9 +1237,7 @@ void cmd_set_pipeline(CommandBuffer cmd, Handle<Pipeline> pipeline) {
     } else {
         auto compute_encoder = get_compute_encoder(cmd);
         compute_encoder->setComputePipelineState(p.compute_pipeline.get());
-        cmd->required_threadgroup_size = MTL::Size::Make(p.metadata.required_threadgroup_size.x,
-                                                         p.metadata.required_threadgroup_size.y,
-                                                         p.metadata.required_threadgroup_size.z);
+        cmd->required_threadgroup_size = p.metadata.required_threadgroup_size;
     }
 }
 
@@ -1291,7 +1291,9 @@ void cmd_dispatch(CommandBuffer cmd, GpuPtr dataGpu, const Dimension3D& gridDime
     set_compute_ptrs(cmd, dataGpu);
     encoder->dispatchThreadgroups(
         MTL::Size::Make(gridDimensions.x, gridDimensions.y, gridDimensions.z),
-        cmd->required_threadgroup_size);
+        MTL::Size::Make(cmd->required_threadgroup_size.x,
+                        cmd->required_threadgroup_size.y,
+                        cmd->required_threadgroup_size.z));
 }
 
 void cmd_dispatch_indirect(CommandBuffer cmd, GpuPtr dataGpu, GpuPtr gridDimensionsGpu) {
@@ -1302,7 +1304,10 @@ void cmd_dispatch_indirect(CommandBuffer cmd, GpuPtr dataGpu, GpuPtr gridDimensi
 
     auto encoder = get_compute_encoder(cmd);
     set_compute_ptrs(cmd, dataGpu);
-    encoder->dispatchThreadgroups(gridDimensionsGpu, cmd->required_threadgroup_size);
+    encoder->dispatchThreadgroups(gridDimensionsGpu,
+                                  MTL::Size::Make(cmd->required_threadgroup_size.x,
+                                                  cmd->required_threadgroup_size.y,
+                                                  cmd->required_threadgroup_size.z));
 }
 
 void cmd_begin_render_pass(CommandBuffer cmd, RenderPassDesc desc) {

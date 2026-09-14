@@ -37,6 +37,8 @@ class CommandSuperpool {
     CommandSuperpool(Allocator alloc, uint32_t max_command_pools) :
         m_nodes(alloc, max_command_pools) {}
 
+    static constexpr uint32_t kMaxCommandBuffersPerPool = 32;
+
     /**
      * @brief Get a command pool that can be used to record a command buffer, or nullptr if all
      * command pools are already being used.
@@ -148,16 +150,16 @@ class CommandSuperpool {
         return result;
     }
 
-    static constexpr uint32_t kInvalidIdx               = ~0u;
-    static constexpr uint32_t kMaxCommandBuffersPerPool = 32;
-    NodeHead                  m_current_frame_nodes_head;
-    NodeHead                  m_available_nodes_head;
-    NodeHead                  m_locked_nodes_head;
-    uint32_t                  m_allocated_nodes_count = 0;
-    uint64_t                  m_current_timeline_idx  = 0;
-    mutex m_mutex = LOON_MUTEX_INIT;  // We should only need to lock when creating a new command
-                                      // pool. In steady state usage, we should be lock free.
-    Vector<Node> m_nodes;             // We never grow this, but instead just pre-allocate to a
+    static constexpr uint32_t kInvalidIdx = ~0u;
+
+    NodeHead m_current_frame_nodes_head;
+    NodeHead m_available_nodes_head;
+    NodeHead m_locked_nodes_head;
+    uint32_t m_allocated_nodes_count = 0;
+    uint64_t m_current_timeline_idx  = 0;
+    mutex    m_mutex = LOON_MUTEX_INIT;  // We should only need to lock when creating a new command
+                                         // pool. In steady state usage, we should be lock free.
+    Vector<Node> m_nodes;                // We never grow this, but instead just pre-allocate to a
 };
 
 template <class P>

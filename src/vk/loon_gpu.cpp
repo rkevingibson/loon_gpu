@@ -176,10 +176,10 @@ struct CommandBufferImpl {
 };
 
 struct CommandPool {
-    VkCommandPool                   command_pool = VK_NULL_HANDLE;
-    SegmentArray<CommandBufferImpl> command_buffers;
-    uint64_t buffer_free_idx = 0;  // Index of the next command_buffer to use.
-    uint64_t frame_idx       = 0;  // Frame index of the last time this pool was used.
+    VkCommandPool             command_pool = VK_NULL_HANDLE;
+    Vector<CommandBufferImpl> command_buffers;
+    uint64_t                  buffer_free_idx = 0;  // Index of the next command_buffer to use.
+    uint64_t                  frame_idx = 0;  // Frame index of the last time this pool was used.
 };
 
 struct QueueImpl {
@@ -2517,7 +2517,9 @@ CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
                      "gpu::get_command_pool: Error in vkCreateCommandPool");
             *pool = CommandPool{
                 .command_pool    = command_pool,
-                .command_buffers = SegmentArray<CommandBufferImpl>(queue->device->allocator),
+                .command_buffers = Vector<CommandBufferImpl>(
+                    queue->device->allocator,
+                    CommandSuperpool<CommandPool>::kMaxCommandBuffersPerPool),
                 .buffer_free_idx = 0,
                 .frame_idx       = frame_idx,
             };
