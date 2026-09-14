@@ -231,7 +231,8 @@ class Vector {
     constexpr const T* begin() const { return m_data; }
     constexpr T*       end() { return m_data + m_count; }
     constexpr const T* end() const { return m_data + m_count; }
-    constexpr uint32_t size() const { return m_count; }
+    constexpr uint32_t size() const noexcept { return m_count; }
+    constexpr uint32_t capacity() const noexcept { return m_capacity; }
     constexpr bool     is_empty() const { return m_count == 0; }
 
    private:
@@ -250,11 +251,10 @@ class Vector {
 
 // As described by https://danielchasehooper.com/posts/segment_array, an array that gives
 // pointer-stability on growth.
-template <class T>
+template <class T, int NumSegments = 8>
 class SegmentArray {
    public:
-    using DestructorFn = Function<void, T*>;
-    SegmentArray()     = default;
+    SegmentArray() = default;
     SegmentArray(Allocator alloc) : m_allocator(alloc) {};
     ~SegmentArray() { clear(); };
 
@@ -329,8 +329,8 @@ class SegmentArray {
     uint32_t  m_used_segments = 0;
     uint32_t  m_count         = 0;
     Allocator m_allocator;
-    // Smallest segment is 64 items, 26 segments get us to ~4 billion items
-    T* m_segments[26] = {nullptr};
+    // Smallest segment is 64 items, 8 segments get us to ~16k items
+    T* m_segments[NumSegments] = {nullptr};
 };
 
 // MARK: Slot Map

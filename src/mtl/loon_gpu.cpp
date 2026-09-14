@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "command_superpool.h"
 #include "format_info.h"
 #include "metal_compute_metadata.h"
 #include "platform_utils.h"
@@ -137,18 +138,11 @@ struct CommandBufferImpl {
 };
 
 struct CommandPool {
-    id<MTL4::CommandAllocator>      allocator      = nullptr;
-    id<MTL4::ArgumentTable>         argument_table = nullptr;
-    SegmentArray<CommandBufferImpl> command_buffers;  // In theory
-    uint64_t                        frame_idx       = 0;
-    uint32_t                        buffer_free_idx = 0;
-};
-
-struct CommandSuperpool {
-    static constexpr uint32_t kPoolsPerGroup                                   = 3;
-    static constexpr uint32_t kMaxSimultaneousCommands                         = 64;
-    int64_t                   available_pools                                  = ~0;
-    CommandPool               pools[kMaxSimultaneousCommands * kPoolsPerGroup] = {};
+    id<MTL4::CommandAllocator>         allocator       = nullptr;
+    id<MTL4::ArgumentTable>            argument_table  = nullptr;
+    uint64_t                           frame_idx       = 0;
+    uint32_t                           buffer_free_idx = 0;
+    SegmentArray<CommandBufferImpl, 1> command_buffers;
 };
 
 struct QueueImpl {
@@ -157,11 +151,11 @@ struct QueueImpl {
         Function<void> callback;
     };
 
-    id<MTL4::CommandQueue> command_queue = nullptr;
-    CommandSuperpool       command_superpool;
-    id<MTL::SharedEvent>   callback_event = nullptr;
-    Vector<Event>          pending_events;
-    uint64_t               timeline_value = 0;
+    id<MTL4::CommandQueue>        command_queue = nullptr;
+    CommandSuperpool<CommandPool> command_superpool;
+    id<MTL::SharedEvent>          callback_event = nullptr;
+    Vector<Event>                 pending_events;
+    uint64_t                      timeline_value = 0;
 
     Device device = nullptr;
 };
@@ -446,6 +440,7 @@ SurfaceTextureInfo get_current_texture(Device d) {
 
 SurfaceStatus present(Device d, Queue queue) {
     (void)queue;
+    queue->command_superpool.end_of_frame();
     d->surface.current_drawable->present();
     d->surface.current_drawable = nullptr;
     d->texture_pool.erase(d->surface.current_texture);
@@ -952,22 +947,12 @@ static void reset_command_pool(CommandPool* pool) {
 }
 
 static CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
-    CommandSuperpool& superpool       = queue->command_superpool;
-    CommandPool*      pool            = nullptr;
-    int64_t           available_pools = atomic_load(&superpool.available_pools);
-    bool              index_good      = false;
-    uint64_t          idx;
-    while (!index_good && available_pools != 0) {
-        idx                    = count_trailing_zeros(available_pools);
-        const uint64_t mask    = ~(1ull << idx);
-        const int64_t  desired = static_cast<int64_t>(available_pools & mask);
-        index_good = atomic_compare_exchange(&superpool.available_pools, &available_pools, desired);
-    }
+    CommandSuperpool<CommandPool>& superpool = queue->command_superpool;
 
-    if (index_good) {
-        pool = &superpool.pools[CommandSuperpool::kPoolsPerGroup * idx +
-                                (frame_idx % CommandSuperpool::kPoolsPerGroup)];
+    CommandPool* pool = superpool.acquire_command_pool();
 
+
+    if (pool) {
         if (!pool->allocator) {
             auto argument_table_desc = make_id<MTL4::ArgumentTableDescriptor>();
             argument_table_desc->setMaxBufferBindCount(2);
@@ -979,9 +964,9 @@ static CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
                 .allocator      = NS::TransferPtr(queue->device->device->newCommandAllocator()),
                 .argument_table = NS::TransferPtr(
                     queue->device->device->newArgumentTable(argument_table_desc.get(), nullptr)),
-                .command_buffers = SegmentArray<CommandBufferImpl>(queue->device->allocator),
                 .frame_idx       = 0,
                 .buffer_free_idx = 0,
+                .command_buffers = SegmentArray<CommandBufferImpl, 1>(queue->device->allocator),
             };
         } else if (pool->frame_idx != frame_idx) {
             // Last time this was used was on a different frame, so reset the pool.
@@ -997,16 +982,8 @@ static CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
 }
 
 static void release_command_pool(Queue q, CommandPool* pool) {
-    auto&         superpool = q->command_superpool;
-    const int64_t idx       = (pool - superpool.pools) / CommandSuperpool::kPoolsPerGroup;
-
-    // Need to set the bit in available pools using a compare-exchange loop
-    int64_t previous = atomic_load(&superpool.available_pools);
-
-    int64_t desired = previous | (1ll << idx);
-    while (!atomic_compare_exchange(&superpool.available_pools, &previous, desired)) {
-        desired = previous | (1ll << idx);
-    }
+    auto& superpool = q->command_superpool;
+    superpool.release_command_pool(pool);
 }
 
 static CommandBufferImpl* get_command_buffer(Queue q, CommandPool* pool) {
@@ -1031,11 +1008,12 @@ Queue get_queue(Device d, QueueType type) {
     (void)type;  // TODO: Support multiple queues.
     if (!d->queue.command_queue) {
         d->queue = {
-            .command_queue  = NS::TransferPtr(d->device->newMTL4CommandQueue()),
-            .callback_event = NS::TransferPtr(d->device->newSharedEvent()),
-            .pending_events = Vector<QueueImpl::Event>(d->allocator),
-            .timeline_value = 0,
-            .device         = d,
+            .command_queue     = NS::TransferPtr(d->device->newMTL4CommandQueue()),
+            .command_superpool = CommandSuperpool<CommandPool>(d->allocator, 256),
+            .callback_event    = NS::TransferPtr(d->device->newSharedEvent()),
+            .pending_events    = Vector<QueueImpl::Event>(d->allocator),
+            .timeline_value    = 0,
+            .device            = d,
         };
     }
 
@@ -1092,6 +1070,10 @@ void queue_submit(Queue                     q,
         q->command_queue->signalEvent(event.get(), s.value);
     }
 
+    q->command_queue->signalEvent(q->callback_event.get(), q->timeline_value);
+    q->command_superpool.on_queue_submit(q->timeline_value, q->callback_event->signaledValue());
+    ++q->timeline_value;
+
     if (signal_drawable) { q->command_queue->signalDrawable(d->surface.current_drawable.get()); }
 }
 
@@ -1103,7 +1085,6 @@ void queue_cancel(Queue q, Span<const Handle<CommandBuffer>> command_buffers) {
 void queue_on_submitted_work_completed(Queue q, Function<void>&& fn) {
     q->pending_events.emplace_back(
         QueueImpl::Event{.completed_time = q->timeline_value, .callback = std::move(fn)});
-    q->command_queue->signalEvent(q->callback_event.get(), q->timeline_value++);
 }
 
 void queue_process_events(Queue q) {
