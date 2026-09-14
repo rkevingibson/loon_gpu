@@ -140,9 +140,15 @@ struct CommandBufferImpl {
 struct CommandPool {
     id<MTL4::CommandAllocator> allocator       = nullptr;
     id<MTL4::ArgumentTable>    argument_table  = nullptr;
-    uint64_t                   frame_idx       = 0;
     uint32_t                   buffer_free_idx = 0;
     Vector<CommandBufferImpl>  command_buffers;
+
+    void reset() {
+        if (allocator) {
+            allocator->reset();
+            buffer_free_idx = 0;
+        }
+    }
 };
 
 struct QueueImpl {
@@ -941,12 +947,8 @@ void free(Device d, Handle<Semaphore> sema) {
 
 // MARK: Queue
 
-static void reset_command_pool(CommandPool* pool) {
-    pool->allocator->reset();
-    pool->buffer_free_idx = 0;
-}
 
-static CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
+static CommandPool* get_command_pool(Queue queue) {
     CommandSuperpool<CommandPool>& superpool = queue->command_superpool;
 
     CommandPool* pool = superpool.acquire_command_pool();
@@ -964,15 +966,11 @@ static CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
                 .allocator      = NS::TransferPtr(queue->device->device->newCommandAllocator()),
                 .argument_table = NS::TransferPtr(
                     queue->device->device->newArgumentTable(argument_table_desc.get(), nullptr)),
-                .frame_idx       = 0,
                 .buffer_free_idx = 0,
                 .command_buffers = Vector<CommandBufferImpl>(
                     queue->device->allocator,
                     CommandSuperpool<CommandPool>::kMaxCommandBuffersPerPool),
             };
-        } else if (pool->frame_idx != frame_idx) {
-            // Last time this was used was on a different frame, so reset the pool.
-            reset_command_pool(pool);
         }
     } else {
         LOON_LOG(queue->device,
@@ -1025,7 +1023,7 @@ Queue get_queue(Device d, QueueType type) {
 CommandBuffer queue_start_command_recording(Queue q) {
     auto d = q->device;
 
-    CommandPool* pool = get_command_pool(q, d->surface.frame_idx);
+    CommandPool* pool = get_command_pool(q);
     if (pool == nullptr) { return nullptr; }
 
     CommandBuffer buffer = get_command_buffer(q, pool);

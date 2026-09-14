@@ -179,7 +179,8 @@ struct CommandPool {
     VkCommandPool             command_pool = VK_NULL_HANDLE;
     Vector<CommandBufferImpl> command_buffers;
     uint64_t                  buffer_free_idx = 0;  // Index of the next command_buffer to use.
-    uint64_t                  frame_idx = 0;  // Frame index of the last time this pool was used.
+
+    void reset();
 };
 
 struct QueueImpl {
@@ -2491,12 +2492,15 @@ void free(Device d, Handle<Semaphore> sema) {
 
 // MARK: Queue
 
-static void reset_command_pool(const VolkDeviceTable& api, VkDevice device, CommandPool* pool) {
-    api.vkResetCommandPool(device, pool->command_pool, 0);
-    pool->buffer_free_idx = 0;
+void CommandPool::reset() {
+    if (command_pool != VK_NULL_HANDLE && command_buffers.size() > 0) {
+        Device device = command_buffers[0].device;
+        device->api.vkResetCommandPool(device->device, command_pool, 0);
+        buffer_free_idx = 0;
+    }
 }
 
-CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
+CommandPool* get_command_pool(Queue queue) {
     auto&        superpool = queue->command_superpool;
     CommandPool* pool      = superpool.acquire_command_pool();
     if (pool) {
@@ -2521,12 +2525,7 @@ CommandPool* get_command_pool(Queue queue, uint64_t frame_idx) {
                     queue->device->allocator,
                     CommandSuperpool<CommandPool>::kMaxCommandBuffersPerPool),
                 .buffer_free_idx = 0,
-                .frame_idx       = frame_idx,
             };
-        } else if (pool->frame_idx != frame_idx) {
-            // Last time this was used was on a different frame, so reset the pool.
-            reset_command_pool(queue->device->api, queue->device->device, pool);
-            pool->frame_idx = frame_idx;
         }
     } else {
         LOON_LOG(queue->device,
@@ -2577,7 +2576,7 @@ static CommandBufferImpl* get_command_buffer(Queue q, CommandPool* pool) {
 CommandBuffer queue_start_command_recording(Queue q) {
     auto d = q->device;
 
-    CommandPool* pool = get_command_pool(q, d->surface.frame_idx);
+    CommandPool* pool = get_command_pool(q);
     if (pool == nullptr) { return nullptr; }
 
     CommandBuffer buffer = get_command_buffer(q, pool);

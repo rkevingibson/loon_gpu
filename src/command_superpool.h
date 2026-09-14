@@ -167,7 +167,10 @@ P* CommandSuperpool<P>::acquire_command_pool() {
     Node* n = try_pop_stack(&m_current_frame_nodes_head);
     if (n == nullptr) {
         n = try_pop_stack(&m_available_nodes_head);
-        if (n) n->times_used_this_frame = 0;
+        if (n) {
+            n->pool.reset();
+            n->times_used_this_frame = 0;
+        }
     }
     if (n == nullptr) {
         n = allocate_node();
