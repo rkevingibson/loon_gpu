@@ -21,17 +21,17 @@ class ManyCubes : public Example {
     Handle<Texture>           m_color_texture;
     Handle<TextureHeap>       m_texture_heap;
 
-    GpuPtr      m_vertex_ptr;
+    GpuSpan     m_vertex_buffer;
     TextureView m_color_view;
     Sampler     m_sampler;
 
     loon::RingBuffer m_ring_buffer;
     uint64_t         m_frame_idx;
 
-    static constexpr int kFrameTimeWindow                  = 300;
-    int64_t              m_frame_time_us[kFrameTimeWindow] = {0};
-    float                m_frame_time_ms[kFrameTimeWindow] = {0};
-    int64_t              m_frame_time_average              = 0;
+    static constexpr uint32_t kFrameTimeWindow                  = 300;
+    int64_t                   m_frame_time_us[kFrameTimeWindow] = {0};
+    float                     m_frame_time_ms[kFrameTimeWindow] = {0};
+    int64_t                   m_frame_time_average              = 0;
 
     int  m_grid_width          = 500;
     int  m_grid_height         = 500;

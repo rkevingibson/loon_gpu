@@ -5,7 +5,7 @@ namespace loon {
 
 RingBuffer::RingBuffer(gpu::Device device, uint32_t size, uint32_t num_frames_in_flight) :
     m_device(device), m_mask{size - 1}, m_num_frames_in_flight{num_frames_in_flight} {
-    m_device_ptr = gpu::malloc(device, size);
+    m_device_ptr = gpu::malloc(device, size).ptr;
     m_host_ptr   = gpu::get_host_pointer(device, m_device_ptr);
 }
 
@@ -55,17 +55,17 @@ uint32_t RingBuffer::contiguous_free_space() const {
     }
 }
 
-gpu::GpuPtr RingBuffer::append_raw(uint64_t    frame_idx,
-                                   const void* ptr,
-                                   size_t      size,
-                                   size_t      alignment) {
+gpu::GpuSpan RingBuffer::append_raw(uint64_t    frame_idx,
+                                    const void* ptr,
+                                    size_t      size,
+                                    size_t      alignment) {
     while (frame_idx - m_allocated_ranges[m_allocated_range_tail & kAllocatedRangesMask].frame_idx >
            m_num_frames_in_flight) {
         m_allocated_range_tail++;  // Effectively "free" this range.
     }
 
     // If we don't have enough space to do the copy, return nullptr.
-    if (contiguous_free_space() < size) { return 0; }
+    if (contiguous_free_space() < size) { return {0, 0}; }
 
     AllocationRange* range = nullptr;
     if (m_allocated_ranges[m_allocated_range_head & kAllocatedRangesMask].frame_idx == frame_idx) {
@@ -101,7 +101,7 @@ gpu::GpuPtr RingBuffer::append_raw(uint64_t    frame_idx,
     void* host_dest = (char*)m_host_ptr + (offset_start & m_mask);
     memcpy(host_dest, ptr, size);
 
-    return m_device_ptr + (offset_start & m_mask);
+    return {m_device_ptr + (offset_start & m_mask), offset_start - offset_end};
 }
 
 }  // namespace loon

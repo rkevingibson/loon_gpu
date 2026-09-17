@@ -104,15 +104,15 @@ HelloCube::HelloCube(const WindowState& window_state) : Example(window_state) {
 
     assert(m_render_pipeline.h != 0);
 
-    m_vertex_ptr = gpu::malloc(m_device, Cube::kSize, Memory::Gpu);
+    m_vertex_buffer = gpu::malloc(m_device, Cube::kSize, Memory::Gpu);
 
     m_constant_buffer = gpu::malloc(m_device, 1024ull * 1024);
     // Copy over the geometry to the geometry buffer
-    void* dst = gpu::get_host_pointer(m_device, m_constant_buffer);
+    void* dst = gpu::get_host_pointer(m_device, m_constant_buffer.ptr);
     Cube::write(dst);
 
     auto cmd = gpu::queue_start_command_recording(m_queue);
-    gpu::cmd_memcpy(cmd, m_vertex_ptr, m_constant_buffer, Cube::kSize);
+    gpu::cmd_memcpy(cmd, {m_vertex_buffer.ptr, Cube::kSize}, {m_constant_buffer.ptr, Cube::kSize});
 
     // A little excessive, but wait for the copy to be done before returning.
     gpu::cmd_barrier(cmd, StageFlags::Transfer, StageFlags::VertexShader);
@@ -138,7 +138,8 @@ HelloCube::HelloCube(const WindowState& window_state) : Example(window_state) {
 
 bool HelloCube::update(const UpdateInfo& info) {
     // Update constant data
-    auto args = reinterpret_cast<ShaderArgs*>(gpu::get_host_pointer(m_device, m_constant_buffer));
+    auto args =
+        reinterpret_cast<ShaderArgs*>(gpu::get_host_pointer(m_device, m_constant_buffer.ptr));
     args[m_frame_idx % 3].camera = CameraInfo{
         .projection        = projection({.view_width  = (float)info.texture_size.x,
                                          .view_height = (float)info.texture_size.y,
@@ -147,8 +148,8 @@ bool HelloCube::update(const UpdateInfo& info) {
         .camera_from_world = transform3d::identity().translated({0, 0, -5}).to_matrix(),
     };
     args[m_frame_idx % 3].mesh = {
-        .position        = m_vertex_ptr,
-        .color           = m_vertex_ptr + sizeof(Cube::kPositions),
+        .position        = m_vertex_buffer.ptr,
+        .color           = m_vertex_buffer.ptr + sizeof(Cube::kPositions),
         .world_from_mesh = transform3d::identity()
                                .rotated_local(normalized({1, 0.5, 0}),
                                               radians_from_degrees((float)(m_frame_idx % 360)))
@@ -185,10 +186,11 @@ bool HelloCube::update(const UpdateInfo& info) {
     gpu::cmd_draw_indexed_instanced(
         cmd,
         {
-            .vertexDataGpu   = m_constant_buffer + sizeof(ShaderArgs) * (m_frame_idx % 3),
+            .vertexDataGpu   = m_constant_buffer.ptr + sizeof(ShaderArgs) * (m_frame_idx % 3),
             .fragmentDataGpu = 0,
-            .indicesGpu      = m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kColors),
-            .indexCount      = 36,
+            .indices    = {m_vertex_buffer.ptr + sizeof(Cube::kPositions) + sizeof(Cube::kColors),
+                           sizeof(Cube::kIndices)},
+            .indexCount = 36,
         });
 
     gpu::cmd_end_render_pass(cmd);

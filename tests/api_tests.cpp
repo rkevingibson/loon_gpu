@@ -66,8 +66,8 @@ UTEST(pipeline_tests, specialized_compute_compilation) {
     auto                    args        = gpu::malloc(device, sizeof(ClearBufferArgs));
     static constexpr size_t kBufferSize = 1024;
     auto buffer      = gpu::malloc(device, kBufferSize * sizeof(uint32_t), gpu::Memory::Readback);
-    auto cpu_args    = reinterpret_cast<ClearBufferArgs*>(gpu::get_host_pointer(device, args));
-    cpu_args->buffer = buffer;
+    auto cpu_args    = reinterpret_cast<ClearBufferArgs*>(gpu::get_host_pointer(device, args.ptr));
+    cpu_args->buffer = buffer.ptr;
     cpu_args->num_elements = kBufferSize;
 
     auto queue = gpu::get_queue(device);
@@ -75,14 +75,14 @@ UTEST(pipeline_tests, specialized_compute_compilation) {
     auto cmd = gpu::queue_start_command_recording(queue);
 
     gpu::cmd_set_pipeline(cmd, pipeline);
-    gpu::cmd_dispatch(cmd, args, {.x = kBufferSize / 64, .y = 1, .z = 1});
+    gpu::cmd_dispatch(cmd, args.ptr, {.x = kBufferSize / 64, .y = 1, .z = 1});
     gpu::cmd_finalize(cmd);
 
     gpu::queue_submit(queue, cmd);
 
     gpu::device_wait_for_idle(device);
 
-    auto cpu_buffer = reinterpret_cast<uint32_t*>(gpu::get_host_pointer(device, buffer));
+    auto cpu_buffer = reinterpret_cast<uint32_t*>(gpu::get_host_pointer(device, buffer.ptr));
 
     for (uint32_t i = 0; i < kBufferSize; ++i) { ASSERT_EQ(cpu_buffer[i], kClearValue); }
 

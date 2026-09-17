@@ -16,7 +16,7 @@ Currently it targets a roughly Vulkan 1.3 feature set, with a couple of required
 
 The project is designed to be built with cmake, and should be self-contained (all dependencies are either vendored or downloaded by cmake via FetchContent). We also aim to use minimal STL headers to minimize compile times when possible.
 
-## Prequisites
+## Prerequisites
 
 The library should be entirely self-contained. The Vulkan SDK is recommended for development but not required - we pull down the necessary headers via cmake.
 

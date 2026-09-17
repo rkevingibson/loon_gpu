@@ -455,11 +455,11 @@ SurfaceStatus present(Device d, Queue queue) {
 
 // MARK: Buffers:
 
-GpuPtr malloc(Device d, size_t bytes, Memory memory) {
+GpuSpan malloc(Device d, size_t bytes, Memory memory) {
     return malloc(d, bytes, 64, memory);
 }
 
-GpuPtr malloc(Device d, size_t bytes, size_t align, Memory memory) {
+GpuSpan malloc(Device d, size_t bytes, size_t align, Memory memory) {
     (void)align;  // TODO: Can we do alignment on MTL? Do we need to?
     id<MTL::HeapDescriptor> heap_info = make_id<MTL::HeapDescriptor>();
     heap_info->setType(MTL::HeapTypePlacement);
@@ -479,7 +479,7 @@ GpuPtr malloc(Device d, size_t bytes, size_t align, Memory memory) {
 
 
     id<MTL::Buffer> buffer = NS::TransferPtr(heap->newBuffer(bytes, resource_options, 0));
-    if (!buffer) { return 0; }
+    if (!buffer) { return {}; }
 
     auto handle = d->buffer_pool.emplace({
         .buffer = buffer,
@@ -496,7 +496,7 @@ GpuPtr malloc(Device d, size_t bytes, size_t align, Memory memory) {
     d->ptr_map.insert(insertion_pos, {.ptr = buffer->gpuAddress(), .buffer = handle});
     rwlock_unlock_write(&d->ptr_map_lock);
 
-    return buffer->gpuAddress();
+    return {buffer->gpuAddress(), buffer->length()};
 }
 
 BufferAndOffset buffer_and_offset_from_ptr(Device d, GpuPtr ptr) {
@@ -1129,12 +1129,12 @@ static void end_compute_pass(CommandBuffer cmd) {
     cmd->compute_encoder = nullptr;
 }
 
-void cmd_memcpy(CommandBuffer cmd, GpuPtr destGpu, GpuPtr srcGpu, size_t size) {
-    auto d = cmd->device;
-
-    auto encoder = get_compute_encoder(cmd);
-    auto src     = buffer_and_offset_from_ptr(d, srcGpu);
-    auto dst     = buffer_and_offset_from_ptr(d, destGpu);
+void cmd_memcpy(CommandBuffer cmd, GpuSpan destGpu, GpuSpan srcGpu) {
+    auto           d       = cmd->device;
+    const uint32_t size    = destGpu.size < srcGpu.size ? destGpu.size : srcGpu.size;
+    auto           encoder = get_compute_encoder(cmd);
+    auto           src     = buffer_and_offset_from_ptr(d, srcGpu.ptr);
+    auto           dst     = buffer_and_offset_from_ptr(d, destGpu.ptr);
     encoder->copyFromBuffer(src.buffer->buffer.get(),
                             src.offset,
                             dst.buffer->buffer.get(),
@@ -1143,13 +1143,13 @@ void cmd_memcpy(CommandBuffer cmd, GpuPtr destGpu, GpuPtr srcGpu, size_t size) {
 }
 
 void cmd_copy_to_texture(CommandBuffer                cmd,
-                         GpuPtr                       srcGpu,
+                         GpuSpan                      srcGpu,
                          Handle<Texture>              texture,
                          const BufferTextureCopyInfo& info) {
     auto d = cmd->device;
 
     auto             encoder     = get_compute_encoder(cmd);
-    auto             src         = buffer_and_offset_from_ptr(d, srcGpu);
+    auto             src         = buffer_and_offset_from_ptr(d, srcGpu.ptr);
     const auto&      t           = d->texture_pool[texture];
     const FormatInfo format_info = get_format_info(t.format);
     const uint64_t   pixels_per_row =
@@ -1172,13 +1172,13 @@ void cmd_copy_to_texture(CommandBuffer                cmd,
 
 void cmd_copy_from_texture(CommandBuffer                cmd,
                            Handle<Texture>              texture,
-                           GpuPtr                       destGpu,
+                           GpuSpan                      destGpu,
                            const BufferTextureCopyInfo& info) {
     auto d       = cmd->device;
     auto encoder = get_compute_encoder(cmd);
 
     const auto&      t           = d->texture_pool[texture];
-    auto             dst         = buffer_and_offset_from_ptr(d, destGpu);
+    auto             dst         = buffer_and_offset_from_ptr(d, destGpu.ptr);
     const FormatInfo format_info = get_format_info(t.format);
     const uint64_t   pixels_per_row =
         info.buffer_row_pixels_stride == 0 ? info.image_extent.x : info.buffer_row_pixels_stride;
@@ -1421,20 +1421,12 @@ void cmd_draw_indexed_instanced(CommandBuffer cmd, const DrawIndexedInstancedInf
 
     set_graphics_ptrs(cmd, args.vertexDataGpu, args.fragmentDataGpu);
 
-    // NOTE: In theory, we can use the indexCount to just compute a lower bound on the index buffer
-    // size, as in the commented code below. In practice, this seems to not work correctly on
-    // MacOS 25.5 and gets you random vertex_id == 0 in your shader. As a workaround, we look up the
-    // buffer size here and use that.
-    auto index_info = buffer_and_offset_from_ptr(cmd->device, args.indicesGpu);
-    // const uint32_t index_buffer_size =
-    //     (args.indexCount) * (args.type == IndexType::UInt16 ? sizeof(uint16_t) :
-    //     sizeof(uint32_t));
     cmd->render_encoder->drawIndexedPrimitives(
         cmd->current_topology,
         args.indexCount,
         args.type == IndexType::UInt16 ? MTL::IndexTypeUInt16 : MTL::IndexTypeUInt32,
-        args.indicesGpu,
-        index_info.buffer->buffer->length() - index_info.offset,
+        args.indices.ptr,
+        args.indices.size,
         args.instanceCount);
 }
 
@@ -1446,14 +1438,13 @@ void cmd_draw_indexed_instanced_indirect(CommandBuffer cmd, const DrawIndexedInd
 
 
     set_graphics_ptrs(cmd, args.vertexDataGpu, args.fragmentDataGpu);
-    auto index_info = buffer_and_offset_from_ptr(cmd->device, args.indicesGpu);
 
     cmd->render_encoder->drawIndexedPrimitives(
         cmd->current_topology,
         args.type == IndexType::UInt16 ? MTL::IndexTypeUInt16 : MTL::IndexTypeUInt32,
-        args.indicesGpu,
-        index_info.buffer->buffer->length() - index_info.offset,
-        args.argsGpu);
+        args.indices.ptr,
+        args.indices.size,
+        args.argsGpu.ptr);
 }
 
 void cmd_draw_indexed_instanced_indirect_multi(CommandBuffer                cmd,

@@ -47,8 +47,7 @@ static ImGui_ImplLoon_Data* GetBackendData() {
 
 // Buffers used during the rendering of a frame
 struct ImGui_ImplLoon_RenderBuffers {
-    gpu::GpuPtr buffer;
-    size_t      buffer_size;
+    gpu::GpuSpan buffer;
 };
 
 static void SetupRenderState(ImDrawData*                   draw_data,
@@ -132,13 +131,12 @@ static void UpdateTexture(ImTextureData* tex, ImGui_ImplLoon_RenderBuffers* fb) 
         // Use the staging buffer to upload the texture data to the GPU.
         // For simplicity, use a semamphore to make this update a blocking function,
         // not async.
-        if (fb->buffer_size < tex->GetSizeInBytes()) {
-            if (fb->buffer) gpu::free(bd->device, fb->buffer);
-            fb->buffer      = gpu::malloc(bd->device, tex->GetSizeInBytes());
-            fb->buffer_size = tex->GetSizeInBytes();
+        if (fb->buffer.size < tex->GetSizeInBytes()) {
+            if (fb->buffer) gpu::free(bd->device, fb->buffer.ptr);
+            fb->buffer = gpu::malloc(bd->device, tex->GetSizeInBytes());
         }
 
-        void* dst = gpu::get_host_pointer(bd->device, fb->buffer);
+        void* dst = gpu::get_host_pointer(bd->device, fb->buffer.ptr);
         memcpy(dst, tex->GetPixels(), tex->GetSizeInBytes());
 
         auto cmd = gpu::queue_start_command_recording(bd->queue);
@@ -241,7 +239,7 @@ void InvalidateDeviceObjects() {
 
     for (uint32_t i = 0; i < bd->num_frames_in_flight; i++) {
         ImGui_ImplLoon_RenderBuffers* fr = &bd->pFrameResources[i];
-        gpu::free(bd->device, fr->buffer);
+        gpu::free(bd->device, fr->buffer.ptr);
     }
 }
 
@@ -277,8 +275,7 @@ bool Init(const InitInfo& info) {
     bd->pFrameResources = new ImGui_ImplLoon_RenderBuffers[bd->num_frames_in_flight];
     for (int i = 0; i < (int)bd->num_frames_in_flight; i++) {
         ImGui_ImplLoon_RenderBuffers* fr = &bd->pFrameResources[i];
-        fr->buffer                       = {0};
-        fr->buffer_size                  = 0;
+        fr->buffer                       = {0, 0};
     }
 
     return true;
@@ -371,16 +368,15 @@ void Render(gpu::CommandBuffer cmd) {
 
     if (required_buffer_size == 0) { return; }
 
-    if (!fr->buffer || fr->buffer_size < required_buffer_size) {
+    if (!fr->buffer || fr->buffer.size < required_buffer_size) {
         // Round up to some nice multiple to avoid reallocs frequently.
         const size_t buffer_size = ((required_buffer_size + 1023) / 1024) * 1024;
 
-        if (fr->buffer) { gpu::free(bd->device, fr->buffer); }
-        fr->buffer      = gpu::malloc(bd->device, required_buffer_size, gpu::Memory::Default);
-        fr->buffer_size = required_buffer_size;
+        if (fr->buffer.ptr) { gpu::free(bd->device, fr->buffer.ptr); }
+        fr->buffer = gpu::malloc(bd->device, required_buffer_size, gpu::Memory::Default);
     }
 
-    char*       buffer_host = (char*)gpu::get_host_pointer(bd->device, fr->buffer);
+    char*       buffer_host = (char*)gpu::get_host_pointer(bd->device, fr->buffer.ptr);
     ImDrawVert* vtx_dst     = (ImDrawVert*)buffer_host;
     ImDrawIdx*  idx_dst     = (ImDrawIdx*)(buffer_host + vertex_data_size);
     for (const ImDrawList* draw_list : draw_data->CmdLists) {
@@ -406,7 +402,7 @@ void Render(gpu::CommandBuffer cmd) {
     // Render command lists
     // (Because we merged all buffers into a single one, we maintain our own
     // offset into them)
-    gpu::GpuPtr global_vtx_ptr = fr->buffer;
+    gpu::GpuPtr global_vtx_ptr = fr->buffer.ptr;
     gpu::GpuPtr global_idx_ptr = global_vtx_ptr + vertex_data_size;
     gpu::GpuPtr args_ptr       = global_idx_ptr + index_data_size;
 
@@ -471,7 +467,7 @@ void Render(gpu::CommandBuffer cmd) {
                     {
                         .vertexDataGpu   = args_ptr,
                         .fragmentDataGpu = args_ptr + offsetof(DrawArgs, frag),
-                        .indicesGpu      = index_buf,
+                        .indices         = {index_buf, index_data_size},
                         .indexCount      = pcmd->ElemCount,
                     });
 
