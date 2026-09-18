@@ -372,7 +372,7 @@ void Render(gpu::CommandBuffer cmd) {
         // Round up to some nice multiple to avoid reallocs frequently.
         const size_t buffer_size = ((required_buffer_size + 1023) / 1024) * 1024;
 
-        if (fr->buffer.ptr) { gpu::free(bd->device, fr->buffer.ptr); }
+        if (fr->buffer) { gpu::free(bd->device, fr->buffer.ptr); }
         fr->buffer = gpu::malloc(bd->device, required_buffer_size, gpu::Memory::Default);
     }
 

@@ -17,6 +17,7 @@
 #include "common/geometry.h"
 #include "common/shaders.h"
 #include "example.h"
+#include "gpu_args.h"
 using namespace geometry;
 using namespace loon;
 namespace {
@@ -104,7 +105,11 @@ HelloCube::HelloCube(const WindowState& window_state) : Example(window_state) {
 
     assert(m_render_pipeline.h != 0);
 
-    m_vertex_buffer = gpu::malloc(m_device, Cube::kSize, Memory::Gpu);
+    auto          gpu_buffer = gpu::malloc(m_device, Cube::kSize, Memory::Gpu);
+    BumpAllocator gpu_arena(gpu_buffer);
+
+    m_vertex_buffer = gpu_arena.allocate(sizeof(Cube::kPositions) + sizeof(Cube::kColors));
+    m_index_buffer  = gpu_arena.allocate(sizeof(Cube::kIndices));
 
     m_constant_buffer = gpu::malloc(m_device, 1024ull * 1024);
     // Copy over the geometry to the geometry buffer
@@ -112,7 +117,7 @@ HelloCube::HelloCube(const WindowState& window_state) : Example(window_state) {
     Cube::write(dst);
 
     auto cmd = gpu::queue_start_command_recording(m_queue);
-    gpu::cmd_memcpy(cmd, {m_vertex_buffer.ptr, Cube::kSize}, {m_constant_buffer.ptr, Cube::kSize});
+    gpu::cmd_memcpy(cmd, gpu_buffer, {m_constant_buffer.ptr, Cube::kSize});
 
     // A little excessive, but wait for the copy to be done before returning.
     gpu::cmd_barrier(cmd, StageFlags::Transfer, StageFlags::VertexShader);
@@ -188,9 +193,8 @@ bool HelloCube::update(const UpdateInfo& info) {
         {
             .vertexDataGpu   = m_constant_buffer.ptr + sizeof(ShaderArgs) * (m_frame_idx % 3),
             .fragmentDataGpu = 0,
-            .indices    = {m_vertex_buffer.ptr + sizeof(Cube::kPositions) + sizeof(Cube::kColors),
-                           sizeof(Cube::kIndices)},
-            .indexCount = 36,
+            .indices         = m_index_buffer,
+            .indexCount      = 36,
         });
 
     gpu::cmd_end_render_pass(cmd);

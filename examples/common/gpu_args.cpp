@@ -1,7 +1,29 @@
 #include "gpu_args.h"
 
+#include "gpu/loon_gpu.h"
+
 
 namespace loon {
+
+static constexpr auto align_offset = [](uint32_t offset, uint32_t alignment) {
+    return (offset + alignment - 1) & ~(alignment - 1);
+};
+
+BumpAllocator::BumpAllocator(gpu::GpuSpan span) : m_span{span} {}
+
+gpu::GpuSpan BumpAllocator::allocate(uint32_t bytes) noexcept {
+    const uint32_t new_offset = m_offset + bytes;
+    if (new_offset > m_span.size) {
+        return {};
+    } else {
+        gpu::GpuSpan result = {
+            .ptr  = m_span.ptr + m_offset,
+            .size = bytes,
+        };
+        m_offset = align_offset(new_offset, 16);
+        return result;
+    }
+}
 
 RingBuffer::RingBuffer(gpu::Device device, uint32_t size, uint32_t num_frames_in_flight) :
     m_device(device), m_mask{size - 1}, m_num_frames_in_flight{num_frames_in_flight} {
@@ -86,15 +108,11 @@ gpu::GpuSpan RingBuffer::append_raw(uint64_t    frame_idx,
         };
     }
 
-    const auto align = [](uint32_t offset, uint32_t alignment) {
-        return (offset + alignment - 1) & ~(alignment - 1);
-    };
-
-    uint32_t offset_start = align(range->end, alignment);
+    uint32_t offset_start = align_offset(range->end, alignment);
     uint32_t offset_end   = offset_start + size;
     if ((offset_start & m_mask) > (offset_end & m_mask)) {
         // Adjust start in the case where we're wrapping around the ring buffer.
-        offset_start = align(offset_start, m_mask + 1);
+        offset_start = align_offset(offset_start, m_mask + 1);
         offset_end   = offset_start + size;
     }
     range->end      = offset_end;

@@ -11,6 +11,19 @@
 
 namespace loon {
 
+class BumpAllocator {
+   public:
+    BumpAllocator() = default;
+    explicit BumpAllocator(gpu::GpuSpan span);
+
+    [[nodiscard]] gpu::GpuSpan allocate(uint32_t bytes) noexcept;
+    void                       reset() noexcept { m_offset = 0; }
+
+   private:
+    gpu::GpuSpan m_span   = {};
+    uint32_t     m_offset = 0;
+};
+
 class RingBuffer {
    public:
     RingBuffer() = default;

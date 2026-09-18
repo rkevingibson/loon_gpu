@@ -515,7 +515,7 @@ BufferAndOffset buffer_and_offset_from_ptr(Device d, GpuPtr ptr) {
 
 void* get_host_pointer(Device d, GpuPtr ptr) {
     auto info = buffer_and_offset_from_ptr(d, ptr);
-    return info.buffer->buffer->contents();
+    return (char*)info.buffer->buffer->contents() + info.offset;
 }
 
 void free(Device d, GpuPtr ptr) {

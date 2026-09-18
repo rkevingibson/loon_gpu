@@ -138,22 +138,27 @@ ManyCubes::ManyCubes(const WindowState& window_state) : Example(window_state) {
     m_sampler      = gpu::add_sampler_to_heap(m_device, m_texture_heap, SamplerDesc{});
 
     // Copy texture and geometry into staging buffer:
-    const size_t image_size     = (size_t)x * y * 4;
-    auto         staging_buffer = gpu::malloc(m_device, Cube::kSize + image_size);
-    void*        cube_dst       = gpu::get_host_pointer(m_device, staging_buffer.ptr);
-    void*        image_dst      = Cube::write(cube_dst);
-    memcpy(image_dst, image_data, image_size);
+    constexpr auto align = [](size_t x, size_t alignment) {
+        return x + (alignment - 1) & ~(alignment - 1);
+    };
+    const size_t image_size = (size_t)x * y * 4;
+    auto staging_buffer     = gpu::malloc(m_device, align(Cube::kSize, 16) + align(image_size, 16));
+    BumpAllocator gpu_arena(staging_buffer);
+    auto          cube_staging = gpu_arena.allocate(Cube::kSize);
+
+    auto cube_cpu = gpu::get_host_pointer(m_device, cube_staging.ptr);
+    Cube::write(cube_cpu);
+
+    auto image_staging     = gpu_arena.allocate(image_size);
+    auto image_staging_cpu = gpu::get_host_pointer(m_device, image_staging.ptr);
+    memcpy(image_staging_cpu, image_data, image_size);
     stbi_image_free(image_data);
 
     // GPU-side copy, but block on the result for simplicity
     auto cmd = gpu::queue_start_command_recording(m_queue);
-    gpu::cmd_memcpy(cmd, {m_vertex_buffer.ptr, Cube::kSize}, {staging_buffer.ptr, Cube::kSize});
-
+    gpu::cmd_memcpy(cmd, m_vertex_buffer, cube_staging);
     gpu::cmd_copy_to_texture(cmd,
-                             {
-                                 staging_buffer.ptr + Cube::kSize,
-                                 staging_buffer.size - Cube::kSize,
-                             },
+                             image_staging,
                              m_color_texture,
                              BufferTextureCopyInfo{
                                  .image_extent = {(uint32_t)x, (uint32_t)y, 1},
