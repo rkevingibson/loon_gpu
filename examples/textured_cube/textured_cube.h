@@ -17,6 +17,7 @@ class TexturedCube : public Example {
     uint64_t                  m_frame_idx = 0;
 
     GpuSpan                   m_vertex_buffer;
+    GpuSpan                   m_index_buffer;
     GpuSpan                   m_constant_buffer;
     Handle<DepthStencilState> m_depth_stencil_state;
 
