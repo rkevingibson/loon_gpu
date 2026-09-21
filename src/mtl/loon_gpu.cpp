@@ -1131,7 +1131,7 @@ static void end_compute_pass(CommandBuffer cmd) {
 
 void cmd_memcpy(CommandBuffer cmd, GpuSpan destGpu, GpuSpan srcGpu) {
     auto           d       = cmd->device;
-    const uint32_t size    = destGpu.size < srcGpu.size ? destGpu.size : srcGpu.size;
+    const uint64_t size    = destGpu.size < srcGpu.size ? destGpu.size : srcGpu.size;
     auto           encoder = get_compute_encoder(cmd);
     auto           src     = buffer_and_offset_from_ptr(d, srcGpu.ptr);
     auto           dst     = buffer_and_offset_from_ptr(d, destGpu.ptr);
@@ -1294,7 +1294,7 @@ void cmd_dispatch(CommandBuffer cmd, GpuPtr dataGpu, const Dimension3D& gridDime
                         cmd->required_threadgroup_size.z));
 }
 
-void cmd_dispatch_indirect(CommandBuffer cmd, GpuPtr dataGpu, GpuPtr gridDimensionsGpu) {
+void cmd_dispatch_indirect(CommandBuffer cmd, GpuPtr dataGpu, GpuSpan gridDimensionsGpu) {
     LOON_ASSERT(cmd->device,
                 !is_in_render_pass(cmd),
                 "gpu::cmd_dispatch_indirect: Cannot be called from inside of a render pass.");
@@ -1302,7 +1302,7 @@ void cmd_dispatch_indirect(CommandBuffer cmd, GpuPtr dataGpu, GpuPtr gridDimensi
 
     auto encoder = get_compute_encoder(cmd);
     set_compute_ptrs(cmd, dataGpu);
-    encoder->dispatchThreadgroups(gridDimensionsGpu,
+    encoder->dispatchThreadgroups(gridDimensionsGpu.ptr,
                                   MTL::Size::Make(cmd->required_threadgroup_size.x,
                                                   cmd->required_threadgroup_size.y,
                                                   cmd->required_threadgroup_size.z));

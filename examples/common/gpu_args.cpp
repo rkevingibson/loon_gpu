@@ -119,7 +119,7 @@ gpu::GpuSpan RingBuffer::append_raw(uint64_t    frame_idx,
     void* host_dest = (char*)m_host_ptr + (offset_start & m_mask);
     memcpy(host_dest, ptr, size);
 
-    return {m_device_ptr + (offset_start & m_mask), offset_start - offset_end};
+    return {m_device_ptr + (offset_start & m_mask), offset_end - offset_start};
 }
 
 }  // namespace loon

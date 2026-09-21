@@ -2834,7 +2834,7 @@ void cmd_memcpy(CommandBuffer cmd, GpuSpan destGpu, GpuSpan srcGpu) {
     auto src = buffer_and_offset_from_ptr(impl, srcGpu.ptr);
     auto dst = buffer_and_offset_from_ptr(impl, destGpu.ptr);
 
-    const uint32_t size = destGpu.size < srcGpu.size ? destGpu.size : srcGpu.size;
+    const uint64_t size = destGpu.size < srcGpu.size ? destGpu.size : srcGpu.size;
     VkBufferCopy   region{
           .srcOffset = src.offset,
           .dstOffset = dst.offset,
@@ -3068,9 +3068,9 @@ void cmd_dispatch(CommandBuffer cmd, GpuPtr dataGpu, const Dimension3D& gridDime
     impl->api.vkCmdDispatch(cmd->buffer, gridDimensions.x, gridDimensions.y, gridDimensions.z);
 }
 
-void cmd_dispatch_indirect(CommandBuffer cmd, GpuPtr dataGpu, GpuPtr gridDimensionsGpu) {
+void cmd_dispatch_indirect(CommandBuffer cmd, GpuPtr dataGpu, GpuSpan gridDimensionsGpu) {
     auto impl = cmd->device;
-    auto dim  = buffer_and_offset_from_ptr(impl, gridDimensionsGpu);
+    auto dim  = buffer_and_offset_from_ptr(impl, gridDimensionsGpu.ptr);
     cmd_set_compute_ptr(cmd, dataGpu);
     impl->api.vkCmdDispatchIndirect(cmd->buffer, dim.buffer, dim.offset);
 }
