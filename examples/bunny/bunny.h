@@ -26,7 +26,7 @@ class Bunny : public Example {
     Handle<DepthStencilState> m_depth_stencil_state;
     loon::RingBuffer          m_ring_buffer;
     GpuMesh                   m_mesh;
-    GpuPtr                    m_mesh_indices;
+    GpuSpan                   m_mesh_indices;
     uint32_t                  m_num_indices;
     size_t                    m_frame_idx = 0;
 

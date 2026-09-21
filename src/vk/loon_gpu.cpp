@@ -1568,11 +1568,11 @@ SurfaceStatus present(Device d, Queue q) {
 
 // MARK: Buffers
 
-GpuPtr malloc(Device d, size_t bytes, Memory memory) {
+GpuSpan malloc(Device d, size_t bytes, Memory memory) {
     return malloc(d, bytes, 64, memory);
 }
 
-GpuPtr malloc(Device d, size_t bytes, size_t align, Memory memory) {
+GpuSpan malloc(Device d, size_t bytes, size_t align, Memory memory) {
     constexpr VkBufferUsageFlags kDefaultUsages =
         VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
@@ -1665,7 +1665,7 @@ GpuPtr malloc(Device d, size_t bytes, size_t align, Memory memory) {
     d->ptr_map.insert(insertion_pos, {.ptr = device_ptr, .buffer = handle});
     rwlock_unlock_write(&d->ptr_map_lock);
 
-    return device_ptr;
+    return {device_ptr, bytes};
 }
 
 static BufferAndOffset buffer_and_offset_from_ptr(Device d, GpuPtr ptr) {
@@ -2828,27 +2828,28 @@ void queue_process_events(Queue q) {
 
 // MARK: Commmand Buffer
 
-void cmd_memcpy(CommandBuffer cmd, GpuPtr destGpu, GpuPtr srcGpu, size_t size) {
+void cmd_memcpy(CommandBuffer cmd, GpuSpan destGpu, GpuSpan srcGpu) {
     auto impl = cmd->device;
 
-    auto src = buffer_and_offset_from_ptr(impl, srcGpu);
-    auto dst = buffer_and_offset_from_ptr(impl, destGpu);
+    auto src = buffer_and_offset_from_ptr(impl, srcGpu.ptr);
+    auto dst = buffer_and_offset_from_ptr(impl, destGpu.ptr);
 
-    VkBufferCopy region{
-        .srcOffset = src.offset,
-        .dstOffset = dst.offset,
-        .size      = size,
+    const uint64_t size = destGpu.size < srcGpu.size ? destGpu.size : srcGpu.size;
+    VkBufferCopy   region{
+          .srcOffset = src.offset,
+          .dstOffset = dst.offset,
+          .size      = size,
     };
     impl->api.vkCmdCopyBuffer(cmd->buffer, src.buffer, dst.buffer, 1, &region);
 }
 
 void cmd_copy_to_texture(CommandBuffer                cmd,
-                         GpuPtr                       srcPtr,
+                         GpuSpan                      srcPtr,
                          Handle<Texture>              texture,
                          const BufferTextureCopyInfo& info) {
     auto impl = cmd->device;
 
-    auto                    src = buffer_and_offset_from_ptr(impl, srcPtr);
+    auto                    src = buffer_and_offset_from_ptr(impl, srcPtr.ptr);
     const auto&             tex = impl->texture_pool[texture];
     const VkBufferImageCopy region{
         .bufferOffset      = src.offset,
@@ -2885,11 +2886,11 @@ void cmd_copy_to_texture(CommandBuffer                cmd,
 
 void cmd_copy_from_texture(CommandBuffer                cmd,
                            Handle<Texture>              texture,
-                           GpuPtr                       destGpu,
+                           GpuSpan                      destGpu,
                            const BufferTextureCopyInfo& info) {
     auto impl = cmd->device;
 
-    auto                    dst = buffer_and_offset_from_ptr(impl, destGpu);
+    auto                    dst = buffer_and_offset_from_ptr(impl, destGpu.ptr);
     const auto&             tex = impl->texture_pool[texture];
     const VkBufferImageCopy region{
         .bufferOffset      = dst.offset,
@@ -3067,9 +3068,9 @@ void cmd_dispatch(CommandBuffer cmd, GpuPtr dataGpu, const Dimension3D& gridDime
     impl->api.vkCmdDispatch(cmd->buffer, gridDimensions.x, gridDimensions.y, gridDimensions.z);
 }
 
-void cmd_dispatch_indirect(CommandBuffer cmd, GpuPtr dataGpu, GpuPtr gridDimensionsGpu) {
+void cmd_dispatch_indirect(CommandBuffer cmd, GpuPtr dataGpu, GpuSpan gridDimensionsGpu) {
     auto impl = cmd->device;
-    auto dim  = buffer_and_offset_from_ptr(impl, gridDimensionsGpu);
+    auto dim  = buffer_and_offset_from_ptr(impl, gridDimensionsGpu.ptr);
     cmd_set_compute_ptr(cmd, dataGpu);
     impl->api.vkCmdDispatchIndirect(cmd->buffer, dim.buffer, dim.offset);
 }
@@ -3266,13 +3267,13 @@ void cmd_draw(CommandBuffer cmd,
 void cmd_draw_indexed_instanced(CommandBuffer cmd, const DrawIndexedInstancedInfo& args) {
     auto impl = cmd->device;
     cmd_set_graphics_ptrs(cmd, args.vertexDataGpu, args.fragmentDataGpu);
-    if (args.indicesGpu != cmd->current_idx_buffer) {
-        const auto indices = buffer_and_offset_from_ptr(impl, args.indicesGpu);
+    if (args.indices.ptr != cmd->current_idx_buffer) {
+        const auto indices = buffer_and_offset_from_ptr(impl, args.indices.ptr);
         impl->api.vkCmdBindIndexBuffer(cmd->buffer,
                                        indices.buffer,
                                        indices.offset,
                                        bridge(args.type));
-        cmd->current_idx_buffer = args.indicesGpu;
+        cmd->current_idx_buffer = args.indices.ptr;
     }
     impl->api.vkCmdDrawIndexed(cmd->buffer, args.indexCount, args.instanceCount, 0, 0, 0);
 }
@@ -3281,16 +3282,16 @@ void cmd_draw_indexed_instanced_indirect(CommandBuffer cmd, const DrawIndexedInd
     auto impl = cmd->device;
 
     cmd_set_graphics_ptrs(cmd, args.vertexDataGpu, args.fragmentDataGpu);
-    if (args.indicesGpu != cmd->current_idx_buffer) {
-        const auto indices = buffer_and_offset_from_ptr(impl, args.indicesGpu);
+    if (args.indices.ptr != cmd->current_idx_buffer) {
+        const auto indices = buffer_and_offset_from_ptr(impl, args.indices.ptr);
         impl->api.vkCmdBindIndexBuffer(cmd->buffer,
                                        indices.buffer,
                                        indices.offset,
                                        bridge(args.type));
-        cmd->current_idx_buffer = args.indicesGpu;
+        cmd->current_idx_buffer = args.indices.ptr;
     }
 
-    const auto gpu = buffer_and_offset_from_ptr(impl, args.argsGpu);
+    const auto gpu = buffer_and_offset_from_ptr(impl, args.argsGpu.ptr);
     impl->api.vkCmdDrawIndexedIndirect(cmd->buffer,
                                        gpu.buffer,
                                        gpu.offset,
@@ -3302,17 +3303,17 @@ void cmd_draw_indexed_instanced_indirect_multi(CommandBuffer                cmd,
                                                const MultiDrawIndirectInfo& args) {
     auto impl = cmd->device;
     cmd_set_graphics_ptrs(cmd, args.vertexDataGpu, args.pixelDataGpu);
-    if (args.indicesGpu != cmd->current_idx_buffer) {
-        const auto indices = buffer_and_offset_from_ptr(impl, args.indicesGpu);
+    if (args.indices.ptr != cmd->current_idx_buffer) {
+        const auto indices = buffer_and_offset_from_ptr(impl, args.indices.ptr);
         impl->api.vkCmdBindIndexBuffer(cmd->buffer,
                                        indices.buffer,
                                        indices.offset,
                                        bridge(args.type));
-        cmd->current_idx_buffer = args.indicesGpu;
+        cmd->current_idx_buffer = args.indices.ptr;
     }
 
-    const auto gpu   = buffer_and_offset_from_ptr(impl, args.argsGpu);
-    const auto count = buffer_and_offset_from_ptr(impl, args.drawCountGpu);
+    const auto gpu   = buffer_and_offset_from_ptr(impl, args.argsGpu.ptr);
+    const auto count = buffer_and_offset_from_ptr(impl, args.drawCountGpu.ptr);
     impl->api.vkCmdDrawIndexedIndirectCount(cmd->buffer,
                                             gpu.buffer,
                                             gpu.offset,

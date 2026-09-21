@@ -16,6 +16,7 @@
 #include "common/shaders.h"
 #include "example.h"
 #include "geometry.h"
+#include "gpu_args.h"
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_loon.h"
 #include "obj_parser.h"
@@ -184,39 +185,48 @@ Bunny::Bunny(const WindowState& window_state) : Example(window_state) {
 
 
     // Copy the mesh to GPU memory, via a staging buffer.
-    GpuPtr pos_staging     = m_ring_buffer.append(0, mesh->positions);
-    GpuPtr uv_staging      = m_ring_buffer.append(0, mesh->texcoords);
-    GpuPtr normal_staging  = m_ring_buffer.append(0, mesh->normals);
-    GpuPtr indices_staging = m_ring_buffer.append(0, mesh->indices);
+    GpuSpan pos_staging     = m_ring_buffer.append(0, mesh->positions);
+    GpuSpan uv_staging      = m_ring_buffer.append(0, mesh->texcoords);
+    GpuSpan normal_staging  = m_ring_buffer.append(0, mesh->normals);
+    GpuSpan indices_staging = m_ring_buffer.append(0, mesh->indices);
     // Staging buffer should have room for everything.
     assert(pos_staging && uv_staging && normal_staging && indices_staging);
 
-    const size_t pos_size    = mesh->positions.size() * sizeof(mesh->positions[0]);
-    const size_t uv_size     = mesh->texcoords.size() * sizeof(mesh->texcoords[0]);
-    const size_t normal_size = mesh->normals.size() * sizeof(mesh->normals[0]);
-    const size_t index_size  = mesh->indices.size() * sizeof(mesh->indices[0]);
+    constexpr auto align = [](size_t x, size_t alignment) {
+        return x + (alignment - 1) & ~(alignment - 1);
+    };
+    const size_t pos_size    = align(mesh->positions.size() * sizeof(mesh->positions[0]), 16);
+    const size_t uv_size     = align(mesh->texcoords.size() * sizeof(mesh->texcoords[0]), 16);
+    const size_t normal_size = align(mesh->normals.size() * sizeof(mesh->normals[0]), 16);
+    const size_t index_size  = align(mesh->indices.size() * sizeof(mesh->indices[0]), 16);
     const size_t mesh_size   = pos_size + uv_size + normal_size + index_size;
 
-    GpuPtr mesh_buffer = gpu::malloc(m_device, mesh_size, Memory::Gpu);
-    m_mesh             = GpuMesh{
-                    .world_from_mesh =
+    GpuSpan       mesh_buffer = gpu::malloc(m_device, mesh_size, Memory::Gpu);
+    BumpAllocator gpu_arena(mesh_buffer);
+
+    GpuSpan positions_buffer = gpu_arena.allocate(pos_size);
+    GpuSpan uv_buffer        = gpu_arena.allocate(uv_size);
+    GpuSpan normal_buffer    = gpu_arena.allocate(normal_size);
+    m_mesh_indices           = gpu_arena.allocate(index_size);
+    assert(positions_buffer && uv_buffer && normal_buffer && normal_buffer && m_mesh_indices);
+
+    m_mesh = GpuMesh{
+        .world_from_mesh =
             geometry::transform3d::from_axis_angle_and_origin({0, 0, 1},
                                                               geometry::radians_from_degrees(0),
                                                               float3{0, 0, 0})
                 .to_matrix(),
-                    .positions = mesh_buffer,
-                    .uvs       = mesh_buffer + pos_size,
-                    .normals   = mesh_buffer + pos_size + uv_size,
+        .positions = positions_buffer.ptr,
+        .uvs       = uv_buffer.ptr,
+        .normals   = normal_buffer.ptr,
     };
-    m_mesh_indices = m_mesh.normals + normal_size;
-    m_num_indices  = mesh->indices.size();
+    m_num_indices = mesh->indices.size();
 
     auto cmd = gpu::queue_start_command_recording(m_queue);
-
-    gpu::cmd_memcpy(cmd, mesh_buffer, pos_staging, pos_size);
-    gpu::cmd_memcpy(cmd, m_mesh.uvs, uv_staging, uv_size);
-    gpu::cmd_memcpy(cmd, m_mesh.normals, normal_staging, normal_size);
-    gpu::cmd_memcpy(cmd, m_mesh_indices, indices_staging, index_size);
+    gpu::cmd_memcpy(cmd, positions_buffer, pos_staging);
+    gpu::cmd_memcpy(cmd, uv_buffer, uv_staging);
+    gpu::cmd_memcpy(cmd, normal_buffer, normal_staging);
+    gpu::cmd_memcpy(cmd, m_mesh_indices, indices_staging);
     gpu::cmd_barrier(cmd, StageFlags::Transfer, StageFlags::VertexShader);
     gpu::cmd_finalize(cmd);
     gpu::queue_submit(m_queue, cmd);
@@ -376,7 +386,7 @@ Bunny::Bunny(const WindowState& window_state) : Example(window_state) {
     gpu::cmd_barrier(cmd, StageFlags::Transfer, StageFlags::Compute);
     gpu::cmd_set_texture_heap(cmd, m_texture_heap);
     gpu::cmd_set_pipeline(cmd, equirectangular_to_cube_pipeline);
-    gpu::cmd_dispatch(cmd, args, {1024 / 8, 1024 / 8, 6});
+    gpu::cmd_dispatch(cmd, args.ptr, {1024 / 8, 1024 / 8, 6});
     gpu::cmd_barrier(cmd, StageFlags::Compute, StageFlags::Compute);
 
     for (uint16_t mip_level = 1; mip_level < kNumMips; ++mip_level) {
@@ -388,12 +398,14 @@ Bunny::Bunny(const WindowState& window_state) : Example(window_state) {
                                              });
 
         uint32_t image_size = 1024 / (1 << mip_level);
-        gpu::cmd_dispatch(cmd, mip_args, {image_size / 8, image_size / 8, 6});
+        gpu::cmd_dispatch(cmd, mip_args.ptr, {image_size / 8, image_size / 8, 6});
         gpu::cmd_barrier(cmd, StageFlags::Compute, StageFlags::Compute);
     }
 
     gpu::cmd_set_pipeline(cmd, cube_to_irradiance_cube_pipeline);
-    gpu::cmd_dispatch(cmd, irradiance_args, {kIrradianceMapSize / 8, kIrradianceMapSize / 8, 6});
+    gpu::cmd_dispatch(cmd,
+                      irradiance_args.ptr,
+                      {kIrradianceMapSize / 8, kIrradianceMapSize / 8, 6});
     gpu::cmd_barrier(cmd, StageFlags::Compute, StageFlags::PixelShader);
     gpu::cmd_finalize(cmd);
     gpu::queue_submit(m_queue, cmd);
@@ -520,9 +532,9 @@ bool Bunny::update(const UpdateInfo& info) {
 
     gpu::cmd_draw_indexed_instanced(cmd,
                                     {
-                                        .vertexDataGpu   = vert_args,
-                                        .fragmentDataGpu = frag_args,
-                                        .indicesGpu      = m_mesh_indices,
+                                        .vertexDataGpu   = vert_args.ptr,
+                                        .fragmentDataGpu = frag_args.ptr,
+                                        .indices         = m_mesh_indices,
                                         .indexCount      = m_num_indices,
                                         .type            = IndexType::UInt32,
                                     });
@@ -530,7 +542,7 @@ bool Bunny::update(const UpdateInfo& info) {
     // Render skybox
     gpu::cmd_set_pipeline(cmd, m_skybox_pipeline);
     gpu::cmd_set_cull_mode(cmd, Cull::None);
-    gpu::cmd_draw(cmd, skybox_args, 0, 3, 1);
+    gpu::cmd_draw(cmd, skybox_args.ptr, 0, 3, 1);
 
     loon::imgui::Render(cmd);
     gpu::cmd_end_render_pass(cmd);

@@ -104,7 +104,7 @@ ManyCubes::ManyCubes(const WindowState& window_state) : Example(window_state) {
 
     assert(m_render_pipeline.h != 0);
 
-    m_vertex_ptr = gpu::malloc(m_device, Cube::kSize, Memory::Gpu);
+    m_vertex_buffer = gpu::malloc(m_device, Cube::kSize, Memory::Gpu);
 
 
     // Load the texture
@@ -138,19 +138,27 @@ ManyCubes::ManyCubes(const WindowState& window_state) : Example(window_state) {
     m_sampler      = gpu::add_sampler_to_heap(m_device, m_texture_heap, SamplerDesc{});
 
     // Copy texture and geometry into staging buffer:
-    const size_t image_size     = (size_t)x * y * 4;
-    auto         staging_buffer = gpu::malloc(m_device, Cube::kSize + image_size);
-    void*        cube_dst       = gpu::get_host_pointer(m_device, staging_buffer);
-    void*        image_dst      = Cube::write(cube_dst);
-    memcpy(image_dst, image_data, image_size);
+    constexpr auto align = [](size_t x, size_t alignment) {
+        return x + (alignment - 1) & ~(alignment - 1);
+    };
+    const size_t image_size = (size_t)x * y * 4;
+    auto staging_buffer     = gpu::malloc(m_device, align(Cube::kSize, 16) + align(image_size, 16));
+    BumpAllocator gpu_arena(staging_buffer);
+    auto          cube_staging = gpu_arena.allocate(Cube::kSize);
+
+    auto cube_cpu = gpu::get_host_pointer(m_device, cube_staging.ptr);
+    Cube::write(cube_cpu);
+
+    auto image_staging     = gpu_arena.allocate(image_size);
+    auto image_staging_cpu = gpu::get_host_pointer(m_device, image_staging.ptr);
+    memcpy(image_staging_cpu, image_data, image_size);
     stbi_image_free(image_data);
 
     // GPU-side copy, but block on the result for simplicity
     auto cmd = gpu::queue_start_command_recording(m_queue);
-    gpu::cmd_memcpy(cmd, m_vertex_ptr, staging_buffer, Cube::kSize);
-
+    gpu::cmd_memcpy(cmd, m_vertex_buffer, cube_staging);
     gpu::cmd_copy_to_texture(cmd,
-                             staging_buffer + Cube::kSize,
+                             image_staging,
                              m_color_texture,
                              BufferTextureCopyInfo{
                                  .image_extent = {(uint32_t)x, (uint32_t)y, 1},
@@ -159,7 +167,7 @@ ManyCubes::ManyCubes(const WindowState& window_state) : Example(window_state) {
     gpu::cmd_finalize(cmd);
     gpu::queue_submit(m_queue, cmd, {}, {});
     gpu::device_wait_for_idle(m_device);
-    gpu::free(m_device, staging_buffer);
+    gpu::free(m_device, staging_buffer.ptr);
 
     m_depth_stencil_state = gpu::create_depth_stencil_state(
         m_device,
@@ -213,24 +221,29 @@ bool ManyCubes::update(const UpdateInfo& info) {
     m_frame_idx++;
 
     // Set up global draw arguments, these are constant for all cubes drawn.
-    GpuPtr camera = m_ring_buffer.append(
-        m_frame_idx,
-        CameraData{
-            .projection        = geometry::projection({.view_width  = (float)info.texture_size.x,
-                                                       .view_height = (float)info.texture_size.y,
-                                                       .y_fov       = geometry::radians_from_degrees(30.f),
-                                                       .depth_far   = 0.5f}),
-            .camera_from_world = geometry::transform3d::identity()
-                                     .translated({0, -5, -15})
-                                     .rotated_local({1, 0, 0}, radians_from_degrees(30))
-                                     .to_matrix(),
-        });
+    GpuPtr camera =
+        m_ring_buffer
+            .append(m_frame_idx,
+                    CameraData{
+                        .projection =
+                            geometry::projection({.view_width  = (float)info.texture_size.x,
+                                                  .view_height = (float)info.texture_size.y,
+                                                  .y_fov     = geometry::radians_from_degrees(30.f),
+                                                  .depth_far = 0.5f}),
+                        .camera_from_world = geometry::transform3d::identity()
+                                                 .translated({0, -5, -15})
+                                                 .rotated_local({1, 0, 0}, radians_from_degrees(30))
+                                                 .to_matrix(),
+                    })
+            .ptr;
 
-    GpuPtr frag = m_ring_buffer.append(m_frame_idx,
-                                       FragArgs{
-                                           .texture = m_color_view,
-                                           .sampler = m_sampler,
-                                       });
+    GpuPtr frag = m_ring_buffer
+                      .append(m_frame_idx,
+                              FragArgs{
+                                  .texture = m_color_view,
+                                  .sampler = m_sampler,
+                              })
+                      .ptr;
 
     // Render
 
@@ -282,32 +295,37 @@ bool ManyCubes::update(const UpdateInfo& info) {
         uint32_t num_cubes = 0;
         for (int x = 0; x < m_grid_width; ++x) {
             for (int y = 0; y < m_grid_height; ++y) {
-                GpuPtr tx = m_ring_buffer.append(m_frame_idx,
-                                                 VertArgs{
-                                                     .world_from_mesh = grid_transform(x, y),
-                                                     .camera          = camera,
-                                                     .position        = m_vertex_ptr,
-                                                     .uvs = m_vertex_ptr + sizeof(Cube::kPositions),
-                                                 });
+                GpuSpan tx =
+                    m_ring_buffer.append(m_frame_idx,
+                                         VertArgs{
+                                             .world_from_mesh = grid_transform(x, y),
+                                             .camera          = camera,
+                                             .position        = m_vertex_buffer.ptr,
+                                             .uvs = m_vertex_buffer.ptr + sizeof(Cube::kPositions),
+                                         });
 
-                if (x == 0 && y == 0) { vert_args = tx; }
+                if (x == 0 && y == 0) { vert_args = tx.ptr; }
 
                 // We've wrapped around the ring buffer end, so submit a draw with whatever we've
                 // recorded so far.
-                if (tx < vert_args) {
+                if (tx.ptr < vert_args) {
                     gpu::cmd_draw_indexed_instanced(
                         cmd,
                         {
                             .vertexDataGpu   = vert_args,
                             .fragmentDataGpu = frag,
-                            .indicesGpu =
-                                m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
+                            .indices =
+                                {
+                                    m_vertex_buffer.ptr + sizeof(Cube::kPositions) +
+                                        sizeof(Cube::kUVs),
+                                    sizeof(Cube::kIndices),
+                                },
                             .indexCount    = Cube::kNumIndices,
                             .instanceCount = num_cubes,
                         });
 
                     num_cubes = 0;
-                    vert_args = tx;
+                    vert_args = tx.ptr;
                 }
                 ++num_cubes;
             }
@@ -318,9 +336,13 @@ bool ManyCubes::update(const UpdateInfo& info) {
                 {
                     .vertexDataGpu   = vert_args,
                     .fragmentDataGpu = frag,
-                    .indicesGpu      = m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
-                    .indexCount      = Cube::kNumIndices,
-                    .instanceCount   = num_cubes,
+                    .indices =
+                        {
+                            m_vertex_buffer.ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
+                            sizeof(Cube::kIndices),
+                        },
+                    .indexCount    = Cube::kNumIndices,
+                    .instanceCount = num_cubes,
                 });
         }
 
@@ -328,20 +350,26 @@ bool ManyCubes::update(const UpdateInfo& info) {
         for (int x = 0; x < m_grid_width; ++x) {
             for (int y = 0; y < m_grid_height; ++y) {
                 GpuPtr vert_args =
-                    m_ring_buffer.append(m_frame_idx,
-                                         VertArgs{
-                                             .world_from_mesh = grid_transform(x, y),
-                                             .camera          = camera,
-                                             .position        = m_vertex_ptr,
-                                             .uvs = m_vertex_ptr + sizeof(Cube::kPositions),
-                                         });
+                    m_ring_buffer
+                        .append(m_frame_idx,
+                                VertArgs{
+                                    .world_from_mesh = grid_transform(x, y),
+                                    .camera          = camera,
+                                    .position        = m_vertex_buffer.ptr,
+                                    .uvs = m_vertex_buffer.ptr + sizeof(Cube::kPositions),
+                                })
+                        .ptr;
 
                 gpu::cmd_draw_indexed_instanced(
                     cmd,
                     {
                         .vertexDataGpu   = vert_args,
                         .fragmentDataGpu = frag,
-                        .indicesGpu = m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
+                        .indices =
+                            {
+                                m_vertex_buffer.ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
+                                sizeof(Cube::kIndices),
+                            },
                         .indexCount = Cube::kNumIndices,
                     });
             }

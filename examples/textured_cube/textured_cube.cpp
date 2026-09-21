@@ -13,6 +13,7 @@
 
 #include "common/geometry.h"
 #include "common/shaders.h"
+#include "gpu_args.h"
 #include "stb_image.h"
 
 
@@ -101,9 +102,14 @@ TexturedCube::TexturedCube(const WindowState& window_state) : Example(window_sta
 
     assert(m_render_pipeline.h != 0);
 
-    m_vertex_ptr = gpu::malloc(m_device, Cube::kSize, Memory::Gpu);
+    m_vertex_buffer = gpu::malloc(m_device, Cube::kSize, Memory::Gpu);
+    m_index_buffer  = {
+        m_vertex_buffer.ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
+        sizeof(Cube::kIndices),
+    };
 
     m_constant_buffer = gpu::malloc(m_device, 1024ull * 1024);
+    BumpAllocator gpu_arena(m_constant_buffer);
 
     // Load the texture
     int            x = 0, y = 0, n = 0;
@@ -136,17 +142,21 @@ TexturedCube::TexturedCube(const WindowState& window_state) : Example(window_sta
     m_sampler      = gpu::add_sampler_to_heap(m_device, m_texture_heap, SamplerDesc{});
 
     // Copy over the geometry to the geometry buffer
-    void* dst = gpu::get_host_pointer(m_device, m_constant_buffer);
-    dst       = Cube::write(dst);
+    auto  cube_staging = gpu_arena.allocate(Cube::kSize);
+    void* dst          = gpu::get_host_pointer(m_device, cube_staging.ptr);
+    Cube::write(dst);
 
-    memcpy(dst, image_data, (size_t)x * y * 4);
+    const size_t image_size    = static_cast<size_t>(x) * y * 4;
+    auto         image_staging = gpu_arena.allocate(image_size);
+
+    memcpy(gpu::get_host_pointer(m_device, image_staging.ptr), image_data, image_size);
     stbi_image_free(image_data);
 
     auto cmd = gpu::queue_start_command_recording(m_queue);
-    gpu::cmd_memcpy(cmd, m_vertex_ptr, m_constant_buffer, Cube::kSize);
+    gpu::cmd_memcpy(cmd, m_vertex_buffer, cube_staging);
 
     gpu::cmd_copy_to_texture(cmd,
-                             m_constant_buffer + Cube::kSize,
+                             image_staging,
                              m_color_texture,
                              BufferTextureCopyInfo{
                                  .image_extent = {(uint32_t)x, (uint32_t)y, 1},
@@ -175,8 +185,9 @@ TexturedCube::~TexturedCube() = default;
 
 bool TexturedCube::update(const UpdateInfo& info) {
     // Update constant data
-    auto args = reinterpret_cast<ShaderArgs*>(gpu::get_host_pointer(m_device, m_constant_buffer)) +
-                (m_frame_idx % 3);
+    auto args =
+        reinterpret_cast<ShaderArgs*>(gpu::get_host_pointer(m_device, m_constant_buffer.ptr)) +
+        (m_frame_idx % 3);
     *args = ShaderArgs{
         .camera =
             CameraInfo{
@@ -188,8 +199,8 @@ bool TexturedCube::update(const UpdateInfo& info) {
             },
         .mesh =
             {
-                .position = m_vertex_ptr,
-                .color    = m_vertex_ptr + sizeof(Cube::kPositions),
+                .position = m_vertex_buffer.ptr,
+                .color    = m_vertex_buffer.ptr + sizeof(Cube::kPositions),
                 .world_from_mesh =
                     transform3d::identity()
                         .rotated_local(normalized({1, 0.2, 0}),
@@ -236,16 +247,15 @@ bool TexturedCube::update(const UpdateInfo& info) {
     gpu::cmd_set_depth_stencil_state(cmd, m_depth_stencil_state);
     gpu::cmd_set_pipeline(cmd, m_render_pipeline);
     uint32_t args_offset = sizeof(ShaderArgs) * (m_frame_idx % 3);
-    GpuPtr   argsGpu     = m_constant_buffer + args_offset;
+    GpuPtr   argsGpu     = m_constant_buffer.ptr + args_offset;
 
-    gpu::cmd_draw_indexed_instanced(
-        cmd,
-        {
-            .vertexDataGpu   = argsGpu,
-            .fragmentDataGpu = argsGpu + offsetof(ShaderArgs, texture),
-            .indicesGpu      = m_vertex_ptr + sizeof(Cube::kPositions) + sizeof(Cube::kUVs),
-            .indexCount      = Cube::kNumIndices,
-        });
+    gpu::cmd_draw_indexed_instanced(cmd,
+                                    {
+                                        .vertexDataGpu   = argsGpu,
+                                        .fragmentDataGpu = argsGpu + offsetof(ShaderArgs, texture),
+                                        .indices         = m_index_buffer,
+                                        .indexCount      = Cube::kNumIndices,
+                                    });
 
     gpu::cmd_end_render_pass(cmd);
 

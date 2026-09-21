@@ -234,11 +234,6 @@ class Function {
     uint8_t                 m_storage[kStorageSize];
 };
 
-struct MemoryBlock {
-    void*    ptr;
-    uint32_t len;
-};
-
 // Opaque handles
 
 template <class T>
@@ -612,6 +607,11 @@ enum class IndexType : uint8_t {
 // - If new_size == 0, the function must return null; if old_size != 0, it
 // should free the block pointed to by ptr. It is the responsibility of the
 // function to copy old_size bytes of memory from ptr to the returned pointer.
+struct MemoryBlock {
+    void*    ptr;
+    uint32_t len;
+};
+
 typedef MemoryBlock (*ProcAllocatorCallback)(void*    userdata,
                                              void*    ptr,
                                              uint32_t old_size,
@@ -810,6 +810,13 @@ struct SemaphoreInfo {
                                                  // blocked on the wait operation
 };
 
+struct GpuSpan {
+    GpuPtr   ptr  = 0;
+    uint64_t size = 0;
+
+    explicit operator bool() const { return ptr != 0; }
+};
+
 struct BufferTextureCopyInfo {
     Dimension3D image_extent;
     uint32_t    buffer_row_pixels_stride =
@@ -827,7 +834,7 @@ struct BufferTextureCopyInfo {
 struct DrawIndexedInstancedInfo {
     GpuPtr    vertexDataGpu;
     GpuPtr    fragmentDataGpu;
-    GpuPtr    indicesGpu;
+    GpuSpan   indices;
     uint32_t  indexCount;
     uint32_t  instanceCount = 1;
     IndexType type          = IndexType::UInt16;
@@ -836,17 +843,17 @@ struct DrawIndexedInstancedInfo {
 struct DrawIndexedIndirectInfo {
     GpuPtr    vertexDataGpu;
     GpuPtr    fragmentDataGpu;
-    GpuPtr    indicesGpu;
-    GpuPtr    argsGpu;
+    GpuSpan   indices;
+    GpuSpan   argsGpu;
     IndexType type = IndexType::UInt16;
 };
 
 struct MultiDrawIndirectInfo {
     GpuPtr    vertexDataGpu;
     GpuPtr    pixelDataGpu;
-    GpuPtr    indicesGpu;
-    GpuPtr    argsGpu;
-    GpuPtr    drawCountGpu;
+    GpuSpan   indices;
+    GpuSpan   argsGpu;
+    GpuSpan   drawCountGpu;
     uint32_t  maxDraws;
     IndexType type = IndexType::UInt16;
 };
@@ -946,13 +953,13 @@ SurfaceStatus present(Device d, Queue queue);
  * @brief Allocate memory with the specified size and type.
  *
  */
-GpuPtr malloc(Device d, size_t bytes, Memory memory = Memory::Default);
+GpuSpan malloc(Device d, size_t bytes, Memory memory = Memory::Default);
 
 /**
  * @brief Allocate memory with the specified size, alignment and type.
  *
  */
-GpuPtr malloc(Device d, size_t bytes, size_t align, Memory memory = Memory::Default);
+GpuSpan malloc(Device d, size_t bytes, size_t align, Memory memory = Memory::Default);
 
 /**
  * @brief Free a pointer allocated with malloc
@@ -1280,7 +1287,7 @@ void queue_process_events(Queue q);
  * @brief Copy `size` bytes of memory from `src` to `dest`.
  *
  */
-void cmd_memcpy(CommandBuffer cmd, GpuPtr destGpu, GpuPtr srcGpu, size_t size);
+void cmd_memcpy(CommandBuffer cmd, GpuSpan destGpu, GpuSpan srcGpu);
 
 /**
  * @brief Copy from gpu memory into a texture object.
@@ -1291,7 +1298,7 @@ void cmd_memcpy(CommandBuffer cmd, GpuPtr destGpu, GpuPtr srcGpu, size_t size);
  * @param info
  */
 void cmd_copy_to_texture(CommandBuffer                cmd,
-                         GpuPtr                       src,
+                         GpuSpan                      src,
                          Handle<Texture>              texture,
                          const BufferTextureCopyInfo& info);
 
@@ -1305,7 +1312,7 @@ void cmd_copy_to_texture(CommandBuffer                cmd,
  */
 void cmd_copy_from_texture(CommandBuffer                cmd,
                            Handle<Texture>              texture,
-                           GpuPtr                       destGpu,
+                           GpuSpan                      destGpu,
                            const BufferTextureCopyInfo& info);
 
 /**
@@ -1373,7 +1380,7 @@ void cmd_dispatch(CommandBuffer cmd, GpuPtr dataGpu, const Dimension3D& gridDime
  * @param dataGpu
  * @param gridDimensionsGpu
  */
-void cmd_dispatch_indirect(CommandBuffer cmd, GpuPtr dataGpu, GpuPtr gridDimensionsGpu);
+void cmd_dispatch_indirect(CommandBuffer cmd, GpuPtr dataGpu, GpuSpan gridDimensionsGpu);
 
 /**
  * @brief
