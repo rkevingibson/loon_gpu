@@ -103,6 +103,7 @@ struct SurfaceCreationResult {
 struct MemoryRequirements {
     VkMemoryRequirements gpu_mem_requirements;
     VkMemoryRequirements buffer_mem_requirements;
+    VkMemoryRequirements sparse_buffer_mem_requirements;
     VkResult             result;
 };
 
@@ -749,7 +750,7 @@ static MemoryRequirements get_memory_requirements(const VolkDeviceTable& api, Vk
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
         VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
 
-    VkBufferCreateInfo test_buffer_info{
+    const VkBufferCreateInfo test_buffer_info{
         .sType                 = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .pNext                 = nullptr,
         .flags                 = 0,
@@ -764,6 +765,24 @@ static MemoryRequirements get_memory_requirements(const VolkDeviceTable& api, Vk
 
     VkMemoryRequirements buffer_requirements;
     api.vkGetBufferMemoryRequirements(device, test_device_buffer, &buffer_requirements);
+
+    api.vkDestroyBuffer(device, test_device_buffer, nullptr);
+
+    const VkBufferCreateInfo test_sparse_buffer_info{
+        .sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .pNext       = nullptr,
+        .flags       = VK_BUFFER_CREATE_SPARSE_BINDING_BIT | VK_BUFFER_CREATE_SPARSE_RESIDENCY_BIT,
+        .size        = 1024ull * 1024,
+        .usage       = kDefaultUsages,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,  // TODO: Support multiple queues.
+        .queueFamilyIndexCount = 0,
+        .pQueueFamilyIndices   = nullptr,
+    };
+    result = api.vkCreateBuffer(device, &test_sparse_buffer_info, nullptr, &test_device_buffer);
+    if (result != VK_SUCCESS) { return {.result = result}; }
+
+    VkMemoryRequirements sparse_buffer_requirements;
+    api.vkGetBufferMemoryRequirements(device, test_device_buffer, &sparse_buffer_requirements);
 
     api.vkDestroyBuffer(device, test_device_buffer, nullptr);
 
@@ -991,8 +1010,11 @@ static LogicalDeviceCreateResult create_logical_device(
         .pNext = &vulkan_11_features,
         .features =
             {
-                .samplerAnisotropy = true,
-                .shaderInt16       = true,
+                .samplerAnisotropy      = true,
+                .shaderInt16            = true,
+                .sparseBinding          = true,
+                .sparseResidencyBuffer  = true,
+                .sparseResidencyAliased = true,
             },
     };
 
